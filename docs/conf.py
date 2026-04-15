@@ -13,6 +13,8 @@
 import os
 import datetime
 import sys
+from pathlib import Path
+
 sys.path.insert(0, os.path.abspath('../src/gensec'))
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('./extensions'))
@@ -23,6 +25,11 @@ project = 'gensec'
 copyright = '2026, Andrea Albero'
 author = 'Andrea Albero'
 show_authors = True
+
+CURRENT_DIR = Path(__file__).parent.resolve()
+REPO_SRC = (CURRENT_DIR / ".." / "src").resolve()
+if str(REPO_SRC) not in sys.path:
+    sys.path.insert(0, str(REPO_SRC))
 
 ### Sphinx Debug
 import subprocess
