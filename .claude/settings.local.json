@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv run *)"
+      "Bash(uv run *)",
+      "Bash(ls docs/build/multiversion/doc/0.1/architecture/)",
+      "Bash(ls docs/build/multiversion/doc/0.2/architecture/)"
     ]
   }
 }
