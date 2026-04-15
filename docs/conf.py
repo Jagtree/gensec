@@ -24,6 +24,18 @@ copyright = '2026, Andrea Albero'
 author = 'Andrea Albero'
 show_authors = True
 
+### Sphinx Debug
+import subprocess
+print("0.1:", subprocess.check_output(["git", "rev-parse", "doc/0.1"]).decode())
+print("0.2:", subprocess.check_output(["git", "rev-parse", "doc/0.2"]).decode())
+import os
+print("CURRENT FILES:", os.listdir("."))
+###
+
+def setup(app):
+    app.env = None
+nitpicky = True # for correct multiversion
+
 # Use the package version if available
 try:
     from gensec import __version__ as version
@@ -184,12 +196,7 @@ html_favicon = '../src/gensec/_docs_assets/static/logo/logo_alone.png'
 html_logo = '../src/gensec/_docs_assets/static/logo/logolight.png'
 html_title = 'GenSec Documentation'
 html_short_title = 'GenSec Doc'
-# For RTD Template
-#html_theme_options = {
-#    'logo_only': True,
-#    #'display_version': False,
-#    #'search_field': True,
-#}
+
 
 # ---------------------------------------------------------------------------
 # sphinx-multiversion configuration
@@ -220,6 +227,17 @@ html_theme_options = {
 html_context = {
     "author": "Andrea ALBERO",
     "date": datetime.date.today().strftime("%d/%m/%y"),
+}
+
+html_sidebars = {
+    "**": [
+        "sidebar/brand.html",
+        "sidebar/search.html",
+        "sidebar/scroll-start.html",
+        "sidebar/versioning.html",  # switch version
+        "sidebar/navigation.html",
+        "sidebar/scroll-end.html",
+    ]
 }
 
 # =============================================================================
