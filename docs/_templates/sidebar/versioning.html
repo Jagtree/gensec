@@ -1,0 +1,12 @@
+{% if versions %}
+<div class="version-switcher">
+  <p><strong>Versions</strong></p>
+  <ul>
+    {% for version in versions %}
+      <li>
+        <a href="{{ version.url }}">{{ version.name }}</a>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

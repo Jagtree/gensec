@@ -159,12 +159,17 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 #html_theme = 'sphinx_rtd_theme'
 html_theme = "furo"
 
-from importlib.resources import files
-import gensec._docs_assets as _assets
-htmlstatic_path = [
-    "static",
-    str(files(_assets) / "static"),
-]  # path nel site-packages
+# _docs_assets may not be present in git-archive checkouts used by
+# sphinx-multiversion. Guard the import so conf.py always loads cleanly.
+try:
+    from importlib.resources import files as _ires_files
+    import gensec._docs_assets as _docs_assets_pkg
+    html_static_path = [
+        "static",
+        str(_ires_files(_docs_assets_pkg) / "static"),
+    ]
+except (ImportError, ModuleNotFoundError):
+    html_static_path = ["static"]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -184,6 +189,17 @@ html_favicon = '../src/gensec/_docs_assets/static/logo/logo_alone.png'
 html_logo = '../src/gensec/_docs_assets/static/logo/logolight.png'
 html_title = 'GenSec Documentation'
 html_short_title = 'GenSec Doc'
+
+html_sidebars = {
+    "**": [
+        "sidebar/brand.html",
+        "sidebar/search.html",
+        "sidebar/scroll-start.html",
+        "sidebar/versioning.html",
+        "sidebar/navigation.html",
+        "sidebar/scroll-end.html",
+    ]
+}
 # For RTD Template
 #html_theme_options = {
 #    'logo_only': True,
@@ -201,7 +217,22 @@ smv_branch_whitelist = r'^(doc/\d+\.\d+)$'
 smv_tag_whitelist = r"$^"
 smv_remote_whitelist = None
 smv_prefer_remote_refs = False
-smv_latest_version = "latest"  # we'll show this as "latest" in the sidebar
+# Auto-detect latest: highest doc/X.Y local branch. No manual update needed.
+import re as _re
+try:
+    import subprocess as _sp
+    _raw = _sp.check_output(
+        ["git", "branch", "--list", "doc/*"],
+        text=True, stderr=_sp.DEVNULL,
+    ).splitlines()
+    _doc_branches = sorted(
+        (b.strip().lstrip("* ") for b in _raw
+         if _re.match(r"^doc/\d+\.\d+$", b.strip().lstrip("* "))),
+        key=lambda v: tuple(int(x) for x in v[4:].split(".")),
+    )
+    smv_latest_version = _doc_branches[-1] if _doc_branches else ""
+except Exception:
+    smv_latest_version = ""
 
 # For furo Template
 html_theme_options = {
