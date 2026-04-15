@@ -32,6 +32,7 @@ use the discrete property values).
 .. note::
 
     Only the French National Annex is implemented at this time.
+    
 """
 '''
 from math import sqrt

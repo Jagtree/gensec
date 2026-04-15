@@ -94,7 +94,7 @@ corresponding Python objects:
 +===================+==================================================+
 | ``materials``     | dict of ``Material`` instances                   |
 +-------------------+--------------------------------------------------+
-| ``section``       | ``GenericSection`` or ``RectSection``             |
+| ``section``       | ``GenericSection`` or ``RectSection``            |
 +-------------------+--------------------------------------------------+
 | ``demands``       | list of ``{"name", "N", "Mx", "My"}`` dicts      |
 +-------------------+--------------------------------------------------+
@@ -224,11 +224,11 @@ A typical run with all options enabled produces:
 +------------------------------------+------------------------------------------------+
 | ``combination_summary.json``       | Staged combination results                     |
 +------------------------------------+------------------------------------------------+
-| ``envelope_summary.json``          | Envelope results with governing member          |
+| ``envelope_summary.json``          | Envelope results with governing member         |
 +------------------------------------+------------------------------------------------+
 | ``verification_summary.json``      | Unified export (all three above)               |
 +------------------------------------+------------------------------------------------+
-| ``fibers_{name}.csv``              | Per-fiber strain/stress for each demand         |
+| ``fibers_{name}.csv``              | Per-fiber strain/stress for each demand        |
 +------------------------------------+------------------------------------------------+
 
 PNG plots: ``n_mx_diagram.png``, ``n_my_diagram.png``,

@@ -41,7 +41,7 @@ Command-line workflow
    +-------------------------------+------------------------------------------+
    | ``stress_<n>.png``            | Strain and stress profile plots          |
    +-------------------------------+------------------------------------------+
-   | ``mx_my_diagram.png``         | :math:`M_x\text{-}M_y` contour (if      |
+   | ``mx_my_diagram.png``         | :math:`M_x\text{-}M_y` contour (if       |
    |                               | ``generate_mx_my: true``)                |
    +-------------------------------+------------------------------------------+
    | ``surface_3d.png``            | 3-D resistance surface (if               |

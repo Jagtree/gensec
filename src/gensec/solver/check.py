@@ -45,9 +45,9 @@ and the boundary represent:
 | ``eta_2D``       | Origin in :math:`Mx`-     | :math:`(Mx, My)`  | :math:`Mx`-:math:`My`      |
 |                  | :math:`My` plane          | of demand         | contour at :math:`N`       |
 +------------------+---------------------------+-------------------+----------------------------+
-| ``eta_path``     | :math:`\mathbf{S}_{k-1}` | :math:`\mathbf{S}_k` | 3-D hull              |
+| ``eta_path``     | :math:`\mathbf{S}_{k-1}` | :math:`\mathbf{S}_k` | 3-D hull                 |
 +------------------+---------------------------+-------------------+----------------------------+
-| ``eta_path_2D``  | :math:`(Mx,My)_{k-1}`    | :math:`(Mx,My)_k` | :math:`Mx`-:math:`My`      |
+| ``eta_path_2D``  | :math:`(Mx,My)_{k-1}`    | :math:`(Mx,My)_k` | :math:`Mx`-:math:`My`       |
 |                  |                           |                   | contour at :math:`N_k`     |
 +------------------+---------------------------+-------------------+----------------------------+
 

@@ -30,6 +30,7 @@ Steel_plate
     Base class providing the common interface.
 Steel_EN10025_2
     Derived class with EN 10025-2 thickness-dependent properties.
+    
 """
 '''
 class Steel_plate:

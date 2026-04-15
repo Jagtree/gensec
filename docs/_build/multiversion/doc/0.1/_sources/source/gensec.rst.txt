@@ -1,0 +1,40 @@
+gensec package
+==============
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   gensec.geometry
+   gensec.materials
+   gensec.output
+   gensec.solver
+
+Submodules
+----------
+
+gensec.cli module
+-----------------
+
+.. automodule:: gensec.cli
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+gensec.io\_yaml module
+----------------------
+
+.. automodule:: gensec.io_yaml
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: gensec
+   :members:
+   :undoc-members:
+   :show-inheritance:
