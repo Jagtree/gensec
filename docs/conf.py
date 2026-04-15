@@ -13,8 +13,6 @@
 import os
 import datetime
 import sys
-from pathlib import Path
-
 sys.path.insert(0, os.path.abspath('../src/gensec'))
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('./extensions'))
@@ -25,13 +23,6 @@ project = 'gensec'
 copyright = '2026, Andrea Albero'
 author = 'Andrea Albero'
 show_authors = True
-
-CURRENT_DIR = Path(__file__).parent.resolve()
-REPO_SRC = (CURRENT_DIR / ".." / "src").resolve()
-if str(REPO_SRC) not in sys.path:
-    sys.path.insert(0, str(REPO_SRC))
-
-nitpicky = True
 
 # Use the package version if available
 try:
@@ -168,9 +159,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 #html_theme = 'sphinx_rtd_theme'
 html_theme = "furo"
 
-# _docs_assets may not be present in git-archive checkouts (sphinx-multiversion
-# extracts files via git archive, which only includes tracked files from that
-# specific branch). Fall back gracefully so conf.py always loads.
+# _docs_assets may not be present in git-archive checkouts used by
+# sphinx-multiversion. Guard the import so conf.py always loads cleanly.
 try:
     from importlib.resources import files as _ires_files
     import gensec._docs_assets as _docs_assets_pkg
@@ -200,6 +190,22 @@ html_logo = '../src/gensec/_docs_assets/static/logo/logolight.png'
 html_title = 'GenSec Documentation'
 html_short_title = 'GenSec Doc'
 
+html_sidebars = {
+    "**": [
+        "sidebar/brand.html",
+        "sidebar/search.html",
+        "sidebar/scroll-start.html",
+        "sidebar/versioning.html",
+        "sidebar/navigation.html",
+        "sidebar/scroll-end.html",
+    ]
+}
+# For RTD Template
+#html_theme_options = {
+#    'logo_only': True,
+#    #'display_version': False,
+#    #'search_field': True,
+#}
 
 # ---------------------------------------------------------------------------
 # sphinx-multiversion configuration
@@ -211,8 +217,7 @@ smv_branch_whitelist = r'^(doc/\d+\.\d+)$'
 smv_tag_whitelist = r"$^"
 smv_remote_whitelist = None
 smv_prefer_remote_refs = False
-# Compute latest automatically: the doc/X.Y branch with the highest version number.
-# No need to update this when a new doc/X.Y branch is added.
+# Auto-detect latest: highest doc/X.Y local branch. No manual update needed.
 import re as _re
 try:
     import subprocess as _sp
@@ -246,17 +251,6 @@ html_theme_options = {
 html_context = {
     "author": "Andrea ALBERO",
     "date": datetime.date.today().strftime("%d/%m/%y"),
-}
-
-html_sidebars = {
-    "**": [
-        "sidebar/brand.html",
-        "sidebar/search.html",
-        "sidebar/scroll-start.html",
-        "sidebar/versioning.html",  # switch version
-        "sidebar/navigation.html",
-        "sidebar/scroll-end.html",
-    ]
 }
 
 # =============================================================================
