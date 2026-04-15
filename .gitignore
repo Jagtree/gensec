@@ -21,6 +21,7 @@ uv.lock
 
 # docs
 docs/build/
+docs/_build/
 
 # GenSec outputs
 results/

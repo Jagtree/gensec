@@ -241,9 +241,9 @@ class TestSolverRobustness(unittest.TestCase):
         self.sec = RectSection(B=300, H=600, bulk_material=concrete,
                                rebars=rb, n_fibers_y=200, n_fibers_x=1)
         self.sv = FiberSolver(self.sec)
-        from gensec.solver import DemandChecker
+        from gensec.solver import DomainChecker
         nm = NMDiagram(self.sv).generate(500)
-        self.checker = DemandChecker(nm)
+        self.checker = DomainChecker(nm)
 
     def test_grid_convergence(self):
         """Every grid point inside the domain must converge."""

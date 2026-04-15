@@ -3,7 +3,10 @@
     "allow": [
       "Bash(uv run *)",
       "Bash(ls docs/build/multiversion/doc/0.1/architecture/)",
-      "Bash(ls docs/build/multiversion/doc/0.2/architecture/)"
+      "Bash(ls docs/build/multiversion/doc/0.2/architecture/)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(wc -l /d/SOFTWARE_HOMEPROJECTS/gensec/tests/*.py /d/SOFTWARE_HOMEPROJECTS/gensec/src/gensec/**/*.py)",
+      "Bash(python -m pytest tests/ -x -q --tb=short)"
     ]
   }
 }

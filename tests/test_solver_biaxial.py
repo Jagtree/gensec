@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 from gensec.materials import Concrete, Steel, TabulatedMaterial
 from gensec.geometry import RebarLayer, RectSection
-from gensec.solver import FiberSolver, NMDiagram, DemandChecker
+from gensec.solver import FiberSolver, NMDiagram, DomainChecker
 
 
 class BiaxialTestBase(unittest.TestCase):
@@ -293,7 +293,7 @@ class TestBiaxialSurface(BiaxialTestBase):
     def test_3d_checker(self):
         nm = NMDiagram(self.sv).generate_biaxial(
             n_angles=12, n_points_per_angle=50)
-        ch = DemandChecker(nm)
+        ch = DomainChecker(nm)
         self.assertEqual(ch.ndim, 3)
         self.assertTrue(ch.is_inside(0, 0, 0))
         self.assertFalse(ch.is_inside(-10000e3, 0, 0))
