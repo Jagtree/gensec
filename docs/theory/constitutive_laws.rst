@@ -24,15 +24,18 @@ Every material must implement:
 Concrete — parabola-rectangle (EC2 3.1.7)
 -------------------------------------------
 
-The parabola-rectangle law per EN 1992-1-1, §3.1.7:
+The compression branch follows the parabola-rectangle law per
+EN 1992-1-1, §3.1.7.  An optional linear-elastic tension branch
+can be activated for serviceability checks or nonlinear analyses.
+
+
+Compression (:math:`\varepsilon \le 0`)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. math::
 
    \sigma_c(\varepsilon) =
    \begin{cases}
-       0
-           & \varepsilon > 0
-           \\[4pt]
        -f_{cd}\!\left[1 - \left(1 - \dfrac{\varepsilon}
            {\varepsilon_{c2}}\right)^{\!n}\right]
            & \varepsilon_{c2} \le \varepsilon \le 0
@@ -54,17 +57,59 @@ where:
   (default :math:`-0.0035`),
 - :math:`n` is the parabolic exponent (default 2.0).
 
-Concrete carries **no tensile stress** (:math:`\sigma = 0` for
-:math:`\varepsilon > 0`).
-
-The stress is negative (compressive) by sign convention.  The strain
-range is :math:`[\varepsilon_{cu2},\, 0]`.
+The stress is negative (compressive) by sign convention.
 
 For high-strength concrete (:math:`f_{ck} > 50\;\text{MPa}`), the
 parameters :math:`\varepsilon_{c2}`, :math:`\varepsilon_{cu2}`, and
 :math:`n` deviate from the standard values and must be taken from
 EC2 Table 3.1.  The factory function
 :func:`~gensec.materials.concrete_from_ec2` computes them automatically.
+
+
+Tension (:math:`\varepsilon > 0`) — optional
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, concrete carries **no tensile stress** (:math:`\sigma = 0`
+for :math:`\varepsilon > 0`).  This is the correct assumption for
+ULS verifications with the parabola-rectangle law.
+
+When both ``fct`` and ``Ec`` are set to positive values, a linear
+tension branch is activated:
+
+.. math::
+
+   \sigma_c(\varepsilon) =
+   \begin{cases}
+       E_c \, \varepsilon
+           & 0 < \varepsilon \le \varepsilon_{ct}
+           \\[4pt]
+       0
+           & \varepsilon > \varepsilon_{ct}
+   \end{cases}
+
+where :math:`\varepsilon_{ct} = f_{ct} / E_c` is the cracking strain.
+Beyond :math:`\varepsilon_{ct}` the concrete is fully cracked and
+carries no stress.
+
+This branch is useful for:
+
+- **SLS checks** — stress limitation, crack width estimation.
+- **Nonlinear analysis** — capturing the uncracked stiffness.
+- **Prestressed sections** — where concrete may remain uncracked
+  under service loads.
+
+The ``fct`` value should be chosen to match the verification context:
+:math:`f_{ctd,0.05}` (design), :math:`f_{ctm}` (mean), or
+:math:`f_{ctk,0.05}` (characteristic).
+
+When using the ``concrete_ec2`` YAML type, setting
+``enable_tension: true`` automatically populates ``fct`` and ``Ec``
+from the EC2 property object.  The ``tension_fct`` field controls
+which tensile strength is used (see :doc:`yaml_reference`).
+
+With the tension branch active, the admissible strain range becomes
+:math:`[\varepsilon_{cu2},\, \varepsilon_{ct}]`; when disabled it
+remains :math:`[\varepsilon_{cu2},\, 0]`.
 
 
 Reinforcing steel — elastic-plastic with hardening

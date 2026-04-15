@@ -1,0 +1,102 @@
+├── 📁 .github
+├── 📁 docs
+├── 📁 src
+├── 📁 tests
+├── 📄 .gitignore
+├── 📄 CHANGELOG_v0.2.0.md
+├── 📄 CLA.md
+├── 📄 COMMERCIAL_LICENSE.md
+├── 📄 CONTRIBUTING.md
+├── 📄 generate_version.py
+├── 📄 gensec.code-workspace
+├── 📄 gettree.py
+├── 📄 lazy_all_examples.ps1
+├── 📄 lazy_preparefor_git.ps1
+├── 📄 LICENSE
+├── 📄 NOTICE
+├── 📄 pyproject.toml
+├── 📄 README.md
+├── 📄 setup_licensing.py
+├── 📄 tree_output.txt
+└── 📄 uv.lock
+│   ├── 📄 __init__.py
+│   ├── 📄 test_infrastructure.py
+│   ├── 📄 test_materials.py
+│   ├── 📄 test_solver_biaxial.py
+│   └── 📄 test_solver_uniaxial.py
+│   ├── 📁 gensec
+│   └── 📁 gensec.egg-info
+│       ├── 📄 .gitignore
+│       ├── 📄 dependency_links.txt
+│       ├── 📄 entry_points.txt
+│       ├── 📄 PKG-INFO
+│       ├── 📄 requires.txt
+│       ├── 📄 SOURCES.txt
+│       └── 📄 top_level.txt
+│   │   ├── 📁 _docs_assets
+│   │   ├── 📁 geometry
+│   │   ├── 📁 materials
+│   │   ├── 📁 output
+│   │   ├── 📁 solver
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 __main__.py
+│   │   ├── 📄 _about.py
+│   │   ├── 📄 _version.py
+│   │   ├── 📄 cli.py
+│   │   └── 📄 io_yaml.py
+│   │   │   ├── 📄 __init__.py
+│   │   │   ├── 📄 capacity.py
+│   │   │   ├── 📄 check.py
+│   │   │   └── 📄 integrator.py
+│   │   │   ├── 📄 __init__.py
+│   │   │   ├── 📄 export.py
+│   │   │   ├── 📄 plots.py
+│   │   │   └── 📄 report.py
+│   │   │   ├── 📄 __init__.py
+│   │   │   ├── 📄 base.py
+│   │   │   ├── 📄 concrete.py
+│   │   │   ├── 📄 ec2_bridge.py
+│   │   │   ├── 📄 ec2_properties.py
+│   │   │   ├── 📄 en10025_properties.py
+│   │   │   ├── 📄 steel.py
+│   │   │   └── 📄 tabulated.py
+│   │   │   ├── 📄 __init__.py
+│   │   │   ├── 📄 fiber.py
+│   │   │   ├── 📄 geometry.py
+│   │   │   ├── 📄 primitives.py
+│   │   │   └── 📄 section.py
+│   │   │   └── 📁 static
+│   │   │       └── 📁 logo
+│   │   │           ├── 📄 .gitignore
+│   │   │           ├── 📄 Logo GenSec con anello modulare.png
+│   │   │           ├── 📄 logo_alone.png
+│   │   │           ├── 📄 logo_photoshop.psd
+│   │   │           └── 📄 logolight.png
+│   ├── 📁 api
+│   ├── 📁 theory
+│   ├── 📁 user_guide
+│   ├── 📄 about.rst
+│   ├── 📄 changelog.rst
+│   ├── 📄 ci_and_versioning.rst
+│   ├── 📄 conf.py
+│   ├── 📄 developer.rst
+│   └── 📄 index.rst
+│   │   ├── 📄 examples.rst
+│   │   ├── 📄 installation.rst
+│   │   ├── 📄 quickstart.rst
+│   │   ├── 📄 sign_conventions.rst
+│   │   └── 📄 yaml_reference.rst
+│   │   ├── 📄 constitutive_laws.rst
+│   │   ├── 📄 demand_verification.rst
+│   │   ├── 📄 fiber_method.rst
+│   │   └── 📄 nm_diagram.rst
+│   │   ├── 📄 gensec.cli.rst
+│   │   ├── 📄 gensec.geometry.rst
+│   │   ├── 📄 gensec.io_yaml.rst
+│   │   ├── 📄 gensec.materials.rst
+│   │   ├── 📄 gensec.output.rst
+│   │   ├── 📄 gensec.solver.rst
+│   │   └── 📄 index.rst
+│   ├── 📁 workflows
+│   └── 📄 pull_request_template.md
+│   │   └── 📄 cla.yml

@@ -14,8 +14,9 @@
 # License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
+# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
+
 r"""
 Resistance surface generator — N-Mx-My interaction domain.
 
@@ -284,11 +285,22 @@ class NMDiagram:
                     N, Mx, My = _scan(ev + d, ev - d)
                     Nl.append(N); Mxl.append(Mx); Myl.append(My)
 
-            # Branch 4: pure tension
-            for ev in np.linspace(0, exg, n // 4):
+            # Branch 4: pure tension — denser scan for smooth hull cap.
+            # Uniform tension at various levels.
+            n_tens = n // 2
+            for ev in np.linspace(0, exg, n_tens):
+                N, Mx, My = _scan(ev, ev)
+                Nl.append(N); Mxl.append(Mx); Myl.append(My)
+            # Non-uniform tension with gradient.
+            for ev in np.linspace(0, exg, n_tens):
                 N, Mx, My = _scan(ev, 0.0)
                 Nl.append(N); Mxl.append(Mx); Myl.append(My)
                 N, Mx, My = _scan(0.0, ev)
+                Nl.append(N); Mxl.append(Mx); Myl.append(My)
+                # Intermediate gradient.
+                N, Mx, My = _scan(ev, ev * 0.5)
+                Nl.append(N); Mxl.append(Mx); Myl.append(My)
+                N, Mx, My = _scan(ev * 0.5, ev)
                 Nl.append(N); Mxl.append(Mx); Myl.append(My)
 
         Na = np.array(Nl)
@@ -307,17 +319,11 @@ class NMDiagram:
         r"""
         Generate the Mx-My interaction contour at a fixed axial force.
 
-        For each curvature direction :math:`\theta \in [0, 2\pi)`, the
-        algorithm scans curvature magnitudes :math:`\chi` from 0 to the
-        ultimate value, at each step solving for :math:`\varepsilon_0`
-        such that :math:`N = N_{\text{fixed}}`.  The envelope point
-        is the :math:`(M_x, M_y)` at the **maximum** curvature before
-        any fiber reaches a material strain limit.
-
-        This approach is **direct** (no interpolation of strain
-        configurations) and relies on the robust
-        :meth:`_solve_eps0_for_N` for the 1-D equilibrium at each
-        step.
+        For a given :math:`N`, scans curvature directions
+        :math:`\theta \in [0, 2\pi)`. For each direction, sweeps
+        through strain configurations, collects all (N, Mx, My)
+        points, and **interpolates** at :math:`N = N_{\text{fixed}}`
+        to find the moment point on the contour.
 
         Parameters
         ----------
@@ -326,7 +332,7 @@ class NMDiagram:
         n_angles : int, optional
             Number of curvature directions. Default 72 (every 5°).
         n_points_per_angle : int, optional
-            Curvature steps per direction. Default 200.
+            Strain scan resolution per direction. Default 200.
 
         Returns
         -------
@@ -337,73 +343,86 @@ class NMDiagram:
         sec = self.solver.sec
         emg, exg, emb, _ = self._collect_strain_limits()
 
+        lx = sec.x_fibers - self.solver.x_ref
+        ly = sec.y_fibers - self.solver.y_ref
+        lx_r = sec.x_rebars - self.solver.x_ref
+        ly_r = sec.y_rebars - self.solver.y_ref
+        all_lx = np.concatenate([lx, lx_r])
+        all_ly = np.concatenate([ly, ly_r])
+
         thetas = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
         Mxl, Myl = [], []
 
-        # Warm-start eps0 across angles
-        eps0_warm = 0.0
-
         for theta in thetas:
             cos_t, sin_t = np.cos(theta), np.sin(theta)
+            proj = all_ly * cos_t - all_lx * sin_t
+            p_max = proj.max()
+            p_min = proj.min()
+            if abs(p_max - p_min) < 1e-10:
+                continue
+            span = p_max - p_min
 
-            # Estimate chi_max from section depth in this direction
-            chi_max_candidates = []
-            if abs(cos_t) > 0.01 and sec.H > 0:
-                chi_max_candidates.append(
-                    abs(emb) / (sec.H * 0.25) * 1.5)
-            if abs(sin_t) > 0.01 and sec.B > 0:
-                chi_max_candidates.append(
-                    abs(emb) / (sec.B * 0.25) * 1.5)
-            chi_max = (max(chi_max_candidates)
-                       if chi_max_candidates else 1e-4)
+            # Collect all (N, Mx, My) along this curvature direction
+            points_N = []
+            points_Mx = []
+            points_My = []
 
-            # Scan chi from 0 to chi_max, solving for eps0 at each step
+            def _collect(eps_bot, eps_top):
+                chi = (eps_top - eps_bot) / span
+                eps0 = eps_bot - chi * p_min
+                chi_x = chi * cos_t
+                chi_y = chi * sin_t
+                N, Mx, My = self.solver.integrate(eps0, chi_x, chi_y)
+                points_N.append(N)
+                points_Mx.append(Mx)
+                points_My.append(My)
+
+            n = n_points_per_angle
+            for eb in np.linspace(exg, emg, n):
+                _collect(eb, emb)
+            for et in np.linspace(exg, emg, n):
+                _collect(emb, et)
+            for ev in np.linspace(emb * 0.5, emb, n // 4):
+                _collect(ev, ev)
+                sp = abs(emb) * 0.15
+                for d in np.linspace(-sp, sp, 3):
+                    _collect(ev + d, ev - d)
+            for ev in np.linspace(0, exg, n // 4):
+                _collect(ev, 0.0)
+                _collect(0.0, ev)
+
+            pN = np.array(points_N)
+            pMx = np.array(points_Mx)
+            pMy = np.array(points_My)
+
+            # Find crossings where N passes through N_fixed,
+            # and among those pick the one with maximum |M|
+            # in the direction theta.
             best_Mx = 0.0
             best_My = 0.0
-            best_M_mag = 0.0
-            eps0_prev = eps0_warm
+            best_M_mag = -1.0
 
-            for chi_mag in np.linspace(0, chi_max,
-                                       n_points_per_angle):
-                chi_x = chi_mag * cos_t
-                chi_y = chi_mag * sin_t
-
-                eps0 = self._solve_eps0_for_N(
-                    self.solver, N_fixed, chi_x, chi_y,
-                    eps0_prev, emb)
-                eps0_prev = eps0
-
-                # Check material limits
-                eb, er = self.solver.strain_field(
-                    eps0, chi_x, chi_y)
-                all_eps = (np.concatenate([eb, er])
-                           if len(er) > 0 else eb)
-
-                if (all_eps.min() <= emb * 0.99
-                        or all_eps.max() >= exg * 0.99):
-                    # At or past ultimate — record this last point
-                    # and stop scanning further
-                    N, Mx, My = self.solver.integrate(
-                        eps0, chi_x, chi_y)
-                    M_mag = np.sqrt(Mx**2 + My**2)
+            for k in range(len(pN) - 1):
+                N_a, N_b = pN[k], pN[k + 1]
+                if (N_a - N_fixed) * (N_b - N_fixed) <= 0 and abs(N_b - N_a) > 1e-6:
+                    # Linear interpolation
+                    t = (N_fixed - N_a) / (N_b - N_a)
+                    Mx_interp = pMx[k] + t * (pMx[k + 1] - pMx[k])
+                    My_interp = pMy[k] + t * (pMy[k + 1] - pMy[k])
+                    M_mag = np.sqrt(Mx_interp**2 + My_interp**2)
                     if M_mag > best_M_mag:
                         best_M_mag = M_mag
-                        best_Mx = Mx
-                        best_My = My
-                    break
+                        best_Mx = Mx_interp
+                        best_My = My_interp
 
-                # Within limits — check if this is the best so far
-                N, Mx, My = self.solver.integrate(
-                    eps0, chi_x, chi_y)
-                M_mag = np.sqrt(Mx**2 + My**2)
-                if M_mag > best_M_mag:
-                    best_M_mag = M_mag
-                    best_Mx = Mx
-                    best_My = My
+            # Fallback: closest point in N
+            if best_M_mag < 0:
+                idx = np.argmin(np.abs(pN - N_fixed))
+                best_Mx = pMx[idx]
+                best_My = pMy[idx]
 
             Mxl.append(best_Mx)
             Myl.append(best_My)
-            eps0_warm = eps0_prev
 
         Mxa = np.array(Mxl)
         Mya = np.array(Myl)
@@ -414,119 +433,6 @@ class NMDiagram:
             "N_fixed_kN": N_fixed / 1e3,
         }
 
-    def generate_polar_ductility(self, N_fixed, n_angles=72,
-                                 n_points=400):
-        r"""
-        Compute ultimate curvature as a function of bending direction.
-
-        For each curvature direction :math:`\theta` in the
-        :math:`(\chi_x, \chi_y)` plane, the section is loaded
-        incrementally (increasing curvature magnitude) at constant
-        axial force :math:`N = N_{\text{fixed}}`.  The ultimate
-        curvature :math:`\chi_u(\theta)` is the **largest** curvature
-        at which all fibers remain within their material strain
-        limits.
-
-        Once the coarse scan identifies the failure step, a
-        **bisection refinement** between the last safe step and the
-        first failed step pins down the ultimate curvature to high
-        accuracy.
-
-        Parameters
-        ----------
-        N_fixed : float
-            Axial force [N].
-        n_angles : int, optional
-            Number of curvature directions. Default 72.
-        n_points : int, optional
-            Curvature steps per direction. Default 400.
-
-        Returns
-        -------
-        dict
-            ``thetas`` [rad], ``chi_u`` [1/mm],
-            ``chi_u_km`` [1/km], ``N_fixed_kN``.
-        """
-        sec = self.solver.sec
-        emg, exg, emb, _ = self._collect_strain_limits()
-
-        thetas = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
-        chi_ultimates = np.zeros(n_angles)
-
-        eps0_warm = 0.0
-
-        for i, theta in enumerate(thetas):
-            cos_t, sin_t = np.cos(theta), np.sin(theta)
-
-            # Estimate chi_max from section depth in this direction
-            chi_max_candidates = []
-            if abs(cos_t) > 0.01 and sec.H > 0:
-                chi_max_candidates.append(
-                    abs(emb) / (sec.H * 0.25) * 1.5)
-            if abs(sin_t) > 0.01 and sec.B > 0:
-                chi_max_candidates.append(
-                    abs(emb) / (sec.B * 0.25) * 1.5)
-            chi_max = (max(chi_max_candidates)
-                       if chi_max_candidates else 1e-4)
-
-            # --- Coarse scan: find the first chi that violates limits ---
-            chi_safe = 0.0
-            chi_fail = None
-            eps0_prev = eps0_warm
-
-            for chi_mag in np.linspace(0, chi_max, n_points):
-                chi_x = chi_mag * cos_t
-                chi_y = chi_mag * sin_t
-
-                eps0 = self._solve_eps0_for_N(
-                    self.solver, N_fixed, chi_x, chi_y,
-                    eps0_prev, emb)
-                eps0_prev = eps0
-
-                eb, er = self.solver.strain_field(
-                    eps0, chi_x, chi_y)
-                all_eps = (np.concatenate([eb, er])
-                           if len(er) > 0 else eb)
-
-                if (all_eps.min() <= emb * 0.99
-                        or all_eps.max() >= exg * 0.99):
-                    chi_fail = chi_mag
-                    break
-                chi_safe = chi_mag
-
-            # --- Bisection refinement between chi_safe and chi_fail ---
-            if chi_fail is not None and chi_fail > chi_safe:
-                a, b = chi_safe, chi_fail
-                for _ in range(20):
-                    mid = 0.5 * (a + b)
-                    chi_x = mid * cos_t
-                    chi_y = mid * sin_t
-                    eps0 = self._solve_eps0_for_N(
-                        self.solver, N_fixed, chi_x, chi_y,
-                        eps0_prev, emb)
-                    eb, er = self.solver.strain_field(
-                        eps0, chi_x, chi_y)
-                    all_eps = (np.concatenate([eb, er])
-                               if len(er) > 0 else eb)
-                    if (all_eps.min() <= emb * 0.99
-                            or all_eps.max() >= exg * 0.99):
-                        b = mid
-                    else:
-                        a = mid
-                        eps0_prev = eps0
-                chi_ultimates[i] = a
-            else:
-                # Never failed → chi_max is conservative estimate
-                chi_ultimates[i] = chi_safe
-
-            eps0_warm = eps0_prev
-
-        return {
-            "thetas": thetas,
-            "chi_u": chi_ultimates,
-            "chi_u_km": chi_ultimates * 1e6,
-            "N_fixed_kN": N_fixed / 1e3,
-        }
     def generate_moment_curvature(self, N_fixed, chi_max=None,
                                   n_points=200, direction='x'):
         r"""
@@ -581,11 +487,24 @@ class NMDiagram:
             if hasattr(rb.material, 'eps_yd'):
                 rebar_eps_yd.append(rb.material.eps_yd)
 
+        # Cracking strain from EC2 properties (if available).
+        # eps_cr = fctm / Ecm (positive, tensile).
+        eps_cr = None
+        bulk = sec.bulk_material
+        ec2_obj = getattr(bulk, 'ec2', None)
+        if ec2_obj is not None:
+            fctm = getattr(ec2_obj, 'fctm', None)
+            ecm = getattr(ec2_obj, 'ecm', None)
+            if fctm is not None and ecm is not None and ecm > 0:
+                eps_cr = fctm / ecm
+
         # Scan both positive and negative curvature
         results_pos = self._scan_chi(
-            N_fixed, 0, chi_max, n_points, direction, rebar_eps_yd)
+            N_fixed, 0, chi_max, n_points, direction,
+            rebar_eps_yd, eps_cr=eps_cr)
         results_neg = self._scan_chi(
-            N_fixed, 0, -chi_max, n_points, direction, rebar_eps_yd)
+            N_fixed, 0, -chi_max, n_points, direction,
+            rebar_eps_yd, eps_cr=eps_cr)
 
         # Merge: negative reversed + positive
         chi_all = np.concatenate([
@@ -606,6 +525,10 @@ class NMDiagram:
             "eps_max": eps_max_all,
             "N_fixed_kN": N_fixed / 1e3,
             "direction": direction,
+            "cracking_chi_pos": results_pos.get("cracking_chi"),
+            "cracking_M_pos": results_pos.get("cracking_M"),
+            "cracking_chi_neg": results_neg.get("cracking_chi"),
+            "cracking_M_neg": results_neg.get("cracking_M"),
             "yield_chi_pos": results_pos.get("yield_chi"),
             "yield_M_pos": results_pos.get("yield_M"),
             "ultimate_chi_pos": results_pos.get("ultimate_chi"),
@@ -617,13 +540,24 @@ class NMDiagram:
         }
 
     def _scan_chi(self, N_fixed, chi_start, chi_end, n_points,
-                  direction, rebar_eps_yd):
+                  direction, rebar_eps_yd, eps_cr=None):
         """
         Internal: scan curvature from chi_start to chi_end,
         solving for eps0 at each step to maintain N = N_fixed.
 
         Uses Newton iteration with warm-start from previous step,
         falling back to bisection if Newton fails.
+
+        Parameters
+        ----------
+        N_fixed : float
+        chi_start, chi_end : float
+        n_points : int
+        direction : str
+        rebar_eps_yd : list of float
+        eps_cr : float or None
+            Cracking strain of concrete (positive, tensile).
+            If provided, the first-cracking point is detected.
         """
         sec = self.solver.sec
         emg, exg, emb, _ = self._collect_strain_limits()
@@ -638,6 +572,8 @@ class NMDiagram:
         yield_M = None
         ultimate_chi = None
         ultimate_M = None
+        cracking_chi = None
+        cracking_M = None
 
         # Initial eps0 estimate from the equilibrium solver at chi=0
         if abs(chi_start) < 1e-15:
@@ -669,6 +605,15 @@ class NMDiagram:
             eps_mins[k] = all_eps.min()
             eps_maxs[k] = all_eps.max()
 
+            # Detect first cracking (concrete tensile strain exceeds
+            # eps_cr).  Only bulk fibers are checked since rebars do
+            # not crack.
+            if (cracking_chi is None and eps_cr is not None
+                    and abs(chi) > 0):
+                if eb.max() >= eps_cr:
+                    cracking_chi = chi
+                    cracking_M = M
+
             # Detect first yield
             if yield_chi is None and len(rebar_eps_yd) > 0 and abs(chi) > 0:
                 for j, rb in enumerate(sec.rebars):
@@ -693,113 +638,51 @@ class NMDiagram:
             "eps_min": eps_mins, "eps_max": eps_maxs,
             "yield_chi": yield_chi, "yield_M": yield_M,
             "ultimate_chi": ultimate_chi, "ultimate_M": ultimate_M,
+            "cracking_chi": cracking_chi, "cracking_M": cracking_M,
         }
 
     @staticmethod
-    def _solve_eps0_for_N(sv, N_target, chi_x, chi_y, eps0_init, emb,
-                          tol=1.0):
-        r"""
-        Solve for :math:`\varepsilon_0` at fixed curvature such that
-        :math:`N = N_{\text{target}}`.
-
-        The function :math:`N(\varepsilon_0)` at fixed
-        :math:`(\chi_x, \chi_y)` is generally non-decreasing in the
-        working strain range, but can be non-monotone near the
-        material strain limits.
-
-        Strategy:
-
-        1.  **Newton** with warm-start from ``eps0_init``.  Fast when
-            the initial guess is close (typical in sequential scans).
-        2.  **Scan + bisect fallback**: if Newton fails, scan
-            :math:`N(\varepsilon_0)` on a coarse grid, find a local
-            crossing bracket, and bisect within it.
-
-        Parameters
-        ----------
-        sv : FiberSolver
-        N_target : float
-            Target axial force [N].
-        chi_x, chi_y : float
-            Fixed curvatures [1/mm].
-        eps0_init : float
-            Warm-start for Newton.
-        emb : float
-            Concrete ultimate strain (``eps_cu2``, negative).
-        tol : float, optional
-            Force tolerance [N].  Default 1.0.
-
-        Returns
-        -------
-        float
-            The :math:`\varepsilon_0` value that satisfies equilibrium.
+    def _solve_eps0_for_N(sv, N_target, chi_x, chi_y, eps0_init, emb):
         """
-        # ---- Phase 1: Newton with warm-start ----
+        Solve for eps0 at fixed (chi_x, chi_y) such that N = N_target.
+
+        Newton with bisection fallback.
+        """
         eps0 = eps0_init
-        for _ in range(30):
+
+        # Newton phase
+        for _ in range(25):
             N, _, _ = sv.integrate(eps0, chi_x, chi_y)
             r = N - N_target
-            if abs(r) < tol:
+            if abs(r) < 1.0:  # 1 N tolerance
                 return eps0
-            de = max(abs(eps0) * 1e-7, 1e-9)
+            de = max(abs(eps0) * 1e-7, 1e-10)
             N1, _, _ = sv.integrate(eps0 + de, chi_x, chi_y)
             dNde = (N1 - N) / de
-            if abs(dNde) > 1.0:
+            if abs(dNde) > 1:
                 step = -r / dNde
-                # Adaptive clamp: allow larger steps for larger strains
-                max_step = max(abs(eps0) * 0.5, 5e-4)
-                step = np.clip(step, -max_step, max_step)
+                # Clamp step to avoid wild jumps
+                step = np.clip(step, -0.001, 0.001)
                 eps0 += step
             else:
-                # Near-zero stiffness — nudge toward compression
                 eps0 -= 1e-5
                 continue
 
-        # ---- Phase 2: scan + bisect fallback ----
-        # Build strain range from material limits
-        sec = sv.sec
-        eps_lo = sec.bulk_material.eps_min
-        eps_hi = 0.0
-        for rb in sec.rebars:
-            eps_lo = min(eps_lo, rb.material.eps_min)
-            eps_hi = max(eps_hi, rb.material.eps_max)
-        eps_lo *= 1.01
-        eps_hi *= 1.01
+        # Bisection fallback: search eps0 in [emb, -emb]
+        a, b = emb * 1.2, -emb * 1.2
+        Na, _, _ = sv.integrate(a, chi_x, chi_y)
+        Nb, _, _ = sv.integrate(b, chi_x, chi_y)
+        if (Na - N_target) * (Nb - N_target) > 0:
+            return eps0  # can't bracket — return best Newton
 
-        n_scan = 80
-        eps_scan = np.linspace(eps_lo, eps_hi, n_scan)
-        N_scan = np.empty(n_scan)
-        for k in range(n_scan):
-            N_scan[k], _, _ = sv.integrate(eps_scan[k], chi_x, chi_y)
-
-        # Find all crossings
-        crossings = []
-        for k in range(n_scan - 1):
-            if ((N_scan[k] - N_target) * (N_scan[k + 1] - N_target) <= 0
-                    and abs(N_scan[k + 1] - N_scan[k]) > 0.01):
-                crossings.append(k)
-
-        if not crossings:
-            # Return best Newton result as last resort
-            return eps0
-
-        # Pick crossing closest to eps0=0 (working region)
-        best_k = min(crossings,
-                     key=lambda k: abs(eps_scan[k] + eps_scan[k + 1]))
-
-        a = eps_scan[best_k]
-        b = eps_scan[best_k + 1]
-        Na = N_scan[best_k]
-
-        for _ in range(60):
-            mid = 0.5 * (a + b)
+        for _ in range(50):
+            mid = (a + b) / 2
             Nm, _, _ = sv.integrate(mid, chi_x, chi_y)
-            if abs(Nm - N_target) < tol:
+            if abs(Nm - N_target) < 1.0:
                 return mid
-            if (Nm - N_target) * (Na - N_target) <= 0:
+            if (Nm - N_target) * (Na - N_target) < 0:
                 b = mid
             else:
                 a = mid
                 Na = Nm
-
-        return 0.5 * (a + b)
+        return mid

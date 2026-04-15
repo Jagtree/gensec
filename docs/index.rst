@@ -58,6 +58,15 @@ Key capabilities
 
 .. toctree::
    :maxdepth: 2
+   :caption: Architecture
+
+   architecture/architecture_overview
+   architecture/architecture_io
+   architecture/architecture_solver
+
+
+.. toctree::
+   :maxdepth: 2
    :caption: Theory
 
    theory/fiber_method

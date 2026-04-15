@@ -26,11 +26,20 @@ from .plots import (plot_nm_diagram, plot_stress_profile,
                     plot_section, plot_section_state,
                     plot_demand_heatmap, plot_3d_surface,
                     plot_moment_curvature_bundle, plot_polar_ductility,
-                    plot_moment_curvature_surface)
+                    plot_moment_curvature_surface,
+                    plot_from_json,)
 from .export import (export_nm_domain_csv, export_nm_domain_json,
-                     export_demand_results_csv, export_demand_results_json,
-                     export_fiber_results_csv,
-                     export_3d_surface_csv, export_3d_surface_json)
+                    export_demand_results_csv, export_demand_results_json,
+                    export_fiber_results_csv,
+                    export_3d_surface_csv, export_3d_surface_json,
+                    export_verification_json,
+                    export_combination_results_json,
+                    export_envelope_results_json,
+                    export_moment_curvature_json, 
+                    export_moment_curvature_csv,
+                    export_mx_my_json, 
+                    export_mx_my_csv,
+                    )
 
 __all__ = [
     "print_section_info", "print_fiber_results",
@@ -39,7 +48,15 @@ __all__ = [
     "export_demand_results_csv", "export_demand_results_json",
     "export_fiber_results_csv",
     "export_3d_surface_csv", "export_3d_surface_json",
+    "export_verification_json",
+    "export_combination_results_json",
+    "export_envelope_results_json",
+    "export_moment_curvature_json", 
+    "export_moment_curvature_csv",
+    "export_mx_my_json", 
+    "export_mx_my_csv",
     "plot_section_state", "plot_demand_heatmap",
     "plot_3d_surface", "plot_moment_curvature_bundle",
     "plot_polar_ductility", "plot_moment_curvature_surface",
+    "plot_from_json",
 ]

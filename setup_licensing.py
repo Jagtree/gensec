@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
-# ---------------------------------------------------------------------------
-# setup_licensing.py — Download the AGPL-3.0 license text, optionally
-#                       replace the project-name placeholder, and verify
-#                       that all required licensing files are present.
-#
-# Usage:
-#     python setup_licensing.py                   # uses default name
-#     python setup_licensing.py MyProject         # replaces __PROJECT_NAME__
-#     python setup_licensing.py GenSec --header    # also prepends license
-#                                                 # headers to all .py files
-#
-# Works on Windows, macOS, and Linux — requires only the standard library.
-# ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import textwrap
@@ -21,7 +9,6 @@ import urllib.request
 from pathlib import Path
 
 AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.txt"
-PLACEHOLDER = "__PROJECT_NAME__"
 
 REQUIRED_FILES = [
     "LICENSE",
@@ -33,132 +20,162 @@ REQUIRED_FILES = [
     os.path.join(".github", "workflows", "cla.yml"),
 ]
 
+HEADER_START = "# ---------------------------------------------------------------------------"
+HEADER_KEY = "GNU Affero General Public License"
+
 LICENSE_HEADER = textwrap.dedent("""\
-    # ---------------------------------------------------------------------------
-    # {project} — Copyright (c) 2026 Andrea Albero
-    #
-    # This file is part of {project}.
-    #
-    # {project} is free software: you can redistribute it and/or modify it under
-    # the terms of the GNU Affero General Public License as published by the
-    # Free Software Foundation, either version 3 of the License, or (at your
-    # option) any later version.
-    #
-    # {project} is distributed in the hope that it will be useful, but WITHOUT
-    # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    # FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
-    # License for more details.
-    #
-    # You should have received a copy of the GNU Affero General Public License
-    # along with {project}.  If not, see <https://www.gnu.org/licenses/>.
-    # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# {project} — Copyright (c) 2026 Andrea Albero
+#
+# This file is part of {project}.
+#
+# {project} is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+#
+# {project} is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
+# License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with {project}. If not, see <https://www.gnu.org/licenses/>.
+# ---------------------------------------------------------------------------
+
 """)
 
 
-def download_license(repo_root: Path) -> None:
-    """Download the official AGPL-3.0 text into ``LICENSE``."""
+# ---------------------------------------------------------------------------
+# CORE UTILS
+# ---------------------------------------------------------------------------
+
+def find_repo_root(start: Path) -> Path:
+    """Find repo root by looking for .git or pyproject.toml."""
+    current = start.resolve()
+
+    while current != current.parent:
+        if (current / ".git").exists() or (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+
+    return start.resolve()
+
+
+def download_license(repo_root: Path, dry: bool) -> None:
     dest = repo_root / "LICENSE"
-    print(f"==> Downloading AGPL-3.0 from {AGPL_URL} ...")
+    print(f"==> Downloading AGPL-3.0")
+
+    if dry:
+        print(f"[DRY] Would download to {dest}")
+        return
+
     try:
         urllib.request.urlretrieve(AGPL_URL, dest)
-        lines = dest.read_text(encoding="utf-8").splitlines()
-        print(f"    LICENSE written ({len(lines)} lines).")
+        print("    LICENSE downloaded")
     except Exception as exc:
-        print(f"    [ERROR] Download failed: {exc}")
-        print("    Download manually from:", AGPL_URL)
-        print("    and save it as LICENSE in the repo root.")
+        print(f"    [ERROR] {exc}")
 
 
-def replace_placeholder(repo_root: Path, project_name: str) -> None:
-    """Replace ``__PROJECT_NAME__`` in all licensing files."""
-    targets = ["NOTICE", "CLA.md", "CONTRIBUTING.md", "COMMERCIAL_LICENSE.md"]
-    count = 0
-    for name in targets:
-        path = repo_root / name
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        if PLACEHOLDER in text:
-            path.write_text(
-                text.replace(PLACEHOLDER, project_name), encoding="utf-8"
-            )
-            count += 1
-            print(f"    {name}: replaced {PLACEHOLDER} -> {project_name}")
-    if count == 0:
-        print(f"    No {PLACEHOLDER} placeholders found (files may already "
-              f"use the final project name).")
+def prepend_headers(repo_root: Path, project: str, dry: bool, verbose: bool) -> None:
+    header = LICENSE_HEADER.format(project=project)
 
-
-def prepend_headers(repo_root: Path, project_name: str) -> None:
-    """Prepend the AGPL license header to all ``.py`` files under ``src/``."""
-    header = LICENSE_HEADER.format(project=project_name)
-    marker = "This file is part of"
     src_dir = repo_root / "src"
-    if not src_dir.exists():
-        # Fall back: look for .py files directly in repo root.
-        src_dir = repo_root
+    search_dir = src_dir if src_dir.exists() else repo_root
 
-    py_files = sorted(src_dir.rglob("*.py"))
-    added, skipped = 0, 0
+    print(f"==> Scanning: {search_dir}")
+
+    py_files = list(search_dir.rglob("*.py"))
+
+    added, updated, skipped = 0, 0, 0
+
     for py in py_files:
         content = py.read_text(encoding="utf-8")
-        if marker in content:
+
+        # DEBUG
+        if verbose:
+            print(f"CHECK: {py}")
+
+        # Already has full header
+        if content.startswith(HEADER_START) and HEADER_KEY in content[:500]:
             skipped += 1
             continue
-        py.write_text(header + content, encoding="utf-8")
-        added += 1
-        print(f"    + {py.relative_to(repo_root)}")
 
-    print(f"    Header added to {added} files, {skipped} already had it.")
+        # Has partial header → replace
+        if HEADER_KEY in content[:1000]:
+            if not dry:
+                # Remove existing header block
+                parts = content.split(HEADER_START)
+                if len(parts) > 1:
+                    content = HEADER_START + parts[-1]
+
+                py.write_text(header + content, encoding="utf-8")
+
+            updated += 1
+            print(f"    ~ updated {py.relative_to(repo_root)}")
+            continue
+
+        # Add new header
+        if not dry:
+            py.write_text(header + content, encoding="utf-8")
+
+        added += 1
+        print(f"    + added {py.relative_to(repo_root)}")
+
+    print(f"\nSummary:")
+    print(f"    Added:   {added}")
+    print(f"    Updated: {updated}")
+    print(f"    Skipped: {skipped}")
 
 
 def verify(repo_root: Path) -> bool:
-    """Check that all required licensing files exist."""
-    print("==> Verifying licensing files ...")
-    all_ok = True
+    print("==> Verifying licensing files")
+    ok = True
+
     for rel in REQUIRED_FILES:
         path = repo_root / rel
-        tag = "[OK]" if path.exists() else "[MISSING]"
-        if not path.exists():
-            all_ok = False
-        print(f"    {tag} {rel}")
-    return all_ok
+        if path.exists():
+            print(f"    [OK] {rel}")
+        else:
+            print(f"    [MISSING] {rel}")
+            ok = False
 
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parent
-    project_name = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else None
-    add_headers = "--header" in sys.argv or "--headers" in sys.argv
+    parser = argparse.ArgumentParser(description="Setup AGPL licensing")
 
-    # Step 1 — download LICENSE.
-    download_license(repo_root)
+    parser.add_argument("project", nargs="?", default="GenSec")
+    parser.add_argument("--headers", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
 
-    # Step 2 — replace placeholders if a project name was given.
-    if project_name:
-        print(f"==> Replacing placeholder with project name: {project_name}")
-        replace_placeholder(repo_root, project_name)
+    args = parser.parse_args()
 
-    # Step 3 — optionally add headers to .py files.
-    if add_headers:
-        name = project_name or "GenSec"
-        print(f"==> Adding license headers to .py files (project: {name}) ...")
-        prepend_headers(repo_root, name)
+    repo_root = find_repo_root(Path(__file__).parent)
 
-    # Step 4 — verify.
-    all_ok = verify(repo_root)
+    print(f"==> Repo root detected: {repo_root}")
 
-    print()
-    if all_ok:
-        print("All licensing files in place.")
-    else:
-        print("[!] Some files are missing — copy them from the template.")
+    download_license(repo_root, args.dry_run)
 
-    print()
-    print("Next steps:")
-    print("  1. Replace [your-email@example.com] in COMMERCIAL_LICENSE.md")
-    print("  2. Review NOTICE and update contributor entries if needed")
-    print("  3. git add . && git commit -m 'chore(license): AGPL-3.0 dual licensing'")
-    print("  4. Push to GitHub — the CLA bot activates automatically on PRs")
+    if args.headers:
+        prepend_headers(
+            repo_root,
+            args.project,
+            args.dry_run,
+            args.verbose,
+        )
+
+    ok = verify(repo_root)
+
+    print("\nDone.")
+    if not ok:
+        print("⚠️  Some files are missing.")
 
 
 if __name__ == "__main__":

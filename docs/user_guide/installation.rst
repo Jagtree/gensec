@@ -34,7 +34,7 @@ the virtual environment and dependencies:
 
 .. code-block:: bash
 
-   git clone https://github.com/<your-org>/gensec.git
+   git clone https://github.com/Jagtree/gensec.git
    cd gensec
    uv sync
 

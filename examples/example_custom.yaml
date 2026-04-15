@@ -1,5 +1,4 @@
-# GenSec input — custom polygon with hole
-# Box-like section defined by vertex coordinates
+# GenSec — custom polygon with hole (box-like section)
 
 materials:
   concrete_1:
@@ -29,12 +28,12 @@ section:
         - [80, 620]
   bulk_material: concrete_1
   mesh_size: 12
-  mesh_method: grid    # or: triangle (requires 'triangle' package)
+  mesh_method: grid
   rebars:
-    - {y: 40, x: 40, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40, x: 40,  As: 490.87, material: steel_1, diameter: 25}
     - {y: 40, x: 200, As: 490.87, material: steel_1, diameter: 25}
     - {y: 40, x: 360, As: 490.87, material: steel_1, diameter: 25}
-    - {y: 660, x: 40, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 660, x: 40,  As: 490.87, material: steel_1, diameter: 25}
     - {y: 660, x: 200, As: 490.87, material: steel_1, diameter: 25}
     - {y: 660, x: 360, As: 490.87, material: steel_1, diameter: 25}
 
@@ -42,12 +41,14 @@ demands:
   - name: ULS_1
     N_kN: -2000
     Mx_kNm: 400
+    My_kNm: 0
   - name: ULS_2
     N_kN: -800
     Mx_kNm: 600
     My_kNm: 150
 
 output:
-  n_angles_mx_my: 144  
+  eta_3D: true
   generate_mx_my: true
   generate_3d_surface: true
+  n_angles_mx_my: 144

@@ -14,8 +14,9 @@
 # License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
+# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
+
 r"""
 YAML input loader for GenSec.
 
@@ -102,7 +103,7 @@ _MATERIAL_BUILDERS = {
     "concrete": {
         "cls": Concrete,
         "params": ["fck", "gamma_c", "alpha_cc", "n_parabola",
-                    "eps_c2", "eps_cu2"],
+                    "eps_c2", "eps_cu2", "fct", "Ec"],
     },
     "steel": {
         "cls": Steel,
@@ -142,6 +143,10 @@ def _build_material(name, spec):
     mat_type = spec.get("type", "").lower()
 
     if mat_type == "concrete_ec2":
+        # Tension branch flags (common to both class-based and fck-based).
+        enable_tension = bool(spec.get("enable_tension", False))
+        tension_fct = spec.get("tension_fct", "fctd")
+
         conc_class = spec.get("class")
         if conc_class:
             return concrete_from_class(
@@ -151,6 +156,8 @@ def _build_material(name, spec):
                 TypeConc=spec.get("TypeConc", "R"),
                 NA=spec.get("NA", "French"),
                 time=spec.get("time", 28),
+                enable_tension=enable_tension,
+                tension_fct=tension_fct,
             )
         fck = spec.get("fck")
         if fck is None:
@@ -165,6 +172,8 @@ def _build_material(name, spec):
             TypeConc=spec.get("TypeConc", "R"),
             NA=spec.get("NA", "French"),
             time=spec.get("time", 28),
+            enable_tension=enable_tension,
+            tension_fct=tension_fct,
         )
 
     if mat_type not in _MATERIAL_BUILDERS:
@@ -321,23 +330,23 @@ def load_yaml(filepath):
     # ---- Demands ----
     demands = [_parse_demand(d) for d in data.get("demands", [])]
 
-    # ---- Combinations ----
-    combinations = []
-    for c_spec in data.get("combinations", []):
-        combinations.append({
-            "name": c_spec.get("name", "unnamed"),
-            "demands": [_parse_demand(d)
-                        for d in c_spec.get("demands", [])],
-        })
+    # ---- Combinations (v2.1: components / stages) ----
+    combinations = [_parse_combination(c)
+                    for c in data.get("combinations", [])]
 
-    # ---- Output options ----
-    output_opts = data.get("output", {})
+    # ---- Envelopes ----
+    envelopes = [_parse_envelope(e)
+                 for e in data.get("envelopes", [])]
+
+    # ---- Output options (with v2.1 flag defaults) ----
+    output_opts = _parse_output_flags(data.get("output", {}))
 
     return {
         "materials": materials,
         "section": section,
         "demands": demands,
         "combinations": combinations,
+        "envelopes": envelopes,
         "output_options": output_opts,
     }
 
@@ -410,3 +419,191 @@ def _parse_demand(d_spec):
         "Mx": Mx,
         "My": My,
     }
+
+
+# ---- Combination parser (v2.1) ----
+
+def _parse_combination(c_spec):
+    r"""
+    Parse a combination from YAML.
+
+    A combination has **either** ``components`` (simple factored sum)
+    **or** ``stages`` (sequential accumulation), never both.
+
+    Simple form:
+
+    .. code-block:: yaml
+
+        - name: SLU_1
+          components:
+            - {ref: G, factor: 1.3}
+            - {ref: Q1, factor: 1.5}
+
+    Staged form:
+
+    .. code-block:: yaml
+
+        - name: SLU_sismico
+          stages:
+            - name: gravitazionale
+              components:
+                - {ref: G, factor: 1.0}
+            - name: sisma
+              components:
+                - {ref: Ex, factor: 1.0}
+
+    Parameters
+    ----------
+    c_spec : dict
+        Raw YAML dict for one combination entry.
+
+    Returns
+    -------
+    dict
+        Parsed combination with ``name`` and either ``components``
+        or ``stages``.
+
+    Raises
+    ------
+    ValueError
+        If both ``components`` and ``stages`` are present, or neither.
+    """
+    name = c_spec.get("name", "unnamed")
+    has_components = "components" in c_spec
+    has_stages = "stages" in c_spec
+
+    if has_components and has_stages:
+        raise ValueError(
+            f"Combination '{name}': cannot have both 'components' "
+            f"and 'stages'."
+        )
+    if not has_components and not has_stages:
+        raise ValueError(
+            f"Combination '{name}': must have 'components' or "
+            f"'stages'."
+        )
+
+    if has_components:
+        return {
+            "name": name,
+            "components": _parse_component_list(c_spec["components"]),
+        }
+
+    # Staged.
+    stages = []
+    for i, s_spec in enumerate(c_spec["stages"]):
+        stages.append({
+            "name": s_spec.get("name", f"stage_{i}"),
+            "components": _parse_component_list(
+                s_spec.get("components", [])),
+        })
+    return {"name": name, "stages": stages}
+
+
+def _parse_component_list(comp_list):
+    """
+    Parse a list of component references with optional factors.
+
+    Parameters
+    ----------
+    comp_list : list of dict
+        Each dict has ``ref`` (str) and optionally ``factor``
+        (float, default 1.0).
+
+    Returns
+    -------
+    list of dict
+        ``[{"ref": str, "factor": float}, ...]``
+    """
+    parsed = []
+    for c in comp_list:
+        parsed.append({
+            "ref": c["ref"],
+            "factor": float(c.get("factor", 1.0)),
+        })
+    return parsed
+
+
+# ---- Envelope parser ----
+
+def _parse_envelope(e_spec):
+    r"""
+    Parse an envelope from YAML.
+
+    Members can be references to demands/combinations or inline
+    demand points:
+
+    .. code-block:: yaml
+
+        - name: Envelope_1
+          members:
+            - {ref: SLU_1}
+            - {ref: G, factor: 1.2}
+            - {N_kN: -2500, Mx_kNm: 100, My_kNm: 50}
+
+    Parameters
+    ----------
+    e_spec : dict
+        Raw YAML dict for one envelope entry.
+
+    Returns
+    -------
+    dict
+        ``{"name": str, "members": list}``.
+    """
+    name = e_spec.get("name", "unnamed")
+    members = []
+
+    for i, m_spec in enumerate(e_spec.get("members", [])):
+        member = {}
+        if "ref" in m_spec:
+            member["ref"] = m_spec["ref"]
+        else:
+            # Inline demand.  Keep raw kN/kNm for the engine
+            # to convert.
+            member["N_kN"] = float(m_spec.get("N_kN", 0))
+            member["Mx_kNm"] = float(m_spec.get("Mx_kNm", 0))
+            member["My_kNm"] = float(m_spec.get("My_kNm", 0))
+            member["name"] = m_spec.get("name", f"{name}[{i}]")
+
+        if "factor" in m_spec:
+            member["factor"] = float(m_spec["factor"])
+
+        members.append(member)
+
+    return {"name": name, "members": members}
+
+
+# ---- Output flags parser (v2.1 defaults) ----
+
+def _parse_output_flags(output_spec):
+    r"""
+    Parse the ``output`` block with v2.1 flag defaults.
+
+    Parameters
+    ----------
+    output_spec : dict
+        Raw YAML ``output`` block.
+
+    Returns
+    -------
+    dict
+        All original keys preserved, plus guaranteed defaults for
+        the v2.1 utilization flags.
+    """
+    # Start with all original keys.
+    flags = dict(output_spec)
+
+    # Utilization flag defaults.
+    flags.setdefault("eta_3D", True)
+    flags.setdefault("eta_2D", False)
+    flags.setdefault("eta_path", True)
+    flags.setdefault("eta_path_2D", False)
+    flags.setdefault("delta_N_tol", 0.03)
+
+    # Domain generation defaults.
+    flags.setdefault("generate_mx_my", False)
+    flags.setdefault("generate_3d_surface", False)
+    flags.setdefault("n_angles_mx_my", 144)
+
+    return flags

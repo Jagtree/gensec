@@ -65,6 +65,149 @@ class TestConcreteStressStrain(unittest.TestCase):
         self.assertEqual(self.c.eps_max, 0.0)
 
 
+class TestConcreteTension(unittest.TestCase):
+    """Tests for the optional linear tension branch of Concrete."""
+
+    def setUp(self):
+        # C25 with tension: fct=2.0 MPa, Ec=30000 MPa
+        # => eps_ct = 2.0 / 30000 = 6.6667e-5
+        self.c_t = Concrete(
+            fck=25.0, gamma_c=1.5, alpha_cc=0.85,
+            fct=2.0, Ec=30000.0,
+        )
+        self.eps_ct = 2.0 / 30000.0
+        self.fcd = 0.85 * 25.0 / 1.5
+
+    def test_tension_enabled_flag(self):
+        self.assertTrue(self.c_t.tension_enabled)
+        c_no = Concrete(fck=25.0)
+        self.assertFalse(c_no.tension_enabled)
+
+    def test_eps_ct_computed(self):
+        self.assertAlmostEqual(self.c_t.eps_ct, self.eps_ct, places=10)
+
+    def test_eps_max_with_tension(self):
+        """eps_max must equal eps_ct when tension is active."""
+        self.assertAlmostEqual(self.c_t.eps_max, self.eps_ct, places=10)
+
+    def test_eps_max_without_tension(self):
+        """eps_max must remain 0.0 when tension is disabled."""
+        c = Concrete(fck=25.0)
+        self.assertEqual(c.eps_max, 0.0)
+
+    def test_tension_linear_midpoint(self):
+        """At half the cracking strain, sigma = Ec * eps / 2."""
+        eps_half = self.eps_ct / 2.0
+        expected = 30000.0 * eps_half
+        self.assertAlmostEqual(self.c_t.stress(eps_half), expected,
+                               places=6)
+
+    def test_tension_at_cracking(self):
+        """At eps_ct, sigma = fct."""
+        self.assertAlmostEqual(self.c_t.stress(self.eps_ct), 2.0,
+                               places=6)
+
+    def test_tension_beyond_cracking(self):
+        """Beyond eps_ct, sigma = 0."""
+        self.assertAlmostEqual(self.c_t.stress(self.eps_ct * 1.5), 0.0)
+        self.assertAlmostEqual(self.c_t.stress(0.01), 0.0)
+
+    def test_tension_at_zero(self):
+        """At eps = 0, sigma = 0 (boundary between branches)."""
+        self.assertAlmostEqual(self.c_t.stress(0.0), 0.0)
+
+    def test_compression_unchanged(self):
+        """Compression branch must be unaffected by tension params."""
+        self.assertAlmostEqual(self.c_t.stress(-0.002), -self.fcd,
+                               places=3)
+        self.assertAlmostEqual(self.c_t.stress(-0.003), -self.fcd,
+                               places=3)
+        self.assertAlmostEqual(self.c_t.stress(-0.004), 0.0)
+
+    def test_stress_array_matches_scalar(self):
+        eps = np.array([
+            -0.004, -0.003, -0.001, 0.0,
+            self.eps_ct / 2, self.eps_ct, self.eps_ct * 2, 0.01,
+        ])
+        arr = self.c_t.stress_array(eps)
+        for i, e in enumerate(eps):
+            self.assertAlmostEqual(
+                arr[i], self.c_t.stress(e), places=8,
+                msg=f"Mismatch at eps={e}",
+            )
+
+    def test_disabled_tension_ignored(self):
+        """With fct=0, positive strains must give sigma=0."""
+        c = Concrete(fck=25.0, fct=0.0, Ec=30000.0)
+        self.assertFalse(c.tension_enabled)
+        self.assertAlmostEqual(c.stress(1e-4), 0.0)
+
+    def test_only_fct_without_Ec(self):
+        """fct > 0 but Ec = 0 must disable tension."""
+        c = Concrete(fck=25.0, fct=2.0, Ec=0.0)
+        self.assertFalse(c.tension_enabled)
+        self.assertEqual(c.eps_max, 0.0)
+
+
+class TestEC2BridgeTension(unittest.TestCase):
+    """Tests for the enable_tension flag in EC2 bridge factories."""
+
+    def test_tension_off_by_default(self):
+        c = concrete_from_ec2(fck=30, ls='F')
+        self.assertFalse(c.tension_enabled)
+        self.assertEqual(c.fct, 0.0)
+        self.assertEqual(c.Ec, 0.0)
+        self.assertEqual(c.eps_max, 0.0)
+
+    def test_tension_on_fctd(self):
+        """enable_tension=True with default tension_fct='fctd'."""
+        c = concrete_from_ec2(fck=30, ls='F', enable_tension=True)
+        self.assertTrue(c.tension_enabled)
+        self.assertGreater(c.fct, 0.0)
+        self.assertGreater(c.Ec, 0.0)
+        self.assertGreater(c.eps_max, 0.0)
+        # fct must match fctd_005 from the EC2 object
+        self.assertAlmostEqual(c.fct, c.ec2.fctd_005, places=6)
+        self.assertAlmostEqual(c.Ec, c.ec2.ecm, places=0)
+
+    def test_tension_on_fctm(self):
+        """tension_fct='fctm' must use the mean tensile strength."""
+        c = concrete_from_ec2(fck=30, ls='F', enable_tension=True,
+                              tension_fct='fctm')
+        self.assertAlmostEqual(c.fct, c.ec2.fctm, places=6)
+
+    def test_tension_on_fctk(self):
+        """tension_fct='fctk' must use fctk_005."""
+        c = concrete_from_ec2(fck=30, ls='F', enable_tension=True,
+                              tension_fct='fctk')
+        self.assertAlmostEqual(c.fct, c.ec2.fctk_005, places=6)
+
+    def test_tension_invalid_fct_source(self):
+        with self.assertRaises(ValueError):
+            concrete_from_ec2(fck=30, enable_tension=True,
+                              tension_fct='bogus')
+
+    def test_from_class_tension(self):
+        """concrete_from_class must propagate enable_tension."""
+        from gensec.materials import concrete_from_class
+        c = concrete_from_class('C25/30', ls='F',
+                                enable_tension=True, tension_fct='fctm')
+        self.assertTrue(c.tension_enabled)
+        self.assertAlmostEqual(c.fct, c.ec2.fctm, places=6)
+
+    def test_ec2_eps_ct_attributes(self):
+        """fben2 must expose eps_ct and eps_ctd."""
+        ec2 = fben2(fck=30, ls='F')
+        self.assertGreater(ec2.eps_ct, 0.0)
+        self.assertGreater(ec2.eps_ctd, 0.0)
+        # eps_ct = fctm / ecm
+        self.assertAlmostEqual(ec2.eps_ct,
+                               ec2.fctm / ec2.ecm, places=10)
+        # eps_ctd = fctd_005 / ecm
+        self.assertAlmostEqual(ec2.eps_ctd,
+                               ec2.fctd_005 / ec2.ecm, places=10)
+
+
 class TestSteelStressStrain(unittest.TestCase):
     """Pointwise verification of elastic-plastic steel law."""
 

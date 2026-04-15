@@ -14,8 +14,9 @@
 # License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
+# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
+
 r"""
 Plotting utilities for N-M diagrams, section state maps, and demand
 analysis.
@@ -417,9 +418,13 @@ def _draw_geometry_panel(ax, sec, fiber_results=None):
                     facecolor=color, edgecolor='black', lw=0.8,
                     zorder=4)
         ax.add_patch(c)
-        ax.annotate(f"{i+1}", (rb.x, rb.y), fontsize=8,
-                    ha='center', va='center', color='white',
-                    fontweight='bold', zorder=5)
+        ax.annotate(f"{i+1}", (rb.x, rb.y),
+                    xytext=(12, -4), textcoords="offset points",
+                    fontsize=7, fontweight='bold',
+                    color='black', zorder=5,
+                    bbox=dict(boxstyle='round,pad=0.2',
+                              facecolor='white', alpha=0.8,
+                              edgecolor='none'))
 
     if fiber_results is not None:
         _draw_neutral_axis(ax, sec, fiber_results)
@@ -468,8 +473,12 @@ def _draw_field_panel(ax, sec, fiber_results, field='sigma'):
                    linewidths=1.2, zorder=5)
         for i in range(len(rb["x"])):
             ax.annotate(f"{i+1}", (rb["x"][i], rb["y"][i]),
-                        fontsize=7, ha='center', va='center',
-                        color='white', fontweight='bold', zorder=6)
+                        xytext=(12, -4), textcoords="offset points",
+                        fontsize=7, fontweight='bold',
+                        color='black', zorder=6,
+                        bbox=dict(boxstyle='round,pad=0.2',
+                                  facecolor='white', alpha=0.8,
+                                  edgecolor='none'))
 
     _draw_neutral_axis(ax, sec, fiber_results)
     _draw_reference_axes(ax, sec)
@@ -548,7 +557,7 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
     My = mx_my_data["My_kNm"]
     N_fixed = mx_my_data.get("N_fixed_kN", 0)
 
-    pts = np.column_stack([My, Mx])
+    pts = np.column_stack([Mx, My])
     try:
         hull = ConvexHull(pts)
         hv = np.append(hull.vertices, hull.vertices[0])
@@ -556,23 +565,24 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
                 label="Mx-My domain")
         ax.fill(pts[hv, 0], pts[hv, 1], alpha=0.15, color='blue')
     except Exception:
-        ax.plot(My, Mx, 'b.', ms=3, label="Mx-My domain")
+        ax.plot(Mx, My, 'b.', ms=3, label="Mx-My domain")
 
     if demands:
         for mx_d, my_d, lb in demands:
-            ax.plot(my_d, mx_d, 'ro', ms=8)
-            ax.annotate(lb, (my_d, mx_d), xytext=(8, 5),
+            ax.plot(mx_d, my_d, 'ro', ms=8)
+            ax.annotate(lb, (mx_d, my_d), xytext=(8, 5),
                         textcoords="offset points", fontsize=9)
 
     ax.axhline(0, color='gray', lw=0.5)
     ax.axvline(0, color='gray', lw=0.5)
-    ax.set_xlabel("My [kN·m]")
-    ax.set_ylabel("Mx [kN·m]")
+    ax.set_xlabel("Mx [kN·m]")
+    ax.set_ylabel("My [kN·m]")
     ax.set_title(title or f"Mx-My interaction at N = {N_fixed:.0f} kN")
-    ax.legend()
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0),
+              fontsize=9, borderaxespad=0)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.88, 1])
     return fig
 
 
@@ -581,8 +591,9 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
 # ==================================================================
 
 def plot_moment_curvature(mc_data, title=""):
-    """
-    Plot the moment-curvature diagram with yield and ultimate markers.
+    r"""
+    Plot the moment-curvature diagram with cracking, yield and
+    ultimate markers and a numerical legend.
 
     Parameters
     ----------
@@ -611,6 +622,23 @@ def plot_moment_curvature(mc_data, title=""):
 
     ax.plot(chi[mask], M[mask], 'b-', lw=1.5, label=f"{M_label}-χ")
 
+    # Collect key-point lines for the numerical legend.
+    legend_lines = []
+
+    # First cracking markers.
+    for suffix, marker in [("_pos", "D"), ("_neg", "D")]:
+        cc = mc_data.get(f"cracking_chi{suffix}")
+        cm = mc_data.get(f"cracking_M{suffix}")
+        if cc is not None and cm is not None:
+            ax.plot(cc * 1e6, cm / 1e6, color='#FF8C00',
+                    marker=marker, ms=9, zorder=5,
+                    label="First cracking" if suffix == "_pos"
+                    else None)
+            sign = "+" if suffix == "_pos" else "−"
+            legend_lines.append(
+                f"Cracking ({sign}): {M_label}={cm/1e6:.1f} kNm,"
+                f" χ={cc*1e6:.1f} 1/km")
+
     for suffix, color, marker in [("_pos", "green", "^"),
                                    ("_neg", "green", "v")]:
         yc = mc_data.get(f"yield_chi{suffix}")
@@ -619,6 +647,10 @@ def plot_moment_curvature(mc_data, title=""):
             ax.plot(yc * 1e6, ym / 1e6, color=color, marker=marker,
                     ms=12, zorder=5,
                     label="First yield" if suffix == "_pos" else None)
+            sign = "+" if suffix == "_pos" else "−"
+            legend_lines.append(
+                f"Yield ({sign}): {M_label}={ym/1e6:.1f} kNm,"
+                f" χ={yc*1e6:.1f} 1/km")
 
     for suffix, color, marker in [("_pos", "red", "x"),
                                    ("_neg", "red", "x")]:
@@ -628,6 +660,10 @@ def plot_moment_curvature(mc_data, title=""):
             ax.plot(uc * 1e6, um / 1e6, color=color, marker=marker,
                     ms=12, mew=3, zorder=5,
                     label="Ultimate" if suffix == "_pos" else None)
+            sign = "+" if suffix == "_pos" else "−"
+            legend_lines.append(
+                f"Ultimate ({sign}): {M_label}={um/1e6:.1f} kNm,"
+                f" χ={uc*1e6:.1f} 1/km")
 
     ax.axhline(0, color='gray', lw=0.5)
     ax.axvline(0, color='gray', lw=0.5)
@@ -635,8 +671,19 @@ def plot_moment_curvature(mc_data, title=""):
     ax.set_ylabel(f"{M_label} [kN·m]")
     ax.set_title(title or
                  f"{M_label}-χ diagram at N = {N_kN:.0f} kN")
-    ax.legend()
+    ax.legend(loc='upper left', fontsize=9)
     ax.grid(True, alpha=0.3)
+
+    # Numerical legend box (bottom-right).
+    if legend_lines:
+        txt = "\n".join(legend_lines)
+        ax.text(0.98, 0.02, txt, transform=ax.transAxes,
+                fontsize=7.5, family='monospace',
+                va='bottom', ha='right',
+                bbox=dict(boxstyle='round,pad=0.4',
+                          facecolor='#FAFAFA', alpha=0.9,
+                          edgecolor='#CCCCCC'))
+
     fig.tight_layout()
     return fig
 
@@ -647,17 +694,16 @@ def plot_moment_curvature(mc_data, title=""):
 
 def plot_demand_heatmap(check_results, title=""):
     r"""
-    Bar chart of utilization ratios for all demands, coloured by
-    status (green = verified, red = failed).
+    Grouped horizontal bar chart of all enabled utilization ratios.
 
-    A horizontal dashed line at :math:`\eta = 1` marks the limit.
-    Demands are sorted by decreasing utilization so the most
-    critical are at the top.
+    Each demand gets one bar per :math:`\eta` type present in the
+    results.  Bars exceeding 1.0 are coloured red; those within
+    the limit are green.
 
     Parameters
     ----------
     check_results : list of dict
-        Output of :meth:`DemandChecker.check_demands`.
+        Output of :meth:`VerificationEngine.check_demands`.
     title : str, optional
 
     Returns
@@ -670,34 +716,71 @@ def plot_demand_heatmap(check_results, title=""):
                 ha='center', va='center', transform=ax.transAxes)
         return fig
 
-    # Sort by utilization (descending)
+    # Detect which eta columns are present.
+    _all_keys = [("eta_3D", "η_3D", "#1f77b4"),
+                 ("eta_2D", "η_2D", "#ff7f0e")]
+    eta_cols = [(k, lab, col) for k, lab, col in _all_keys
+                if any(k in r and r[k] is not None
+                       for r in check_results)]
+    if not eta_cols:
+        eta_cols = [("eta_3D", "η_3D", "#1f77b4")]
+
+    n_types = len(eta_cols)
+
+    # Sort demands by governing eta (max across all types).
+    def _gov_eta(r):
+        vals = [r.get(k, 0) or 0 for k, _, _ in eta_cols]
+        return max(vals) if vals else 0
+
     sorted_res = sorted(check_results,
-                        key=lambda r: r["utilization"], reverse=True)
+                        key=_gov_eta, reverse=True)
     names = [r["name"] for r in sorted_res]
-    etas = [r["utilization"] for r in sorted_res]
-    verified = [r["verified"] for r in sorted_res]
-    colors = ['#4CAF50' if v else '#F44336' for v in verified]
+    n_demands = len(names)
 
-    fig, ax = plt.subplots(1, 1,
-                           figsize=(max(8, len(names) * 0.5 + 2), 6))
-    y_pos = np.arange(len(names))
-    bars = ax.barh(y_pos, etas, color=colors, edgecolor='black',
-                   linewidth=0.5, height=0.7)
+    bar_height = 0.7 / n_types
+    fig, ax = plt.subplots(
+        1, 1, figsize=(max(8, n_demands * 0.5 + 2),
+                       max(5, n_demands * 0.8 + 1)))
+    y_pos = np.arange(n_demands)
 
-    # Annotate each bar with the eta value
-    for i, (bar, eta) in enumerate(zip(bars, etas)):
-        x_txt = min(eta + 0.02, max(etas) * 1.1)
-        ax.text(x_txt, i, f"{eta:.3f}", va='center', fontsize=9,
-                fontweight='bold')
+    for t_idx, (key, label, base_color) in enumerate(eta_cols):
+        offsets = y_pos + (t_idx - (n_types - 1) / 2) * bar_height
+        vals = []
+        colors = []
+        for r in sorted_res:
+            v = r.get(key)
+            v = v if v is not None else 0.0
+            vals.append(v)
+            colors.append('#F44336' if v > 1.0 else '#4CAF50')
+
+        bars = ax.barh(offsets, vals, height=bar_height * 0.9,
+                       color=colors, edgecolor='black',
+                       linewidth=0.4, label=label, alpha=0.85)
+
+        for i, (bar, v) in enumerate(zip(bars, vals)):
+            if v > 0:
+                x_txt = v + 0.02
+                ax.text(x_txt, offsets[i], f"{v:.3f}",
+                        va='center', fontsize=7.5,
+                        fontweight='bold', color='#333333')
 
     ax.axvline(1.0, color='red', ls='--', lw=2, label='η = 1.0')
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names, fontsize=9)
     ax.set_xlabel("Utilization ratio η")
     ax.set_title(title or "Demand Utilization")
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=9, loc='lower right')
     ax.grid(True, axis='x', alpha=0.3)
-    ax.invert_yaxis()  # most critical at top
+    ax.invert_yaxis()
+
+    # Type legend in corner.
+    type_txt = ", ".join(lab for _, lab, _ in eta_cols)
+    ax.text(0.98, 0.02, f"Showing: {type_txt}",
+            transform=ax.transAxes, fontsize=7.5, ha='right',
+            va='bottom', style='italic', color='#555555',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                      alpha=0.8, edgecolor='#CCCCCC'))
+
     fig.tight_layout()
     return fig
 
@@ -706,14 +789,143 @@ def plot_demand_heatmap(check_results, title=""):
 #  3D resistance surface (N, Mx, My)
 # ==================================================================
 
-def plot_3d_surface(nm_3d, demands=None, title=""):
+def _hull_slice_at_N(hull_pts, simplices, N_level):
     r"""
-    Plot the 3D resistance surface as a convex hull in (N, Mx, My)
-    space.
+    Intersect hull triangles at a fixed *N* level and return
+    the outer boundary of the resulting 2-D cross-section.
 
-    Uses :class:`scipy.spatial.ConvexHull` in 3D to compute the
-    surface, rendered as a translucent triangulated mesh. Demand
-    points are plotted as red spheres.
+    Uses a 2-D ConvexHull on the intersection points to guarantee
+    a clean, non-self-intersecting contour even when the raw
+    intersection set contains interior duplicates.
+
+    Parameters
+    ----------
+    hull_pts : numpy.ndarray
+        ``(n, 3)`` with columns ``[Mx, My, N]``.
+    simplices : numpy.ndarray
+    N_level : float
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(m, 2)`` ordered boundary points ``[Mx, My]``, or ``None``
+        if fewer than 3 intersection points are found.
+    """
+    pts_2d = []
+    for tri in simplices:
+        v = hull_pts[tri]
+        n_vals = v[:, 2]
+        for i in range(3):
+            j = (i + 1) % 3
+            if (n_vals[i] - N_level) * (n_vals[j] - N_level) < 0:
+                t = (N_level - n_vals[i]) / (n_vals[j] - n_vals[i])
+                p = v[i] + t * (v[j] - v[i])
+                pts_2d.append(p[:2])
+            elif abs(n_vals[i] - N_level) < 1e-6:
+                pts_2d.append(v[i, :2].copy())
+    if len(pts_2d) < 3:
+        return None
+
+    pts_2d = np.array(pts_2d)
+
+    # Use 2-D ConvexHull to extract only the outer boundary.
+    # This eliminates interior points and guarantees a clean,
+    # ordered contour.
+    try:
+        h2 = ConvexHull(pts_2d)
+        boundary = pts_2d[h2.vertices]
+    except Exception:
+        # Fallback: sort by angle.
+        cx, cy = pts_2d[:, 0].mean(), pts_2d[:, 1].mean()
+        angles = np.arctan2(pts_2d[:, 1] - cy,
+                            pts_2d[:, 0] - cx)
+        boundary = pts_2d[np.argsort(angles)]
+
+    return boundary
+
+
+def _resample_contour(contour, n_angles, cx=None, cy=None):
+    r"""
+    Resample a closed convex 2-D contour to *n_angles* evenly-spaced
+    **angular** positions from a reference centroid.
+
+    Angular parameterization guarantees that point *j* on every
+    contour corresponds to the same direction in the Mx-My plane,
+    which is essential for ``plot_surface`` to produce a well-
+    structured mesh between adjacent N-level contours.
+
+    Using a **common centroid** across all contours (passed via
+    *cx*, *cy*) ensures angular consistency even when contour shapes
+    change significantly with N.
+
+    Parameters
+    ----------
+    contour : numpy.ndarray
+        ``(m, 2)`` ordered convex boundary points.
+    n_angles : int
+    cx, cy : float or None
+        Reference centroid for angular parameterization.  If ``None``,
+        computed from the contour's own mean.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_angles + 1, 2)`` resampled contour.  The last point
+        repeats the first to close the loop for ``plot_surface``.
+    """
+    if cx is None:
+        cx = contour[:, 0].mean()
+    if cy is None:
+        cy = contour[:, 1].mean()
+
+    # Compute angle from common centroid for each boundary point.
+    dx = contour[:, 0] - cx
+    dy = contour[:, 1] - cy
+
+    angles = np.arctan2(dy, dx)
+
+    # Sort by angle.
+    order = np.argsort(angles)
+    a_sorted = angles[order]
+    x_sorted = contour[order, 0]
+    y_sorted = contour[order, 1]
+
+    # Wrap: extend by ±2π for clean interpolation across the seam.
+    a_ext = np.concatenate([a_sorted - 2 * np.pi,
+                            a_sorted,
+                            a_sorted + 2 * np.pi])
+    x_ext = np.concatenate([x_sorted, x_sorted, x_sorted])
+    y_ext = np.concatenate([y_sorted, y_sorted, y_sorted])
+
+    # Target: n_angles equally spaced in [-π, π).
+    target_angles = np.linspace(-np.pi, np.pi, n_angles,
+                                endpoint=False)
+
+    # Interpolate x and y as functions of angle (Cartesian interp,
+    # not polar radius — more stable on elongated sections).
+    x_interp = np.interp(target_angles, a_ext, x_ext)
+    y_interp = np.interp(target_angles, a_ext, y_ext)
+
+    # Close the loop: append first point so plot_surface draws
+    # a face across the seam instead of leaving a slit.
+    x_closed = np.append(x_interp, x_interp[0])
+    y_closed = np.append(y_interp, y_interp[0])
+
+    return np.column_stack([x_closed, y_closed])
+
+
+def plot_3d_surface(nm_3d, demands=None, title="",
+                    n_levels=20, n_angles=72):
+    r"""
+    Plot the 3D resistance surface as a lofted surface built from
+    Mx-My contour slices at regular N intervals.
+
+    Two side-by-side perspective views are generated: one from above
+    (compression-dominant) and one from below (tension-dominant, N
+    axis visually inverted).
+
+    Contour rings ("parallels") and meridian lines ("longitudes")
+    are drawn on the surface to aid shape comprehension.
 
     Parameters
     ----------
@@ -721,66 +933,151 @@ def plot_3d_surface(nm_3d, demands=None, title=""):
         Output of :meth:`NMDiagram.generate_biaxial`. Must contain
         ``N_kN``, ``Mx_kNm``, ``My_kNm``.
     demands : list of dict, optional
-        Each dict with ``N`` [N], ``Mx`` [N*mm], ``My`` [N*mm],
-        ``name``.
     title : str, optional
+    n_levels : int, optional
+        Number of N-level slices. Default 20.
+    n_angles : int, optional
+        Angular resolution of each contour. Default 72 (every 5°).
 
     Returns
     -------
     matplotlib.figure.Figure
     """
-    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from matplotlib.colors import Normalize
 
-    N = nm_3d["N_kN"]
-    Mx = nm_3d["Mx_kNm"]
-    My = nm_3d["My_kNm"]
+    N_all = nm_3d["N_kN"]
+    Mx_all = nm_3d["Mx_kNm"]
+    My_all = nm_3d["My_kNm"]
+    pts = np.column_stack([Mx_all, My_all, N_all])
 
-    pts = np.column_stack([My, Mx, N])
+    N_min, N_max = N_all.min(), N_all.max()
+    cmap = plt.cm.RdYlBu_r
+    norm_c = Normalize(vmin=N_min, vmax=N_max)
 
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
+    # ---- Build structured surface from hull contour slices ----
+    hull = ConvexHull(pts)
+    N_levels = np.linspace(N_min * 0.98, N_max * 0.98, n_levels)
 
-    try:
-        hull = ConvexHull(pts)
+    # First pass: collect raw contours and find the largest one
+    # to use its centroid as the common angular reference.
+    raw_contours = []
+    raw_N = []
+    max_area = 0.0
+    ref_cx, ref_cy = 0.0, 0.0
 
-        # Draw hull faces as translucent triangles
-        faces = []
-        for simplex in hull.simplices:
-            triangle = pts[simplex]
-            faces.append(triangle)
+    for nl in N_levels:
+        contour = _hull_slice_at_N(pts, hull.simplices, nl)
+        if contour is None or len(contour) < 4:
+            continue
+        span_x = contour[:, 0].max() - contour[:, 0].min()
+        span_y = contour[:, 1].max() - contour[:, 1].min()
+        if span_x < 1e-3 and span_y < 1e-3:
+            continue
+        raw_contours.append(contour)
+        raw_N.append(nl)
+        area = span_x * span_y
+        if area > max_area:
+            max_area = area
+            ref_cx = contour[:, 0].mean()
+            ref_cy = contour[:, 1].mean()
 
-        mesh = Poly3DCollection(faces, alpha=0.25, facecolor='steelblue',
-                                edgecolor='steelblue', linewidth=0.1)
-        ax.add_collection3d(mesh)
+    # Second pass: resample all contours with the common centroid.
+    grid_Mx = []
+    grid_My = []
+    grid_N = []
+    valid_levels = []
 
-        # Also draw wireframe of hull edges for clarity
-        for simplex in hull.simplices:
-            tri = pts[simplex]
-            tri_closed = np.vstack([tri, tri[0]])
-            ax.plot(tri_closed[:, 0], tri_closed[:, 1],
-                    tri_closed[:, 2], 'b-', lw=0.15, alpha=0.3)
+    for contour, nl in zip(raw_contours, raw_N):
+        resampled = _resample_contour(contour, n_angles,
+                                      cx=ref_cx, cy=ref_cy)
+        n_cols = resampled.shape[0]  # n_angles + 1 (closed loop)
+        grid_Mx.append(resampled[:, 0])
+        grid_My.append(resampled[:, 1])
+        grid_N.append(np.full(n_cols, nl))
+        valid_levels.append(nl)
 
-    except Exception:
-        # Fallback: scatter
-        ax.scatter(My, Mx, N, s=1, alpha=0.3, c='blue')
+    if len(grid_Mx) < 3:
+        # Fallback: scatter.
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8),
+                               subplot_kw={'projection': '3d'})
+        ax.scatter(Mx_all, My_all, N_all, s=1, alpha=0.3, c='blue')
+        ax.set_xlabel("Mx [kN·m]")
+        ax.set_ylabel("My [kN·m]")
+        ax.set_zlabel("N [kN]")
+        ax.set_title(title or "3D Resistance Surface (fallback)")
+        fig.tight_layout()
+        return fig
 
-    # Demand points
-    if demands:
-        for d in demands:
-            n_d = d["N"] / 1e3
-            mx_d = d["Mx"] / 1e6
-            my_d = d.get("My", 0) / 1e6
-            ax.scatter([my_d], [mx_d], [n_d], c='red', s=60,
-                       zorder=10, depthshade=False)
-            ax.text(my_d, mx_d, n_d, f"  {d['name']}",
-                    fontsize=8, color='red')
+    GMx = np.array(grid_Mx)
+    GMy = np.array(grid_My)
+    GN = np.array(grid_N)
 
-    ax.set_xlabel("My [kN·m]")
-    ax.set_ylabel("Mx [kN·m]")
-    ax.set_zlabel("N [kN]")
-    ax.set_title(title or "3D Resistance Surface (N, Mx, My)")
+    # ---- Face colours from N ----
+    face_colors = cmap(norm_c(GN))
 
-    fig.tight_layout()
+    # ---- Two-panel figure: above + below ----
+    fig = plt.figure(figsize=(18, 9))
+    views = [
+        (1, 30, -55, "Perspective — tension side"),
+        (2, -30, -55, "Perspective — compression side"),
+    ]
+
+    n_meridians = min(12, n_angles)
+    meridian_idx = np.linspace(0, n_angles - 1, n_meridians,
+                               dtype=int)
+
+    for idx, elev, azim, vtitle in views:
+        ax = fig.add_subplot(1, 2, idx, projection='3d')
+
+        # Surface.
+        ax.plot_surface(GMx, GMy, GN,
+                        facecolors=face_colors,
+                        rstride=1, cstride=1,
+                        shade=False, alpha=0.55,
+                        antialiased=True)
+
+        # Contour rings (parallels) — grid is already closed,
+        # so plotting the full row draws a closed ring.
+        for i in range(len(valid_levels)):
+            ax.plot(GMx[i], GMy[i], GN[i],
+                    color='#333333', lw=0.4, alpha=0.5)
+
+        # Meridians (longitudes).
+        for j in meridian_idx:
+            ax.plot(GMx[:, j], GMy[:, j], GN[:, j],
+                    color='#555555', lw=0.3, alpha=0.4)
+
+        # Demand points.
+        if demands:
+            for d in demands:
+                n_d = d["N"] / 1e3
+                mx_d = d["Mx"] / 1e6
+                my_d = d.get("My", 0) / 1e6
+                ax.scatter([mx_d], [my_d], [n_d], c='red', s=80,
+                           zorder=10, depthshade=False,
+                           edgecolors='darkred', linewidths=0.8)
+                ax.text(mx_d, my_d, n_d, f"  {d['name']}",
+                        fontsize=9, color='darkred',
+                        fontweight='bold')
+
+        ax.set_xlabel("Mx [kN·m]", fontsize=9, labelpad=8)
+        ax.set_ylabel("My [kN·m]", fontsize=9, labelpad=8)
+        ax.set_zlabel("N [kN]", fontsize=9, labelpad=8)
+        ax.set_title(vtitle, fontsize=11)
+        ax.view_init(elev=elev, azim=azim)
+        ax.tick_params(labelsize=8)
+
+    # Dedicated colour-bar axes between the two plots.
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_c)
+    sm.set_array([])
+    cbar_ax = fig.add_axes([0.2, 0.05, 0.6, 0.02])  # [left, bottom, width, height]
+    fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', label="N [kN]")
+
+    fig.suptitle(
+        title or "3D Resistance Surface (N, Mx, My)",
+        fontsize=14, y=0.98)
+    fig.subplots_adjust(left=0.02, right=0.95, bottom=0.15,
+                        top=0.92, wspace=0.15)
     return fig
 
 
@@ -1190,3 +1487,114 @@ def plot_stress_profile(results, sec, title=""):
     fig.suptitle(title or "Section State", fontsize=14)
     fig.tight_layout()
     return fig
+
+
+# ==================================================================
+#  JSON → plot dispatcher (for ``gensec plot`` subcommand)
+# ==================================================================
+
+def plot_from_json(filepath, output_path=None, dpi=150):
+    """
+    Regenerate a plot from a previously exported JSON data file.
+
+    Detects the data type from the ``"type"`` key in the JSON and
+    dispatches to the appropriate plotting function.
+
+    Supported types:
+
+    - ``moment_curvature`` → :func:`plot_moment_curvature`
+    - ``mx_my_contour`` → :func:`plot_mx_my_diagram`
+
+    For files without a ``"type"`` key, the function inspects the
+    available keys to infer the data type (N-M domain, 3-D surface,
+    demand summary, etc.).
+
+    Parameters
+    ----------
+    filepath : str
+        Path to JSON data file.
+    output_path : str or None
+        Output PNG path. If ``None``, derived from the JSON filename.
+    dpi : int, optional
+        Resolution. Default 150.
+
+    Returns
+    -------
+    str
+        Path of the generated PNG file.
+
+    Raises
+    ------
+    ValueError
+        If the data type cannot be determined.
+    """
+    import json as _json
+
+    with open(filepath, 'r') as f:
+        data = _json.load(f)
+
+    dtype = data.get("type")
+
+    if output_path is None:
+        base = filepath.rsplit('.', 1)[0]
+        output_path = base + ".png"
+
+    fig = None
+
+    if dtype == "moment_curvature":
+        # Reconstruct mc_data dict expected by plot_moment_curvature.
+        mc = {
+            "chi_km": np.array(data["chi_km"]),
+            "M_kNm": np.array(data["M_kNm"]),
+            "N_fixed_kN": data["N_fixed_kN"],
+            "direction": data.get("direction", "x"),
+        }
+        # Restore key points.
+        for prefix in ("cracking", "yield", "ultimate"):
+            for suffix in ("_pos", "_neg"):
+                chi_key = f"{prefix}_chi{suffix}"
+                M_key = f"{prefix}_M{suffix}"
+                chi_km_key = f"{chi_key}_km"
+                M_kNm_key = f"{M_key}_kNm"
+                if chi_km_key in data:
+                    mc[chi_key] = data[chi_km_key] / 1e6  # back to 1/mm
+                if M_kNm_key in data:
+                    mc[M_key] = data[M_kNm_key] * 1e6  # back to N*mm
+        fig = plot_moment_curvature(mc)
+
+    elif dtype == "mx_my_contour":
+        mx_my = {
+            "Mx_kNm": np.array(data["Mx_kNm"]),
+            "My_kNm": np.array(data["My_kNm"]),
+            "N_fixed_kN": data.get("N_fixed_kN", 0),
+        }
+        fig = plot_mx_my_diagram(mx_my)
+
+    elif "Mx_kNm" in data and "My_kNm" in data and "N_kN" in data:
+        # 3D surface point cloud.
+        nm_3d = {
+            "N_kN": np.array(data["N_kN"]),
+            "Mx_kNm": np.array(data["Mx_kNm"]),
+            "My_kNm": np.array(data["My_kNm"]),
+        }
+        fig = plot_3d_surface(nm_3d)
+
+    elif "N_kN" in data and "Mx_kNm" in data and "My_kNm" not in data:
+        # N-M domain.
+        nm = {
+            "N_kN": np.array(data["N_kN"]),
+            "M_kNm": np.array(data["Mx_kNm"]),
+        }
+        fig = plot_nm_diagram(nm)
+
+    else:
+        raise ValueError(
+            f"Cannot determine plot type from '{filepath}'. "
+            f"Keys: {list(data.keys())}"
+        )
+
+    if fig is not None:
+        fig.savefig(output_path, dpi=dpi)
+        plt.close(fig)
+
+    return output_path

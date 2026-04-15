@@ -175,6 +175,16 @@ class fben2:
     dilat : float
     s : float
     beta_cc : float
+    eps_ct : float
+        Mean cracking strain at time *t*:
+        :math:`\varepsilon_{ct} = f_{ctm} / E_{cm}`.
+    eps_ctd : float
+        Design cracking strain at time *t*:
+        :math:`\varepsilon_{ctd} = f_{ctd,0.05} / E_{cm}`.
+    eps_ct_28 : float
+        Mean cracking strain at 28 days.
+    eps_ctd_28 : float
+        Design cracking strain at 28 days.
 
     References
     ----------
@@ -347,6 +357,22 @@ class fben2:
         self.fcd28 = self.alpha_cc * self.fck_28 / self.gamma_c
         self.fctd_005 = self.alpha_ct * self.fctk_005 / self.gamma_c
         self.fctd_005_28 = self.alpha_ct * self.fctk_005_28 / self.gamma_c
+
+        # Tensile strain limits (cracking strain).
+        # These are used by GenSec to enable the optional linear
+        # tension branch in the Concrete constitutive law (SLS).
+        #   eps_ct  = fctm   / Ecm   (mean cracking strain at time t)
+        #   eps_ctd = fctd   / Ecm   (design cracking strain at time t)
+        if self.ecm > 0:
+            self.eps_ct = self.fctm / self.ecm
+            self.eps_ctd = self.fctd_005 / self.ecm
+            self.eps_ct_28 = self.fctm_28 / self.ecm_28
+            self.eps_ctd_28 = self.fctd_005_28 / self.ecm_28
+        else:
+            self.eps_ct = 0.0
+            self.eps_ctd = 0.0
+            self.eps_ct_28 = 0.0
+            self.eps_ctd_28 = 0.0
 
 # Parabole-Rectangle law
 

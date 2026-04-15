@@ -53,7 +53,8 @@ from .en10025_properties import Steel_EN10025_2
 
 
 def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
-                      NA='French', time=28):
+                      NA='French', time=28, enable_tension=False,
+                      tension_fct='fctd'):
     r"""
     Create a GenSec :class:`Concrete` from EC2 Table 3.1 properties.
 
@@ -78,6 +79,15 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
         National Annex. Default ``'French'``.
     time : float, optional
         Concrete age [days]. Default 28.
+    enable_tension : bool, optional
+        If ``True``, the returned :class:`Concrete` includes a linear
+        tension branch.  The tensile strength and elastic modulus are
+        taken from the EC2 property object.  Default ``False``.
+    tension_fct : str, optional
+        Which tensile strength to use when ``enable_tension=True``:
+        ``'fctd'`` for design value :math:`f_{ctd,0.05}` (default),
+        ``'fctm'`` for mean value :math:`f_{ctm}`, or ``'fctk'`` for
+        characteristic value :math:`f_{ctk,0.05}`.
 
     Returns
     -------
@@ -93,6 +103,24 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
     ec2 = fben2(fck=fck, ls=ls, loadtype=loadtype,
                 TypeConc=TypeConc, NA=NA, time=time)
 
+    # Resolve tensile strength from the requested source.
+    fct_val = 0.0
+    Ec_val = 0.0
+    if enable_tension:
+        _fct_map = {
+            'fctd': ec2.fctd_005,
+            'fctm': ec2.fctm,
+            'fctk': ec2.fctk_005,
+        }
+        key = tension_fct.lower()
+        if key not in _fct_map:
+            raise ValueError(
+                f"Unknown tension_fct='{tension_fct}'. "
+                f"Valid: {list(_fct_map.keys())}"
+            )
+        fct_val = _fct_map[key]
+        Ec_val = ec2.ecm
+
     # Note: fben2 stores eps_c2 and eps_cu2 as POSITIVE values.
     # GenSec uses NEGATIVE convention for compression.
     c = Concrete(
@@ -102,6 +130,8 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
         n_parabola=ec2.n_exp,
         eps_c2=-ec2.eps_c2,      # convert to negative
         eps_cu2=-ec2.eps_cu2,     # convert to negative
+        fct=fct_val,
+        Ec=Ec_val,
     )
     # Attach the full EC2 object for downstream access
     c.ec2 = ec2
@@ -109,7 +139,8 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
 
 
 def concrete_from_class(conc_class, ls='F', loadtype='slow',
-                        TypeConc='R', NA='French', time=28):
+                        TypeConc='R', NA='French', time=28,
+                        enable_tension=False, tension_fct='fctd'):
     r"""
     Create a GenSec :class:`Concrete` from an EC2 class name.
 
@@ -119,6 +150,11 @@ def concrete_from_class(conc_class, ls='F', loadtype='slow',
         EC2 class name, e.g. ``'C25/30'``, ``'C30/37'``, etc.
     ls, loadtype, TypeConc, NA, time
         Passed through to :func:`concrete_from_ec2`.
+    enable_tension : bool, optional
+        Activate the linear tension branch. Default ``False``.
+    tension_fct : str, optional
+        Tensile strength source (``'fctd'``, ``'fctm'``, or
+        ``'fctk'``). Default ``'fctd'``.
 
     Returns
     -------
@@ -137,6 +173,7 @@ def concrete_from_class(conc_class, ls='F', loadtype='slow',
     return concrete_from_ec2(
         fck=ConcClassFck[conc_class], ls=ls, loadtype=loadtype,
         TypeConc=TypeConc, NA=NA, time=time,
+        enable_tension=enable_tension, tension_fct=tension_fct,
     )
 
 

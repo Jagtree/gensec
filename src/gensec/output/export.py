@@ -14,8 +14,9 @@
 # License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
+# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
+
 """
 Numerical export utilities — CSV and JSON.
 
@@ -73,53 +74,207 @@ def export_nm_domain_json(nm_data, filepath):
 
 def export_demand_results_csv(results, filepath):
     """
-    Export demand verification summary to CSV.
+    Export demand verification summary to CSV (v2.1 format).
+
+    Columns include all enabled :math:`\\eta` types.
 
     Parameters
     ----------
     results : list of dict
-        Output of :meth:`DemandChecker.check_demands`.
+        Output of :meth:`VerificationEngine.check_demands`.
     filepath : str
     """
+    if not results:
+        return
+
+    # Determine which η columns are present.
+    eta_keys = []
+    for key in ("eta_3D", "eta_2D"):
+        if any(key in r for r in results):
+            eta_keys.append(key)
+
     with open(filepath, 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(["name", "N_kN", "Mx_kNm", "My_kNm", "inside",
-                     "utilization", "verified"])
+        header = ["name", "N_kN", "Mx_kNm", "My_kNm"] + eta_keys + [
+            "inside", "verified"]
+        w.writerow(header)
         for r in results:
-            w.writerow([
+            row = [
                 r["name"],
                 f"{r['N_kN']:.2f}",
-                f"{r['M_kNm']:.4f}",
+                f"{r['Mx_kNm']:.4f}",
                 f"{r.get('My_kNm', 0):.4f}",
-                r["inside"],
-                f"{r['utilization']:.4f}",
-                r["verified"],
-            ])
+            ]
+            for ek in eta_keys:
+                val = r.get(ek)
+                row.append(f"{val:.4f}" if val is not None else "")
+            row += [r["inside"], r["verified"]]
+            w.writerow(row)
 
 
 def export_demand_results_json(results, filepath):
     """
-    Export demand verification summary to JSON.
+    Export demand verification summary to JSON (v2.1 format).
 
     Parameters
     ----------
     results : list of dict
-        Output of :meth:`DemandChecker.check_demands`.
+        Output of :meth:`VerificationEngine.check_demands`.
     filepath : str
     """
-    # Ensure serializable
     clean = []
     for r in results:
-        clean.append({
+        entry = {
             "name": r["name"],
             "N_kN": round(r["N_kN"], 2),
-            "M_kNm": round(r["M_kNm"], 4),
+            "Mx_kNm": round(r["Mx_kNm"], 4),
+            "My_kNm": round(r.get("My_kNm", 0), 4),
             "inside": bool(r["inside"]),
-            "utilization": round(r["utilization"], 4),
             "verified": bool(r["verified"]),
-        })
+        }
+        for key in ("eta_3D", "eta_2D"):
+            if key in r:
+                entry[key] = r[key]
+        clean.append(entry)
     with open(filepath, 'w') as f:
         json.dump({"demands": clean}, f, indent=2)
+
+
+def export_combination_results_json(results, filepath):
+    """
+    Export combination verification results to JSON.
+
+    Handles both simple and staged combinations per the v2.1 spec.
+
+    Parameters
+    ----------
+    results : list of dict
+        Output of :meth:`VerificationEngine.check_combination` calls.
+    filepath : str
+    """
+    clean = []
+    for r in results:
+        entry = {"name": r["name"], "type": r.get("type", "simple")}
+
+        # Resultant in display units.
+        res = r.get("resultant", {})
+        entry["resultant"] = {
+            "N_kN": res.get("N_kN", 0),
+            "Mx_kNm": res.get("Mx_kNm", 0),
+            "My_kNm": res.get("My_kNm", 0),
+        }
+
+        if "stages" in r:
+            entry["stages"] = _clean_stages(r["stages"])
+
+        for key in ("eta_3D", "eta_2D", "eta_governing"):
+            if key in r:
+                entry[key] = r[key]
+
+        entry["inside"] = bool(r.get("inside", False))
+        entry["verified"] = bool(r.get("verified", False))
+        clean.append(entry)
+
+    with open(filepath, 'w') as f:
+        json.dump({"combinations": clean}, f, indent=2)
+
+
+def _clean_stages(stages):
+    """
+    Serialize stage results for JSON export.
+
+    Parameters
+    ----------
+    stages : list of dict
+
+    Returns
+    -------
+    list of dict
+    """
+    out = []
+    for s in stages:
+        entry = {"name": s["name"]}
+        for key in ("increment", "cumulative", "base"):
+            if key in s:
+                entry[key] = s[key]
+        for key in ("eta_3D", "eta_2D", "eta_path", "eta_path_2D",
+                     "warning"):
+            if key in s:
+                entry[key] = s[key]
+        out.append(entry)
+    return out
+
+
+def export_envelope_results_json(results, filepath):
+    """
+    Export envelope verification results to JSON.
+
+    Parameters
+    ----------
+    results : list of dict
+        Output of :meth:`VerificationEngine.check_envelope` calls.
+    filepath : str
+    """
+    clean = []
+    for r in results:
+        entry = {
+            "name": r["name"],
+            "eta_max": r["eta_max"],
+            "governing_member": r["governing_member"],
+            "verified": bool(r["verified"]),
+            "members": r.get("members", []),
+        }
+        clean.append(entry)
+    with open(filepath, 'w') as f:
+        json.dump({"envelopes": clean}, f, indent=2)
+
+
+def export_verification_json(demand_results, combination_results,
+                             envelope_results, filepath):
+    """
+    Export the complete verification summary to a single JSON file.
+
+    Parameters
+    ----------
+    demand_results : list of dict
+    combination_results : list of dict
+    envelope_results : list of dict
+    filepath : str
+    """
+    data = {}
+    if demand_results:
+        data["demands"] = demand_results
+    if combination_results:
+        combs = []
+        for r in combination_results:
+            entry = {"name": r["name"], "type": r.get("type", "simple")}
+            res = r.get("resultant", {})
+            entry["resultant"] = {
+                "N_kN": res.get("N_kN", 0),
+                "Mx_kNm": res.get("Mx_kNm", 0),
+                "My_kNm": res.get("My_kNm", 0),
+            }
+            if "stages" in r:
+                entry["stages"] = _clean_stages(r["stages"])
+            for key in ("eta_3D", "eta_2D", "eta_governing",
+                        "inside", "verified"):
+                if key in r:
+                    entry[key] = r[key]
+            combs.append(entry)
+        data["combinations"] = combs
+    if envelope_results:
+        envs = []
+        for r in envelope_results:
+            envs.append({
+                "name": r["name"],
+                "eta_max": r["eta_max"],
+                "governing_member": r["governing_member"],
+                "verified": bool(r["verified"]),
+                "members": r.get("members", []),
+            })
+        data["envelopes"] = envs
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
 
 
 def export_fiber_results_csv(fiber_results, filepath):
@@ -231,3 +386,103 @@ def export_3d_surface_json(nm_3d, filepath):
     }
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
+
+
+# ==================================================================
+#  Moment-curvature data export
+# ==================================================================
+
+def export_moment_curvature_json(mc_data, filepath):
+    """
+    Export moment-curvature data to JSON.
+
+    The JSON contains the full curve arrays plus all key points
+    (cracking, yield, ultimate), sufficient to regenerate the plot
+    via ``gensec plot``.
+
+    Parameters
+    ----------
+    mc_data : dict
+        Output of :meth:`NMDiagram.generate_moment_curvature`.
+    filepath : str
+    """
+    data = {
+        "type": "moment_curvature",
+        "direction": mc_data.get("direction", "x"),
+        "N_fixed_kN": float(mc_data["N_fixed_kN"]),
+        "units": {"chi": "1/km", "M": "kN*m"},
+        "chi_km": [round(float(x), 6) for x in mc_data["chi_km"]],
+        "M_kNm": [round(float(x), 6) for x in mc_data["M_kNm"]],
+    }
+    for prefix in ("cracking", "yield", "ultimate"):
+        for suffix in ("_pos", "_neg"):
+            chi_key = f"{prefix}_chi{suffix}"
+            M_key = f"{prefix}_M{suffix}"
+            chi_val = mc_data.get(chi_key)
+            M_val = mc_data.get(M_key)
+            if chi_val is not None:
+                data[f"{chi_key}_km"] = round(chi_val * 1e6, 6)
+            if M_val is not None:
+                data[f"{M_key}_kNm"] = round(M_val / 1e6, 6)
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def export_moment_curvature_csv(mc_data, filepath):
+    """
+    Export moment-curvature curve to CSV.
+
+    Parameters
+    ----------
+    mc_data : dict
+    filepath : str
+    """
+    with open(filepath, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(["chi_km", "M_kNm"])
+        for c, m in zip(mc_data["chi_km"], mc_data["M_kNm"]):
+            w.writerow([f"{c:.6f}", f"{m:.6f}"])
+
+
+# ==================================================================
+#  Mx-My contour data export
+# ==================================================================
+
+def export_mx_my_json(mx_my_data, filepath):
+    """
+    Export Mx-My interaction contour to JSON.
+
+    Parameters
+    ----------
+    mx_my_data : dict
+        Output of :meth:`NMDiagram.generate_mx_my`.
+    filepath : str
+    """
+    data = {
+        "type": "mx_my_contour",
+        "N_fixed_kN": float(mx_my_data.get("N_fixed_kN", 0)),
+        "units": {"Mx": "kN*m", "My": "kN*m"},
+        "Mx_kNm": [round(float(x), 6)
+                    for x in mx_my_data["Mx_kNm"]],
+        "My_kNm": [round(float(x), 6)
+                    for x in mx_my_data["My_kNm"]],
+    }
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def export_mx_my_csv(mx_my_data, filepath):
+    """
+    Export Mx-My interaction contour to CSV.
+
+    Parameters
+    ----------
+    mx_my_data : dict
+    filepath : str
+    """
+    with open(filepath, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(["Mx_kNm", "My_kNm"])
+        for mx, my in zip(mx_my_data["Mx_kNm"],
+                          mx_my_data["My_kNm"]):
+            w.writerow([f"{mx:.6f}", f"{my:.6f}"])

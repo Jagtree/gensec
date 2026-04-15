@@ -1,0 +1,42 @@
+# GenSec — VCASLU validation case
+
+materials:
+  C25:
+    type: concrete_ec2
+    class: C25/30
+    ls: F
+    loadtype: slow
+    TypeConc: R
+
+  B450C:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+    works_in_compression: true
+
+section:
+  B: 300
+  H: 500
+  bulk_material: C25
+  n_fibers_y: 40
+  n_fibers_x: 20
+  rebars:
+    - {x: 30, y: 30,   As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+    - {x: 30, y: 250,  As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+    - {x: 30, y: 470,  As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+    - {x: 270, y: 30,  As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+    - {x: 270, y: 250, As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+    - {x: 270, y: 470, As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+
+demands:
+  - name: Test_1
+    N_kN: -10
+    Mx_kNm: -65
+    My_kNm: 30
+
+output:
+  eta_3D: true
+  eta_2D: true
+  generate_mx_my: true
+  generate_3d_surface: true
+  n_angles_mx_my: 144

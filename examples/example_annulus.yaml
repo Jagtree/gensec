@@ -1,5 +1,4 @@
-# GenSec input — annular (hollow circular) pile section
-# Best meshed with triangular method for accurate boundary
+# GenSec — annular (hollow circular) pile section
 
 materials:
   concrete_1:
@@ -18,38 +17,39 @@ materials:
 section:
   shape: annulus
   params:
-    D_ext: 1200      # outer diameter [mm]
-    D_int: 800       # inner diameter [mm]
-    resolution: 64   # polygon vertices on circumference
+    D_ext: 1200
+    D_int: 800
+    resolution: 64
   bulk_material: concrete_1
   mesh_size: 25
-  mesh_method: grid   # triangle recommended for curves
+  mesh_method: grid
   rebars:
-    # 12 bars equally spaced on a circle of radius 540 mm
-    # centre at (600, 600) = D_ext/2
-    - {y: 600,   x: 1140, As: 490.87, material: steel_1, diameter: 25}
-    - {y: 870,   x: 1067, As: 490.87, material: steel_1, diameter: 25}
-    - {y: 1067,  x: 870,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 1140,  x: 600,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 1067,  x: 330,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 870,   x: 133,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 600,   x: 60,   As: 490.87, material: steel_1, diameter: 25}
-    - {y: 330,   x: 133,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 133,   x: 330,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 60,    x: 600,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 133,   x: 870,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 330,   x: 1067, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 600,  x: 1140, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 870,  x: 1067, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 1067, x: 870,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 1140, x: 600,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 1067, x: 330,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 870,  x: 133,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 600,  x: 60,   As: 490.87, material: steel_1, diameter: 25}
+    - {y: 330,  x: 133,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 133,  x: 330,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 60,   x: 600,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 133,  x: 870,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 330,  x: 1067, As: 490.87, material: steel_1, diameter: 25}
 
 demands:
   - name: Gravity
     N_kN: -3000
     Mx_kNm: 800
+    My_kNm: 0
   - name: Seismic
     N_kN: -1500
     Mx_kNm: 1200
     My_kNm: 600
 
 output:
-  n_angles_mx_my: 144  
+  eta_3D: true
+  eta_2D: true
   generate_mx_my: true
   generate_3d_surface: true
+  n_angles_mx_my: 144

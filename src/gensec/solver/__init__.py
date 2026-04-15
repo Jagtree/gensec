@@ -26,6 +26,6 @@ verification module (:class:`DemandChecker`).
 
 from .integrator import FiberSolver
 from .capacity import NMDiagram
-from .check import DemandChecker
+from .check import DomainChecker, MxMyContour, VerificationEngine
 
-__all__ = ["FiberSolver", "NMDiagram", "DemandChecker"]
+__all__ = ["FiberSolver", "NMDiagram", "DomainChecker", "MxMyContour", "VerificationEngine"]

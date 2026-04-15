@@ -1,5 +1,6 @@
+# GenSec — biaxial column with envelope
+
 materials:
-  # EC2 class-based: just specify the class, everything else is computed
   C30:
     type: concrete_ec2
     class: C30/37
@@ -20,8 +21,8 @@ section:
   n_fibers_y: 40
   n_fibers_x: 20
   rebars:
-    - {y: 45, x: 45,  As: 314.16, material: B450C, n_bars: 1, diameter: 20}
-    - {y: 45, x: 355, As: 314.16, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 45, x: 45,   As: 314.16, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 45, x: 355,  As: 314.16, material: B450C, n_bars: 1, diameter: 20}
     - {y: 555, x: 45,  As: 314.16, material: B450C, n_bars: 1, diameter: 20}
     - {y: 555, x: 355, As: 314.16, material: B450C, n_bars: 1, diameter: 20}
     - {y: 45, x: 200,  As: 201.06, material: B450C, n_bars: 1, diameter: 16}
@@ -39,9 +40,9 @@ demands:
     Mx_kNm: 200
     My_kNm: 100
 
-combinations:
+envelopes:
   - name: Envelope_SLU
-    demands:
+    members:
       - {N_kN: -2500, Mx_kNm: 100, My_kNm: 50}
       - {N_kN: -2000, Mx_kNm: 200, My_kNm: 80}
       - {N_kN: -1500, Mx_kNm: 250, My_kNm: 120}
@@ -49,8 +50,9 @@ combinations:
       - {N_kN: -800,  Mx_kNm: 150, My_kNm: 100}
       - {N_kN: -1800, Mx_kNm: 180, My_kNm: 60}
 
-# Output options
 output:
-  generate_mx_my: true      # generate Mx-My diagrams (slower)
-  generate_3d_surface: true  # export 3D resistance surface CSV/JSON
-  n_angles_mx_my: 144  
+  eta_3D: true
+  eta_2D: true
+  generate_mx_my: true
+  generate_3d_surface: true
+  n_angles_mx_my: 144

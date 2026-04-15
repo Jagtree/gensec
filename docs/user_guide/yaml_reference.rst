@@ -34,6 +34,8 @@ Concrete — direct parameters
        n_parabola: 2.0       # parabolic exponent (default 2.0)
        eps_c2: -0.002        # peak-stress strain (default -0.002)
        eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+       fct: 0.0              # tensile strength [MPa] (default 0 = no tension)
+       Ec: 0.0               # elastic modulus [MPa] for tension (default 0)
 
 Only ``fck`` is required; all other fields have the defaults shown above.
 
@@ -42,6 +44,10 @@ The design compressive strength is computed internally as:
 .. math::
 
    f_{cd} = \alpha_{cc} \, \frac{f_{ck}}{\gamma_c}
+
+When both ``fct`` and ``Ec`` are positive, a linear tension branch is
+activated up to the cracking strain :math:`\varepsilon_{ct} = f_{ct}/E_c`.
+See :ref:`constitutive_laws` for the full piecewise definition.
 
 
 Concrete — from EC2 class
@@ -56,10 +62,28 @@ Concrete — from EC2 class
        ls: F                  # limit state: 'F' fundamental, 'A' accidental
        loadtype: slow         # 'slow' or 'fast' (default 'slow')
        TypeConc: R            # 'R' rapid, 'N' normal, 'S' slow hardening
+       enable_tension: false  # activate linear tension branch (default false)
+       tension_fct: fctd      # which fct: 'fctd', 'fctm', or 'fctk'
 
 All Table 3.1 parameters (:math:`f_{cm}`, :math:`f_{ctm}`, :math:`E_{cm}`,
 :math:`\varepsilon_{c2}`, :math:`\varepsilon_{cu2}`, :math:`n`, etc.) are
 computed automatically by the :mod:`~gensec.materials.ec2_properties` module.
+
+When ``enable_tension: true``, the elastic modulus :math:`E_{cm}` and the
+chosen tensile strength (:math:`f_{ctd}`, :math:`f_{ctm}`, or
+:math:`f_{ctk,0.05}`) are extracted from the EC2 property object and passed
+to the :class:`~gensec.materials.Concrete` constructor.  The ``tension_fct``
+field controls which value is used:
+
++---------------+-----------------------------------------------------------+
+| ``tension_fct``| Tensile strength used                                    |
++===============+===========================================================+
+| ``fctd``      | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c`|
++---------------+-----------------------------------------------------------+
+| ``fctm``      | :math:`f_{ctm}` (mean tensile strength)                   |
++---------------+-----------------------------------------------------------+
+| ``fctk``      | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)      |
++---------------+-----------------------------------------------------------+
 
 .. note::
 
