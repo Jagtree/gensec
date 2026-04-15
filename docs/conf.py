@@ -31,17 +31,7 @@ REPO_SRC = (CURRENT_DIR / ".." / "src").resolve()
 if str(REPO_SRC) not in sys.path:
     sys.path.insert(0, str(REPO_SRC))
 
-### Sphinx Debug
-import subprocess
-print("0.1:", subprocess.check_output(["git", "rev-parse", "doc/0.1"]).decode())
-print("0.2:", subprocess.check_output(["git", "rev-parse", "doc/0.2"]).decode())
-import os
-print("CURRENT FILES:", os.listdir("."))
-###
-
-def setup(app):
-    app.env = None
-nitpicky = True # for correct multiversion
+nitpicky = True
 
 # Use the package version if available
 try:
@@ -180,7 +170,7 @@ html_theme = "furo"
 
 from importlib.resources import files
 import gensec._docs_assets as _assets
-htmlstatic_path = [
+html_static_path = [
     "static",
     str(files(_assets) / "static"),
 ]  # path nel site-packages
@@ -215,7 +205,23 @@ smv_branch_whitelist = r'^(doc/\d+\.\d+)$'
 smv_tag_whitelist = r"$^"
 smv_remote_whitelist = None
 smv_prefer_remote_refs = False
-smv_latest_version = "latest"  # we'll show this as "latest" in the sidebar
+# Compute latest automatically: the doc/X.Y branch with the highest version number.
+# No need to update this when a new doc/X.Y branch is added.
+import re as _re
+try:
+    import subprocess as _sp
+    _raw = _sp.check_output(
+        ["git", "branch", "--list", "doc/*"],
+        text=True, stderr=_sp.DEVNULL,
+    ).splitlines()
+    _doc_branches = sorted(
+        (b.strip().lstrip("* ") for b in _raw
+         if _re.match(r"^doc/\d+\.\d+$", b.strip().lstrip("* "))),
+        key=lambda v: tuple(int(x) for x in v[4:].split(".")),
+    )
+    smv_latest_version = _doc_branches[-1] if _doc_branches else ""
+except Exception:
+    smv_latest_version = ""
 
 # For furo Template
 html_theme_options = {
