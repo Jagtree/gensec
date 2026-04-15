@@ -168,12 +168,18 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 #html_theme = 'sphinx_rtd_theme'
 html_theme = "furo"
 
-from importlib.resources import files
-import gensec._docs_assets as _assets
-html_static_path = [
-    "static",
-    str(files(_assets) / "static"),
-]  # path nel site-packages
+# _docs_assets may not be present in git-archive checkouts (sphinx-multiversion
+# extracts files via git archive, which only includes tracked files from that
+# specific branch). Fall back gracefully so conf.py always loads.
+try:
+    from importlib.resources import files as _ires_files
+    import gensec._docs_assets as _docs_assets_pkg
+    html_static_path = [
+        "static",
+        str(_ires_files(_docs_assets_pkg) / "static"),
+    ]
+except (ImportError, ModuleNotFoundError):
+    html_static_path = ["static"]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
