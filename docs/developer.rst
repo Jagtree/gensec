@@ -61,7 +61,7 @@ The suite contains **106 tests** organized in four files:
 +-------------------------------+----------------------------------------------+
 | File                          | Coverage                                     |
 +===============================+==============================================+
-| ``test_materials.py``         | Constitutive laws: pointwise stress          |
+| ``test_materials.py``         | Constitutive laws: pointwise stress           |
 |                               | evaluation, strain limits, edge cases.       |
 +-------------------------------+----------------------------------------------+
 | ``test_infrastructure.py``    | YAML loading, section construction, export   |
@@ -124,11 +124,21 @@ Adding a new material
 1. Create a new module in ``materials/`` that subclasses
    :class:`~gensec.materials.base.Material`.
 2. Implement ``stress(eps)``, ``stress_array(eps)``, ``eps_min``,
-   and ``eps_max``.
-3. Register the new ``type`` string in ``io_yaml.py`` so that YAML
+   and ``eps_max``.  The ``stress_array`` method must accept arrays
+   of **any shape** (1-D, 2-D, …).
+3. **Recommended**: implement ``tangent(eps)`` and ``tangent_array(eps)``
+   with the closed-form derivative of the constitutive law.  If omitted,
+   the base class provides a finite-difference fallback, but the
+   analytical form is faster and more accurate.
+4. **Optional**: if the constitutive law is computationally intensive,
+   consider adding a `Numba <https://numba.pydata.org>`_ JIT kernel
+   guarded by a ``try: import numba`` block.  See ``concrete.py`` for
+   the pattern.
+5. Register the new ``type`` string in ``io_yaml.py`` so that YAML
    files can reference it.
-4. Add pointwise tests in ``test_materials.py``.
-5. Update the API docs in ``docs/api/gensec.materials.rst``.
+6. Add pointwise tests in ``test_materials.py``, including tests for
+   ``tangent_array`` consistency with finite differences.
+7. Update the API docs in ``docs/api/gensec.materials.rst``.
 
 
 Adding a new parametric shape

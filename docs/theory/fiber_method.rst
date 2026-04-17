@@ -108,10 +108,59 @@ M_{x,\text{target}})` (uniaxial) or :math:`(N_{\text{target}},\,
 M_{x,\text{target}},\,M_{y,\text{target}})` (biaxial), find the strain
 plane parameters that produce the specified internal forces.
 
-GenSec solves the inverse problem with a **Newton–Raphson** iteration.
-The Jacobian is computed by finite differences.  A **backtracking line
-search** ensures global convergence even for strongly nonlinear
+GenSec solves the inverse problem with a **Newton–Raphson** iteration
+using the **analytical tangent stiffness matrix**.  A **backtracking
+line search** ensures global convergence even for strongly nonlinear
 constitutive laws (e.g. softening concrete at ultimate).
+
+
+Analytical tangent stiffness
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The 3×3 tangent stiffness matrix relates infinitesimal changes in the
+strain-plane parameters to changes in internal forces:
+
+.. math::
+
+   \mathbf{K} =
+   \frac{\partial (N,\,M_x,\,M_y)}
+        {\partial (\varepsilon_0,\,\chi_x,\,\chi_y)}
+   = \sum_i E_{t,i} \, A_i \;
+     \boldsymbol{\varphi}_i \, \boldsymbol{\varphi}_i^T
+
+where the shape-function vector for fiber :math:`i` is
+
+.. math::
+
+   \boldsymbol{\varphi}_i =
+   \bigl[1,\; (y_i - y_{\text{ref}}),\;
+         -(x_i - x_{\text{ref}})\bigr]^T
+
+and :math:`E_{t,i} = d\sigma_i / d\varepsilon_i` is the tangent
+modulus at the current strain, computed by the material's
+``tangent_array`` method.
+
+This analytical approach replaces the former finite-difference
+Jacobian (which required 3–4 extra ``integrate()`` calls per
+Newton iteration), halving the cost of each iteration.
+
+
+Batch integration
+~~~~~~~~~~~~~~~~~~
+
+The :meth:`~gensec.solver.FiberSolver.integrate_batch` method
+evaluates internal forces for many strain configurations at once.
+All inputs are 1-D arrays of length :math:`n`; the computation
+builds a 2-D strain matrix of shape :math:`(n, n_{\text{fibers}})`,
+passes it through the constitutive law in a single vectorized call,
+and sums forces and moments along the fiber axis.
+
+This is used by the capacity generators
+(:meth:`~gensec.solver.NMDiagram.generate`,
+:meth:`~gensec.solver.NMDiagram.generate_biaxial`,
+:meth:`~gensec.solver.NMDiagram.generate_mx_my`) to eliminate the
+Python-loop overhead of calling ``integrate()`` once per
+configuration.
 
 
 Multi-material bulk

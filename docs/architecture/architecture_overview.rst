@@ -12,6 +12,10 @@ No prior software engineering knowledge is required beyond a basic
 familiarity with the concept of *functions* and *objects* (containers
 that group data and operations together).
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 
 What GenSec does
 -----------------
@@ -53,7 +57,7 @@ well-defined responsibility:
            fiber["fiber.py<br/>RebarLayer"]
            primitives["primitives.py<br/>Shape factories"]
            geom["geometry.py<br/>GenericSection + mesher"]
-           section["section.py<br/>RectSection wrapper"]
+           section["section.py<br/>RectSection factory"]
        end
 
        subgraph solver["solver/"]
@@ -137,6 +141,8 @@ The key classes and their relationships:
            <<abstract>>
            +stress(eps) float
            +stress_array(eps) ndarray
+           +tangent(eps) float
+           +tangent_array(eps) ndarray
            +eps_min float
            +eps_max float
        }
@@ -146,6 +152,9 @@ The key classes and their relationships:
            +eps_c2: float
            +eps_cu2: float
            +n_parabola: float
+           +fct: float
+           +Ec: float
+           +tension_enabled: bool
        }
        class Steel {
            +fyk: float
@@ -177,19 +186,21 @@ The key classes and their relationships:
            +x_fibers: ndarray
            +y_fibers: ndarray
            +A_fibers: ndarray
-       }
-       class RectSection {
-           +B: float
-           +H: float
-           delegates to GenericSection
+           +n_grid_x: int or None
+           +n_grid_y: int or None
+           +dx: float
+           +dy: float
        }
 
        GenericSection o-- Material : bulk
        GenericSection o-- RebarLayer : rebars
-       RectSection --> GenericSection : wraps
+
+       note for GenericSection "RectSection() is a factory function\nthat returns a GenericSection\nwith a rectangular polygon."
 
        class FiberSolver {
            +integrate(eps0, chi_x, chi_y)
+           +integrate_batch(eps0[], chi_x[], chi_y[])
+           +integrate_with_tangent(eps0, chi_x, chi_y)
            +solve_equilibrium(N, Mx, My)
            +get_fiber_results(...)
        }

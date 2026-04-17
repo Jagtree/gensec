@@ -19,7 +19,6 @@ Point fibers (rebars)
 .. automodule:: gensec.geometry.fiber
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Generic section with polygon meshing
@@ -28,7 +27,6 @@ Generic section with polygon meshing
 .. automodule:: gensec.geometry.geometry
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Parametric section primitives
@@ -41,7 +39,6 @@ for common section shapes.  Each polygon can be passed directly to
 .. automodule:: gensec.geometry.primitives
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Rectangular section (legacy wrapper)
@@ -50,13 +47,11 @@ Rectangular section (legacy wrapper)
 .. automodule:: gensec.geometry.section
    :members:
    :show-inheritance:
-   :no-index: 
 
-..
-   Package-level exports
-   ----------------------
 
-   .. automodule:: gensec.geometry
-      :members:
-      :show-inheritance:
-      :no-index: 
+Package-level exports
+----------------------
+
+.. automodule:: gensec.geometry
+   :members:
+   :show-inheritance:

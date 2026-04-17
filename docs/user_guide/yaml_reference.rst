@@ -8,6 +8,10 @@ A GenSec YAML file has four top-level blocks: ``materials``, ``section``,
 ``demands`` (optional), and ``combinations`` (optional).  An ``output``
 block controls which post-processing artefacts are generated.
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 
 ``materials`` block
 -------------------
@@ -23,7 +27,7 @@ Concrete — direct parameters
 
    materials:
      concrete_1:
-       type: concrete
+       type: concrete_ec2_gen1_custom
        fck: 25.0             # characteristic cylinder strength [MPa]
        gamma_c: 1.5          # partial safety factor (default 1.5)
        alpha_cc: 0.85        # long-term coefficient (default 0.85)
@@ -34,6 +38,7 @@ Concrete — direct parameters
        Ec: 0.0               # elastic modulus [MPa] for tension (default 0)
 
 Only ``fck`` is required; all other fields have the defaults shown above.
+The legacy type name ``concrete`` is accepted as an alias.
 
 The design compressive strength is computed internally as:
 
@@ -53,13 +58,15 @@ Concrete — from EC2 class
 
    materials:
      concrete_1:
-       type: concrete_ec2
+       type: concrete_ec2_gen1
        class: C30/37          # EC2 class name (C12/15 … C90/105)
        ls: F                  # limit state: 'F' fundamental, 'A' accidental
        loadtype: slow         # 'slow' or 'fast' (default 'slow')
        TypeConc: R            # 'R' rapid, 'N' normal, 'S' slow hardening
        enable_tension: false  # activate linear tension branch (default false)
        tension_fct: fctd      # which fct: 'fctd', 'fctm', or 'fctk'
+
+The legacy type name ``concrete_ec2`` is accepted as an alias.
 
 All Table 3.1 parameters (:math:`f_{cm}`, :math:`f_{ctm}`, :math:`E_{cm}`,
 :math:`\varepsilon_{c2}`, :math:`\varepsilon_{cu2}`, :math:`n`, etc.) are
@@ -71,15 +78,15 @@ chosen tensile strength (:math:`f_{ctd}`, :math:`f_{ctm}`, or
 to the :class:`~gensec.materials.Concrete` constructor.  The ``tension_fct``
 field controls which value is used:
 
-+----------------+-----------------------------------------------------------+
-| ``tension_fct``| Tensile strength used                                     |
-+================+===========================================================+
-| ``fctd``       | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c` |
-+----------------+-----------------------------------------------------------+
-| ``fctm``       | :math:`f_{ctm}` (mean tensile strength)                   |
-+----------------+-----------------------------------------------------------+
-| ``fctk``       | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)       |
-+----------------+-----------------------------------------------------------+
++---------------+-----------------------------------------------------------+
+| ``tension_fct``| Tensile strength used                                    |
++===============+===========================================================+
+| ``fctd``      | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c`|
++---------------+-----------------------------------------------------------+
+| ``fctm``      | :math:`f_{ctm}` (mean tensile strength)                   |
++---------------+-----------------------------------------------------------+
+| ``fctk``      | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)      |
++---------------+-----------------------------------------------------------+
 
 .. note::
 
@@ -154,8 +161,8 @@ Legacy rectangular section
      B: 300                   # width [mm]
      H: 600                   # height [mm]
      bulk_material: concrete_1
-     n_fibers_y: 100          # fiber count along height
-     n_fibers_x: 1            # 1 = uniaxial, >1 = biaxial grid
+     n_fibers_y: 50            # fiber count along height
+     n_fibers_x: 20            # explicit x resolution (optional)
      rebars:
        - y: 40
          As: 942.5
@@ -167,6 +174,23 @@ Legacy rectangular section
          material: steel_1
 
 The origin is at the **bottom-left corner** of the bounding box.
+
+Grid resolution is controlled by ``n_fibers_y``, which sets the mesh
+size :math:`s = H / n_y`.  When ``n_fibers_x`` is omitted or set to
+``1``, an **isotropic grid** is used: the x-resolution is derived from
+the same mesh size, giving approximately square cells.  For example,
+``B=300, H=600, n_fibers_y=50`` produces ``mesh_size=12`` and
+``n_fibers_x=25``, for a total of 1250 fibers.
+
+Set ``n_fibers_x`` explicitly to override the x-resolution (e.g.,
+``n_fibers_x: 30`` for a 30×50 grid).
+
+.. note::
+
+   ``RectSection`` is internally a convenience wrapper around
+   :class:`~gensec.geometry.GenericSection` with a rectangular
+   polygon.  All attributes (``n_fibers_x``, ``dx``, ``polygon``,
+   etc.) are available directly on the returned object.
 
 
 Generic section — parametric shapes
@@ -260,7 +284,14 @@ Each rebar entry supports:
 +=====================+=========+==========================================+
 | ``y``               | —       | Vertical coordinate [mm] (required)      |
 +---------------------+---------+------------------------------------------+
-| ``As``              | —       | Cross-sectional area [mm²] (required)    |
+| ``As``              | —       | Cross-sectional area [mm²].  If omitted, |
+|                     |         | computed from ``diameter`` and            |
+|                     |         | ``n_bars``.  If both ``As`` and           |
+|                     |         | ``diameter`` are given, ``As`` prevails.  |
++---------------------+---------+------------------------------------------+
+| ``diameter``        | —       | Bar diameter [mm].  When ``As`` is        |
+|                     |         | omitted, used to compute                  |
+|                     |         | :math:`A_s = n_b \cdot \pi d^2/4`.      |
 +---------------------+---------+------------------------------------------+
 | ``material``        | —       | Material identifier (required)           |
 +---------------------+---------+------------------------------------------+
@@ -269,10 +300,13 @@ Each rebar entry supports:
 | ``embedded``        | ``true``| Subtract displaced bulk? See             |
 |                     |         | :doc:`sign_conventions`.                 |
 +---------------------+---------+------------------------------------------+
-| ``n_bars``          | —       | Number of physical bars (reporting only) |
+| ``n_bars``          | ``1``   | Number of physical bars.  Used for       |
+|                     |         | automatic ``As`` computation and         |
+|                     |         | reporting.                               |
 +---------------------+---------+------------------------------------------+
-| ``diameter``        | —       | Bar diameter [mm] (reporting only)       |
-+---------------------+---------+------------------------------------------+
+
+Either ``As`` or ``diameter`` must be provided.  If only ``diameter``
+is given, ``n_bars`` defaults to 1.
 
 
 ``demands`` block
@@ -322,13 +356,49 @@ GenSec reports the utilization ratio :math:`\eta` for every triple, plus
 ``output`` block
 ----------------
 
-Controls optional post-processing.
+Controls optional post-processing.  All fields are optional and
+default to the values shown below.
 
 .. code-block:: yaml
 
    output:
-     generate_mx_my: true         # produce Mx-My contour diagram
-     generate_3d_surface: true    # produce 3-D resistance surface
-     n_angles_mx_my: 144          # angular resolution for Mx-My contour
+     # ── Utilization ratio flags ──
+     eta_3D: true               # 3D ray on N-Mx-My hull (default: true)
+     eta_2D: false              # 2D ray on Mx-My contour at fixed N (default: false)
+     eta_path: true             # 3D ray for staged combinations (default: true)
+     eta_path_2D: false         # 2D ray for staged combinations (default: false)
+     delta_N_tol: 0.03          # ΔN tolerance for eta_path_2D (default: 0.03)
 
-All fields are optional and default to ``false`` / sensible values.
+     # ── Domain generation ──
+     generate_mx_my: false      # produce Mx-My contour diagrams (default: false)
+     generate_3d_surface: false # produce 3-D resistance surface (default: false)
+     n_angles_mx_my: 144        # angular resolution for Mx-My (default: 144)
+
+     # ── Moment-curvature and ductility ──
+     generate_moment_curvature: true      # M-χ diagrams per N level (default: true)
+     generate_polar_ductility: true       # polar ductility plot (default: true)
+     generate_3d_moment_curvature: true   # 3D M-χ-N surface (default: true)
+
+     # ── N-level strategy ──
+     n_levels_mode: demands     # "demands", "auto", or "explicit" (default: "demands")
+     # n_levels_count: 10       # for "auto" mode
+     # n_levels_values: [-3000, -1500, 0]  # for "explicit" mode [kN]
+
+The ``generate_moment_curvature``, ``generate_polar_ductility``, and
+``generate_3d_moment_curvature`` flags control whether the
+computationally expensive moment-curvature diagrams and related outputs
+are produced.  Setting all three to ``false`` significantly reduces
+run time for cases where only the resistance domain and demand
+verification are needed.
+
+.. note::
+
+   When ``eta_2D`` is enabled, GenSec generates an Mx-My contour (via
+   :meth:`~gensec.solver.NMDiagram.generate_mx_my`) for each unique N
+   level encountered in demands, combinations, and envelopes.  This can
+   be expensive for many distinct N values.  Contours are cached so that
+   the same N level is never computed twice.
+
+   For sections where the 3-D domain is 2-D (no My data),
+   ``eta_2D`` and ``eta_path_2D`` are automatically disabled with an
+   informative message.

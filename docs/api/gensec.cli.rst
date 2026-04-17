@@ -22,4 +22,3 @@ all outputs (plots, CSV, JSON) to the specified directory.
 .. automodule:: gensec.cli
    :members:
    :show-inheritance:
-   :no-index: 

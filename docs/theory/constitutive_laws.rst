@@ -16,9 +16,29 @@ Every material must implement:
 
 - ``stress(eps)`` — evaluate :math:`\sigma(\varepsilon)` for a scalar
   strain.
-- ``stress_array(eps)`` — vectorized evaluation over a NumPy array.
+- ``stress_array(eps)`` — vectorized evaluation over a NumPy array
+  of **arbitrary shape** (1-D, 2-D, …).
+- ``tangent(eps)`` — scalar tangent modulus
+  :math:`E_t = d\sigma/d\varepsilon`.
+- ``tangent_array(eps)`` — vectorized tangent modulus over an array of
+  arbitrary shape.
 - ``eps_min`` / ``eps_max`` — admissible strain range, consumed by the
   N-M diagram generator to determine scan bounds.
+
+The tangent modulus methods are used by the analytical Jacobian in the
+Newton-Raphson solver (see :ref:`architecture_solver`).  The base class
+provides a finite-difference fallback for both ``tangent`` and
+``tangent_array``, so existing custom materials continue to work
+without modification.
+
+Optional Numba acceleration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When `numba <https://numba.pydata.org>`_ is installed
+(``pip install gensec[fast]``), the built-in ``Concrete`` and ``Steel``
+classes automatically use JIT-compiled kernels for ``stress_array`` and
+``tangent_array``.  If Numba is not available, pure-NumPy fallbacks are
+used transparently.
 
 
 Concrete — parabola-rectangle (EC2 3.1.7)
@@ -112,6 +132,32 @@ With the tension branch active, the admissible strain range becomes
 remains :math:`[\varepsilon_{cu2},\, 0]`.
 
 
+Tangent modulus (concrete)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The analytical tangent modulus :math:`E_t = d\sigma_c / d\varepsilon`
+is:
+
+.. math::
+
+   E_t(\varepsilon) =
+   \begin{cases}
+       E_c
+           & 0 < \varepsilon \le \varepsilon_{ct}
+             \;\text{(tension enabled)}
+           \\[4pt]
+       -\dfrac{f_{cd}\,n}{\varepsilon_{c2}}
+           \left(1 - \dfrac{\varepsilon}{\varepsilon_{c2}}\right)^{n-1}
+           & \varepsilon_{c2} < \varepsilon \le 0
+           \\[4pt]
+       0
+           & \text{otherwise (plateau, beyond ultimate, post-cracking)}
+   \end{cases}
+
+This is used by the analytical Jacobian in the Newton-Raphson solver
+to avoid finite-difference perturbations.
+
+
 Reinforcing steel — elastic-plastic with hardening
 ----------------------------------------------------
 
@@ -143,6 +189,25 @@ where:
 The law is **symmetric in tension and compression** by default.  Set
 ``works_in_compression = False`` to suppress compressive stress
 (useful for modelling FRP or tendons that buckle in compression).
+
+
+Tangent modulus (steel)
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. math::
+
+   E_t(\varepsilon) =
+   \begin{cases}
+       E_s
+           & |\varepsilon| \le \varepsilon_{yd}
+           \\[4pt]
+       \dfrac{f_{td} - f_{yd}}
+             {\varepsilon_{su} - \varepsilon_{yd}}
+           & \varepsilon_{yd} < |\varepsilon| \le \varepsilon_{su}
+           \\[4pt]
+       0
+           & |\varepsilon| > \varepsilon_{su}
+   \end{cases}
 
 
 Structural steel (EN 10025-2)

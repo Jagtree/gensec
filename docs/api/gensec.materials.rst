@@ -19,7 +19,6 @@ Abstract base
 .. automodule:: gensec.materials.base
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Concrete — parabola-rectangle
@@ -28,7 +27,6 @@ Concrete — parabola-rectangle
 .. automodule:: gensec.materials.concrete
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Reinforcing steel — elastic-plastic
@@ -37,7 +35,6 @@ Reinforcing steel — elastic-plastic
 .. automodule:: gensec.materials.steel
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Tabulated material
@@ -46,7 +43,6 @@ Tabulated material
 .. automodule:: gensec.materials.tabulated
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 EC2 property tables
@@ -59,7 +55,6 @@ National Annex.
 .. automodule:: gensec.materials.ec2_properties
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 EN 10025-2 structural steel
@@ -71,7 +66,6 @@ steels (S235, S275, S355).
 .. automodule:: gensec.materials.en10025_properties
    :members:
    :show-inheritance:
-   :no-index: 
 
 
 Bridge / factory functions
@@ -84,13 +78,11 @@ constitutive parameters automatically.
 .. automodule:: gensec.materials.ec2_bridge
    :members:
    :show-inheritance:
-   :no-index: 
 
-..
-   Package-level exports
-   ----------------------
 
-   .. automodule:: gensec.materials
-      :members:
-      :show-inheritance:
-      :no-index: 
+Package-level exports
+----------------------
+
+.. automodule:: gensec.materials
+   :members:
+   :show-inheritance:

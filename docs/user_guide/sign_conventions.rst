@@ -37,12 +37,12 @@ Force and moment signs
 +----------------------------+----------------------------+----------------------------+
 | Quantity                   | Positive                   | Negative                   |
 +============================+============================+============================+
-| :math:`N` (axial force)     | Tension                    | Compression                |
+| :math:`N` (axial force)   | Tension                    | Compression                |
 +----------------------------+----------------------------+----------------------------+
-| :math:`M_x` (moment         | Bottom edge in compression | Top edge in compression    |
+| :math:`M_x` (moment       | Bottom edge in compression | Top edge in compression    |
 | about :math:`x`)           |                            |                            |
 +----------------------------+----------------------------+----------------------------+
-| :math:`M_y` (moment         | Left edge in compression   | Right edge in compression  |
+| :math:`M_y` (moment       | Left edge in compression   | Right edge in compression  |
 | about :math:`y`)           |                            |                            |
 +----------------------------+----------------------------+----------------------------+
 
