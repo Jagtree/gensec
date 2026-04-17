@@ -25,6 +25,15 @@ scanning ultimate strain configurations across all curvature
 directions.
 
 For uniaxial analysis (chi_y=0), produces the classic N-M diagram.
+
+Performance notes
+-----------------
+All capacity generators use :meth:`FiberSolver.integrate_batch` to
+evaluate hundreds or thousands of strain configurations in a single
+vectorized NumPy call, eliminating Python-loop overhead.  The
+moment-curvature scanner uses
+:meth:`FiberSolver.integrate_with_tangent` for the inner Newton
+iteration, halving the cost compared to a finite-difference Jacobian.
 """
 
 import numpy as np
@@ -81,9 +90,13 @@ class NMDiagram:
             emax_g = max(emax_g, r.material.eps_max)
         return emin_g, emax_g, b.eps_min, b.eps_max
 
+    # ==================================================================
+    #  Configuration builders (return arrays, not lists of tuples)
+    # ==================================================================
+
     def _ultimate_strain_configs_1d(self, direction='x', n_points=200):
         r"""
-        Generate ``(eps_inf, eps_sup)`` pairs for single-axis bending.
+        Generate arrays of ``(eps0, chi)`` for single-axis bending.
 
         For ``direction='x'`` (bending about x-axis, curvature
         :math:`\chi_x`), the section depth is ``H`` and the reference
@@ -100,8 +113,9 @@ class NMDiagram:
 
         Returns
         -------
-        list of (eps0, chi)
-            Strain configurations as ``(eps0, curvature)`` pairs.
+        eps0_arr : numpy.ndarray
+        chi_arr : numpy.ndarray
+            Curvature arrays ready for :meth:`integrate_batch`.
         """
         emg, exg, emb, _ = self._collect_strain_limits()
         sec = self.solver.sec
@@ -113,41 +127,47 @@ class NMDiagram:
             depth = sec.B
             ref = self.solver.x_ref
 
-        configs = []
+        eps0_list = []
+        chi_list = []
 
-        def _to_eps0_chi(ei, es):
-            """Convert edge strains to (eps0, chi)."""
+        def _append(ei, es):
+            """Convert edge strains to (eps0, chi) and append."""
             chi = (es - ei) / depth if depth > 0 else 0.0
             eps0 = ei + chi * ref
-            return eps0, chi
+            eps0_list.append(eps0)
+            chi_list.append(chi)
 
         # Positive curvature: "top" (max coord) compressed
         for ei in np.linspace(exg, emg, n_points):
-            configs.append(_to_eps0_chi(ei, emb))
+            _append(ei, emb)
         for es in np.linspace(emb, emb * 0.5, n_points // 2):
-            configs.append(_to_eps0_chi(emb, es))
+            _append(emb, es)
 
         # Negative curvature: "bottom" (min coord) compressed
         for es in np.linspace(exg, emg, n_points):
-            configs.append(_to_eps0_chi(emb, es))
+            _append(emb, es)
         for ei in np.linspace(emb, emb * 0.5, n_points // 2):
-            configs.append(_to_eps0_chi(ei, emb))
+            _append(ei, emb)
 
         # Pure tension
         for ev in np.linspace(0, exg, n_points // 4):
-            configs.append(_to_eps0_chi(ev, 0.0))
-            configs.append(_to_eps0_chi(0.0, ev))
-            configs.append(_to_eps0_chi(exg, ev))
-            configs.append(_to_eps0_chi(ev, exg))
+            _append(ev, 0.0)
+            _append(0.0, ev)
+            _append(exg, ev)
+            _append(ev, exg)
 
         # Near-uniform compression
         for ev in np.linspace(emb * 0.5, emb, n_points // 4):
-            configs.append(_to_eps0_chi(ev, ev))
+            _append(ev, ev)
             span = abs(emb) * 0.15
             for d in np.linspace(-span, span, 5):
-                configs.append(_to_eps0_chi(ev + d, ev - d))
+                _append(ev + d, ev - d)
 
-        return configs
+        return np.array(eps0_list), np.array(chi_list)
+
+    # ==================================================================
+    #  Uniaxial N-M diagram (batch)
+    # ==================================================================
 
     def generate(self, n_points=300, direction='x'):
         r"""
@@ -156,6 +176,9 @@ class NMDiagram:
 
         For ``direction='x'``: N-Mx diagram (:math:`\chi_y = 0`).
         For ``direction='y'``: N-My diagram (:math:`\chi_x = 0`).
+
+        All strain configurations are evaluated in a **single batch
+        call**, avoiding per-configuration Python-loop overhead.
 
         Parameters
         ----------
@@ -170,18 +193,19 @@ class NMDiagram:
             ``N``, ``M`` [N, N*mm], ``N_kN``, ``M_kNm``.
             Also ``Mx`` or ``My`` alias depending on direction.
         """
-        configs = self._ultimate_strain_configs_1d(direction, n_points)
-        Nl, Ml = [], []
-        for eps0, chi in configs:
-            if direction == 'x':
-                N, Mx, My = self.solver.integrate(eps0, chi, 0.0)
-                Nl.append(N)
-                Ml.append(Mx)
-            else:
-                N, Mx, My = self.solver.integrate(eps0, 0.0, chi)
-                Nl.append(N)
-                Ml.append(My)
-        Na, Ma = np.array(Nl), np.array(Ml)
+        eps0_arr, chi_arr = self._ultimate_strain_configs_1d(
+            direction, n_points)
+        n = len(eps0_arr)
+
+        if direction == 'x':
+            Na, Mxa, Mya = self.solver.integrate_batch(
+                eps0_arr, chi_arr, np.zeros(n))
+            Ma = Mxa
+        else:
+            Na, Mxa, Mya = self.solver.integrate_batch(
+                eps0_arr, np.zeros(n), chi_arr)
+            Ma = Mya
+
         M_key = "Mx" if direction == 'x' else "My"
         return {
             "N": Na, "M": Ma, M_key: Ma,
@@ -189,6 +213,222 @@ class NMDiagram:
             f"{M_key}_kNm": Ma / 1e6,
             "direction": direction,
         }
+
+    # ==================================================================
+    #  Shared helpers for biaxial generators
+    # ==================================================================
+
+    def _build_edge_template(self, n_points):
+        r"""
+        Pre-build the edge-strain template shared by all curvature
+        directions.
+
+        The pattern of ``(eps_bot, eps_top)`` pairs is identical for
+        every angle — only the projection parameters differ.
+        Building it once eliminates per-angle Python loops.
+
+        Parameters
+        ----------
+        n_points : int
+            Base resolution per branch.
+
+        Returns
+        -------
+        ebot : numpy.ndarray
+        etop : numpy.ndarray
+        """
+        emg, exg, emb, _ = self._collect_strain_limits()
+        n = n_points
+
+        ebot_parts = []
+        etop_parts = []
+
+        # Branch 1: top at bulk crush
+        b1 = np.linspace(exg, emg, n)
+        ebot_parts.append(b1)
+        etop_parts.append(np.full(n, emb))
+
+        # Branch 2: bottom at bulk crush
+        b2 = np.linspace(exg, emg, n)
+        ebot_parts.append(np.full(n, emb))
+        etop_parts.append(b2)
+
+        # Branch 3: near-uniform compression
+        n3 = n // 4
+        ev3 = np.linspace(emb * 0.5, emb, n3)
+        sp = abs(emb) * 0.15
+        d3 = np.linspace(-sp, sp, 3)
+        for ev in ev3:
+            ebot_parts.append(np.array([ev]))
+            etop_parts.append(np.array([ev]))
+            ebot_parts.append(ev + d3)
+            etop_parts.append(ev - d3)
+
+        # Branch 4: pure tension
+        n4 = n // 2
+        ev4 = np.linspace(0, exg, n4)
+        # Uniform tension
+        ebot_parts.append(ev4)
+        etop_parts.append(ev4.copy())
+        # Gradient variants
+        ebot_parts.append(ev4)
+        etop_parts.append(np.zeros(n4))
+        ebot_parts.append(np.zeros(n4))
+        etop_parts.append(ev4)
+        ebot_parts.append(ev4)
+        etop_parts.append(ev4 * 0.5)
+        ebot_parts.append(ev4 * 0.5)
+        etop_parts.append(ev4)
+
+        return np.concatenate(ebot_parts), np.concatenate(etop_parts)
+
+    def _build_edge_template_mx_my(self, n_points):
+        r"""
+        Edge-strain template for :meth:`generate_mx_my`.
+
+        Slightly smaller than the biaxial template (fewer tension
+        branches) since the contour interpolation only needs enough
+        crossings at each N level.
+
+        Parameters
+        ----------
+        n_points : int
+
+        Returns
+        -------
+        ebot : numpy.ndarray
+        etop : numpy.ndarray
+        """
+        emg, exg, emb, _ = self._collect_strain_limits()
+        n = n_points
+
+        ebot_parts = []
+        etop_parts = []
+
+        # Branch 1 + 2
+        b1 = np.linspace(exg, emg, n)
+        ebot_parts.append(b1)
+        etop_parts.append(np.full(n, emb))
+        ebot_parts.append(np.full(n, emb))
+        etop_parts.append(b1.copy())
+
+        # Branch 3: near-uniform compression
+        n3 = n // 4
+        ev3 = np.linspace(emb * 0.5, emb, n3)
+        sp = abs(emb) * 0.15
+        d3 = np.linspace(-sp, sp, 3)
+        for ev in ev3:
+            ebot_parts.append(np.array([ev]))
+            etop_parts.append(np.array([ev]))
+            ebot_parts.append(ev + d3)
+            etop_parts.append(ev - d3)
+
+        # Branch 4: tension (lighter)
+        n4 = n // 4
+        ev4 = np.linspace(0, exg, n4)
+        ebot_parts.append(ev4)
+        etop_parts.append(np.zeros(n4))
+        ebot_parts.append(np.zeros(n4))
+        etop_parts.append(ev4)
+
+        return np.concatenate(ebot_parts), np.concatenate(etop_parts)
+
+    def _compute_angle_params(self, thetas, all_lx, all_ly):
+        r"""
+        Compute projection parameters for each curvature direction.
+
+        Parameters
+        ----------
+        thetas : numpy.ndarray
+            Curvature direction angles [rad].
+        all_lx, all_ly : numpy.ndarray
+            Lever arms of all fibers + rebars.
+
+        Returns
+        -------
+        list of tuple
+            ``(cos_t, sin_t, p_min, span)`` for each valid angle.
+            Degenerate angles (zero span) are skipped.
+        """
+        params = []
+        for theta in thetas:
+            cos_t, sin_t = np.cos(theta), np.sin(theta)
+            proj = all_ly * cos_t - all_lx * sin_t
+            p_max = proj.max()
+            p_min = proj.min()
+            span = p_max - p_min
+            if span < 1e-10:
+                continue
+            params.append((cos_t, sin_t, p_min, span))
+        return params
+
+    def _mega_batch_integrate(self, ebot_tmpl, etop_tmpl, angle_params):
+        r"""
+        Build configs for all angles and integrate in chunked
+        mega-batches.
+
+        Instead of calling :meth:`integrate_batch` once per angle
+        (high per-call overhead), this method concatenates configs
+        across multiple angles and processes them in large chunks.
+
+        Parameters
+        ----------
+        ebot_tmpl, etop_tmpl : numpy.ndarray
+            Edge-strain template arrays (identical for every angle).
+        angle_params : list of tuple
+            ``(cos_t, sin_t, p_min, span)`` per angle.
+
+        Returns
+        -------
+        list of tuple
+            ``(N_array, Mx_array, My_array)`` per angle, in the
+            same order as *angle_params*.
+        """
+        n_per = len(ebot_tmpl)
+        n_angles = len(angle_params)
+        total = n_per * n_angles
+
+        # Pre-allocate flat config arrays
+        all_eps0 = np.empty(total)
+        all_chi_x = np.empty(total)
+        all_chi_y = np.empty(total)
+
+        for i, (cos_t, sin_t, p_min, span) in enumerate(angle_params):
+            s = i * n_per
+            e = s + n_per
+            chi = (etop_tmpl - ebot_tmpl) / span
+            all_eps0[s:e] = ebot_tmpl - chi * p_min
+            all_chi_x[s:e] = chi * cos_t
+            all_chi_y[s:e] = chi * sin_t
+
+        # Chunked integration to limit memory usage.
+        # Target: ~400 MB peak per chunk (strain + stress + forces).
+        n_fibers = self.solver.sec.n_fibers
+        max_configs = max(2000, 50_000_000 // max(n_fibers, 1))
+
+        all_N = np.empty(total)
+        all_Mx = np.empty(total)
+        all_My = np.empty(total)
+
+        for cs in range(0, total, max_configs):
+            ce = min(cs + max_configs, total)
+            N_c, Mx_c, My_c = self.solver.integrate_batch(
+                all_eps0[cs:ce], all_chi_x[cs:ce], all_chi_y[cs:ce])
+            all_N[cs:ce] = N_c
+            all_Mx[cs:ce] = Mx_c
+            all_My[cs:ce] = My_c
+
+        # Split by angle
+        results = []
+        for i in range(n_angles):
+            s = i * n_per
+            e = s + n_per
+            results.append((all_N[s:e], all_Mx[s:e], all_My[s:e]))
+        return results
+
+    # ==================================================================
+    #  Biaxial 3-D surface (mega-batch)
+    # ==================================================================
 
     def generate_biaxial(self, n_angles=72, n_points_per_angle=200):
         r"""
@@ -198,10 +438,14 @@ class NMDiagram:
         :math:`[0, 2\pi)` and, for each direction, scans curvature
         magnitudes through ultimate strain configurations.
 
+        All directions are integrated in **chunked mega-batches**,
+        reducing Python-loop overhead by an order of magnitude
+        compared to per-angle batching.
+
         Parameters
         ----------
         n_angles : int, optional
-            Number of curvature direction angles. Default 36 (every 10°).
+            Number of curvature direction angles. Default 72 (every 5°).
         n_points_per_angle : int, optional
             Strain configurations per angle. Default 200.
 
@@ -212,100 +456,26 @@ class NMDiagram:
             variants.
         """
         sec = self.solver.sec
-        emg, exg, emb, _ = self._collect_strain_limits()
-
-        # All bulk fiber positions relative to reference
         lx = sec.x_fibers - self.solver.x_ref
         ly = sec.y_fibers - self.solver.y_ref
-
-        # Also rebar positions
         lx_r = sec.x_rebars - self.solver.x_ref
         ly_r = sec.y_rebars - self.solver.y_ref
-
-        # All lever arms combined
         all_lx = np.concatenate([lx, lx_r])
         all_ly = np.concatenate([ly, ly_r])
 
         thetas = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
+        ebot, etop = self._build_edge_template(n_points_per_angle)
+        angle_params = self._compute_angle_params(thetas, all_lx, all_ly)
 
-        Nl, Mxl, Myl = [], [], []
+        per_angle = self._mega_batch_integrate(ebot, etop, angle_params)
 
-        for theta in thetas:
-            cos_t, sin_t = np.cos(theta), np.sin(theta)
+        Nl = [r[0] for r in per_angle]
+        Mxl = [r[1] for r in per_angle]
+        Myl = [r[2] for r in per_angle]
 
-            # Project all fiber positions onto curvature direction.
-            # Strain field: eps = eps0 + chi_x*ly - chi_y*lx
-            # With chi_x = chi*cos(t), chi_y = chi*sin(t):
-            # eps = eps0 + chi*(ly*cos_t - lx*sin_t)
-            proj = all_ly * cos_t - all_lx * sin_t
-
-            # Extreme projections
-            p_max = proj.max()
-            p_min = proj.min()
-
-            if abs(p_max - p_min) < 1e-10:
-                continue
-
-            # Scan strain configurations: similar to uniaxial but
-            # along the projected direction.
-            # The "top" extreme (max projection) gets eps_top,
-            # the "bottom" extreme (min projection) gets eps_bot.
-            # eps0 + chi * p_max = eps_top
-            # eps0 + chi * p_min = eps_bot
-            # => chi = (eps_top - eps_bot) / (p_max - p_min)
-            # => eps0 = eps_bot - chi * p_min
-
-            span = p_max - p_min
-
-            def _scan(eps_bot, eps_top):
-                chi = (eps_top - eps_bot) / span
-                eps0 = eps_bot - chi * p_min
-                chi_x = chi * cos_t
-                chi_y = chi * sin_t
-                return self.solver.integrate(eps0, chi_x, chi_y)
-
-            n = n_points_per_angle
-
-            # Branch 1: "top" at bulk crush limit
-            for eb in np.linspace(exg, emg, n):
-                N, Mx, My = _scan(eb, emb)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-
-            # Branch 2: "bottom" at bulk crush limit
-            for et in np.linspace(exg, emg, n):
-                N, Mx, My = _scan(emb, et)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-
-            # Branch 3: near-uniform compression
-            for ev in np.linspace(emb * 0.5, emb, n // 4):
-                N, Mx, My = _scan(ev, ev)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-                sp = abs(emb) * 0.15
-                for d in np.linspace(-sp, sp, 3):
-                    N, Mx, My = _scan(ev + d, ev - d)
-                    Nl.append(N); Mxl.append(Mx); Myl.append(My)
-
-            # Branch 4: pure tension — denser scan for smooth hull cap.
-            # Uniform tension at various levels.
-            n_tens = n // 2
-            for ev in np.linspace(0, exg, n_tens):
-                N, Mx, My = _scan(ev, ev)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-            # Non-uniform tension with gradient.
-            for ev in np.linspace(0, exg, n_tens):
-                N, Mx, My = _scan(ev, 0.0)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-                N, Mx, My = _scan(0.0, ev)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-                # Intermediate gradient.
-                N, Mx, My = _scan(ev, ev * 0.5)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-                N, Mx, My = _scan(ev * 0.5, ev)
-                Nl.append(N); Mxl.append(Mx); Myl.append(My)
-
-        Na = np.array(Nl)
-        Mxa = np.array(Mxl)
-        Mya = np.array(Myl)
+        Na = np.concatenate(Nl)
+        Mxa = np.concatenate(Mxl)
+        Mya = np.concatenate(Myl)
 
         return {
             "N": Na, "Mx": Mxa, "My": Mya,
@@ -313,6 +483,10 @@ class NMDiagram:
             "Mx_kNm": Mxa / 1e6,
             "My_kNm": Mya / 1e6,
         }
+
+    # ==================================================================
+    #  Mx-My contour at fixed N (mega-batch)
+    # ==================================================================
 
     def generate_mx_my(self, N_fixed, n_angles=72,
                        n_points_per_angle=200):
@@ -324,6 +498,9 @@ class NMDiagram:
         through strain configurations, collects all (N, Mx, My)
         points, and **interpolates** at :math:`N = N_{\text{fixed}}`
         to find the moment point on the contour.
+
+        All directions are integrated in **chunked mega-batches**
+        for maximum throughput.
 
         Parameters
         ----------
@@ -341,8 +518,6 @@ class NMDiagram:
             ``N_fixed_kN``.
         """
         sec = self.solver.sec
-        emg, exg, emb, _ = self._collect_strain_limits()
-
         lx = sec.x_fibers - self.solver.x_ref
         ly = sec.y_fibers - self.solver.y_ref
         lx_r = sec.x_rebars - self.solver.x_ref
@@ -351,61 +526,25 @@ class NMDiagram:
         all_ly = np.concatenate([ly, ly_r])
 
         thetas = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
+        ebot, etop = self._build_edge_template_mx_my(
+            n_points_per_angle)
+        angle_params = self._compute_angle_params(
+            thetas, all_lx, all_ly)
+
+        per_angle = self._mega_batch_integrate(
+            ebot, etop, angle_params)
+
+        # Post-process: find N-crossings per angle
         Mxl, Myl = [], []
-
-        for theta in thetas:
-            cos_t, sin_t = np.cos(theta), np.sin(theta)
-            proj = all_ly * cos_t - all_lx * sin_t
-            p_max = proj.max()
-            p_min = proj.min()
-            if abs(p_max - p_min) < 1e-10:
-                continue
-            span = p_max - p_min
-
-            # Collect all (N, Mx, My) along this curvature direction
-            points_N = []
-            points_Mx = []
-            points_My = []
-
-            def _collect(eps_bot, eps_top):
-                chi = (eps_top - eps_bot) / span
-                eps0 = eps_bot - chi * p_min
-                chi_x = chi * cos_t
-                chi_y = chi * sin_t
-                N, Mx, My = self.solver.integrate(eps0, chi_x, chi_y)
-                points_N.append(N)
-                points_Mx.append(Mx)
-                points_My.append(My)
-
-            n = n_points_per_angle
-            for eb in np.linspace(exg, emg, n):
-                _collect(eb, emb)
-            for et in np.linspace(exg, emg, n):
-                _collect(emb, et)
-            for ev in np.linspace(emb * 0.5, emb, n // 4):
-                _collect(ev, ev)
-                sp = abs(emb) * 0.15
-                for d in np.linspace(-sp, sp, 3):
-                    _collect(ev + d, ev - d)
-            for ev in np.linspace(0, exg, n // 4):
-                _collect(ev, 0.0)
-                _collect(0.0, ev)
-
-            pN = np.array(points_N)
-            pMx = np.array(points_Mx)
-            pMy = np.array(points_My)
-
-            # Find crossings where N passes through N_fixed,
-            # and among those pick the one with maximum |M|
-            # in the direction theta.
+        for pN, pMx, pMy in per_angle:
             best_Mx = 0.0
             best_My = 0.0
             best_M_mag = -1.0
 
             for k in range(len(pN) - 1):
                 N_a, N_b = pN[k], pN[k + 1]
-                if (N_a - N_fixed) * (N_b - N_fixed) <= 0 and abs(N_b - N_a) > 1e-6:
-                    # Linear interpolation
+                if ((N_a - N_fixed) * (N_b - N_fixed) <= 0
+                        and abs(N_b - N_a) > 1e-6):
                     t = (N_fixed - N_a) / (N_b - N_a)
                     Mx_interp = pMx[k] + t * (pMx[k + 1] - pMx[k])
                     My_interp = pMy[k] + t * (pMy[k + 1] - pMy[k])
@@ -415,7 +554,6 @@ class NMDiagram:
                         best_Mx = Mx_interp
                         best_My = My_interp
 
-            # Fallback: closest point in N
             if best_M_mag < 0:
                 idx = np.argmin(np.abs(pN - N_fixed))
                 best_Mx = pMx[idx]
@@ -433,6 +571,10 @@ class NMDiagram:
             "N_fixed_kN": N_fixed / 1e3,
         }
 
+    # ==================================================================
+    #  Moment-curvature diagram (analytical Jacobian in Newton)
+    # ==================================================================
+
     def generate_moment_curvature(self, N_fixed, chi_max=None,
                                   n_points=200, direction='x'):
         r"""
@@ -440,8 +582,13 @@ class NMDiagram:
 
         Scans curvature :math:`\chi` from 0 to the ultimate value
         (where a material strain limit is reached), tracking the
-        moment response. Key points (first yield, ultimate) are
+        moment response.  Key points (first yield, ultimate) are
         identified.
+
+        The inner Newton iteration for :math:`\varepsilon_0` at each
+        curvature step uses the **analytical tangent** from
+        :meth:`FiberSolver.integrate_with_tangent`, halving the
+        integrate calls compared to a finite-difference approach.
 
         Parameters
         ----------
@@ -468,9 +615,6 @@ class NMDiagram:
         emg, _, emb, _ = self._collect_strain_limits()
 
         # Determine chi_max from geometry and strain limits.
-        # Use the full section height (not half) as lever arm to
-        # ensure the ultimate strain is reached even when the
-        # neutral axis is far from the centroid.
         if chi_max is None:
             if direction == 'x':
                 d_max = sec.H
@@ -488,7 +632,6 @@ class NMDiagram:
                 rebar_eps_yd.append(rb.material.eps_yd)
 
         # Cracking strain from EC2 properties (if available).
-        # eps_cr = fctm / Ecm (positive, tensile).
         eps_cr = None
         bulk = sec.bulk_material
         ec2_obj = getattr(bulk, 'ec2', None)
@@ -546,7 +689,9 @@ class NMDiagram:
         solving for eps0 at each step to maintain N = N_fixed.
 
         Uses Newton iteration with warm-start from previous step,
-        falling back to bisection if Newton fails.
+        falling back to bisection if Newton fails.  The Newton step
+        uses the **analytical tangent** from
+        :meth:`FiberSolver.integrate_with_tangent`.
 
         Parameters
         ----------
@@ -575,11 +720,10 @@ class NMDiagram:
         cracking_chi = None
         cracking_M = None
 
-        # Initial eps0 estimate from the equilibrium solver at chi=0
+        # Initial eps0 estimate
         if abs(chi_start) < 1e-15:
-            # Use a rough estimate: N_fixed ~ sigma_mean * A
             A_gross = getattr(sec, 'gross_area', sec.B * sec.H)
-            eps0_guess = N_fixed / (A_gross * 15000)  # rough Ec/2
+            eps0_guess = N_fixed / (A_gross * 15000)
             eps0_guess = np.clip(eps0_guess, emb, -emb)
         else:
             eps0_guess = 0.0
@@ -605,9 +749,7 @@ class NMDiagram:
             eps_mins[k] = all_eps.min()
             eps_maxs[k] = all_eps.max()
 
-            # Detect first cracking (concrete tensile strain exceeds
-            # eps_cr).  Only bulk fibers are checked since rebars do
-            # not crack.
+            # Detect first cracking
             if (cracking_chi is None and eps_cr is not None
                     and abs(chi) > 0):
                 if eb.max() >= eps_cr:
@@ -623,10 +765,7 @@ class NMDiagram:
                             yield_M = M
                             break
 
-            # Detect ultimate (any fiber at material limit).
-            # emb is negative: emb * 0.99 is less negative, so the
-            # check triggers when strain reaches (or just exceeds)
-            # the limit, not 1% past it.
+            # Detect ultimate
             if ultimate_chi is None and abs(chi) > 0:
                 if (all_eps.min() <= emb * 0.99
                         or all_eps.max() >= exg * 0.99):
@@ -643,22 +782,37 @@ class NMDiagram:
 
     @staticmethod
     def _solve_eps0_for_N(sv, N_target, chi_x, chi_y, eps0_init, emb):
-        """
+        r"""
         Solve for eps0 at fixed (chi_x, chi_y) such that N = N_target.
 
-        Newton with bisection fallback.
+        Newton phase uses the **analytical tangent** :math:`dN/d\varepsilon_0`
+        from the tangent stiffness matrix (element ``K[0,0]``), avoiding
+        an extra ``integrate()`` call for the finite-difference derivative.
+        Falls back to bisection if Newton does not converge.
+
+        Parameters
+        ----------
+        sv : FiberSolver
+        N_target : float
+        chi_x, chi_y : float
+        eps0_init : float
+        emb : float
+            Bulk material ultimate strain (negative).
+
+        Returns
+        -------
+        float
+            Converged :math:`\varepsilon_0`.
         """
         eps0 = eps0_init
 
-        # Newton phase
+        # Newton phase with analytical tangent
         for _ in range(25):
-            N, _, _ = sv.integrate(eps0, chi_x, chi_y)
+            N, _, _, K = sv.integrate_with_tangent(eps0, chi_x, chi_y)
             r = N - N_target
             if abs(r) < 1.0:  # 1 N tolerance
                 return eps0
-            de = max(abs(eps0) * 1e-7, 1e-10)
-            N1, _, _ = sv.integrate(eps0 + de, chi_x, chi_y)
-            dNde = (N1 - N) / de
+            dNde = K[0, 0]      # analytical dN/deps0
             if abs(dNde) > 1:
                 step = -r / dNde
                 # Clamp step to avoid wild jumps

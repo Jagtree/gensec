@@ -36,12 +36,24 @@ class RebarLayer:
     mixed-material sections. For biaxial bending, both ``x`` and ``y``
     coordinates are needed.
 
+    The cross-sectional area ``As`` can be specified directly or
+    computed automatically from ``diameter`` and ``n_bars``:
+
+    .. math::
+
+        A_s = n_{\text{bars}} \cdot \frac{\pi}{4} \, d^2
+
+    If both ``As`` and ``diameter`` are given, ``As`` takes
+    precedence.  If only ``diameter`` is given (with ``As`` omitted
+    or set to 0), ``As`` is computed from the formula above.
+
     Parameters
     ----------
     y : float
         Vertical coordinate from bottom edge [mm].
-    As : float
-        Cross-sectional area [mm^2].
+    As : float, optional
+        Cross-sectional area [mm²]. If 0 or omitted, computed
+        from ``diameter`` and ``n_bars``.
     material : Material
         Constitutive law.
     x : float, optional
@@ -55,15 +67,29 @@ class RebarLayer:
         area. Set to ``False`` for external elements (e.g. external
         FRP strips, steel truss chords outside the concrete).
     n_bars : int, optional
-        Number of bars (informational). Default 1.
+        Number of bars. Default 1.  Also used to compute ``As``
+        when ``diameter`` is given.
     diameter : float, optional
-        Bar diameter [mm] (informational). Default 0.
+        Bar diameter [mm]. Default 0.  When positive and ``As`` is
+        0, ``As`` is computed as
+        :math:`n_{\text{bars}} \cdot \pi/4 \cdot d^2`.
     """
 
     y: float
-    As: float
-    material: Material
+    As: float = 0.0
+    material: Material = None
     x: Optional[float] = None
     embedded: bool = True
     n_bars: int = 1
     diameter: float = 0.0
+
+    def __post_init__(self):
+        """Compute As from diameter if not provided explicitly."""
+        import math
+        if self.As <= 0.0 and self.diameter > 0.0:
+            self.As = self.n_bars * math.pi / 4.0 * self.diameter ** 2
+        if self.As <= 0.0:
+            raise ValueError(
+                f"RebarLayer at y={self.y}: As must be positive. "
+                f"Provide As directly or set diameter > 0."
+            )

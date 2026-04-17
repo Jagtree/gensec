@@ -578,11 +578,12 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
     ax.set_xlabel("Mx [kN·m]")
     ax.set_ylabel("My [kN·m]")
     ax.set_title(title or f"Mx-My interaction at N = {N_fixed:.0f} kN")
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0),
-              fontsize=9, borderaxespad=0)
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
+              fontsize=9, ncol=3, borderaxespad=0)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
-    fig.tight_layout(rect=[0, 0, 0.88, 1])
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.15)
     return fig
 
 

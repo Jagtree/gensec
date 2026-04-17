@@ -318,6 +318,12 @@ def _run(args):
     output_opts = data.get("output_options", {})
     do_mx_my = output_opts.get("generate_mx_my", False)
     do_3d_surface = output_opts.get("generate_3d_surface", False)
+    do_moment_curvature = output_opts.get(
+        "generate_moment_curvature", False)
+    do_polar_ductility = output_opts.get(
+        "generate_polar_ductility", False)
+    do_3d_moment_curvature = output_opts.get(
+        "generate_3d_moment_curvature", False)
 
     # N-level strategy.
     n_levels_mode = output_opts.get("n_levels_mode", "demands")
@@ -536,28 +542,37 @@ def _run(args):
     # ==============================================================
     #  N levels for M-chi and Mx-My diagrams
     # ==============================================================
-    if n_levels_mode == "explicit" and n_levels_explicit:
-        N_levels_analysis = sorted(
-            float(v) * 1e3 for v in n_levels_explicit)
-        print(f"\n  N levels (explicit): "
-              f"{[v/1e3 for v in N_levels_analysis]} kN")
-    elif n_levels_mode == "auto":
-        N_min_d = float(nm_data["N"].min())
-        N_max_d = float(nm_data["N"].max())
-        N_levels_analysis = sorted(
-            np.linspace(N_min_d, N_max_d, n_levels_count).tolist())
-        print(f"\n  N levels (auto, {n_levels_count} values): "
-              f"[{N_min_d/1e3:.0f}, {N_max_d/1e3:.0f}] kN")
-    else:
-        N_levels_analysis = sorted(
-            set(d["N"] for d in demands)) if demands else [0.0]
-        print(f"\n  N levels (from demands): "
-              f"{[v/1e3 for v in N_levels_analysis]} kN")
+    # Only compute N levels if at least one downstream generator
+    # is enabled; otherwise skip the entire block.
+    _need_n_levels = (
+        do_mx_my or do_moment_curvature
+        or do_polar_ductility or do_3d_moment_curvature
+    )
 
-    if not any(abs(n) < 1.0 for n in N_levels_analysis):
-        N_levels_analysis.append(0.0)
-        N_levels_analysis.sort()
-        print(f"  Added N=0 (pure bending)")
+    N_levels_analysis = []
+    if _need_n_levels:
+        if n_levels_mode == "explicit" and n_levels_explicit:
+            N_levels_analysis = sorted(
+                float(v) * 1e3 for v in n_levels_explicit)
+            print(f"\n  N levels (explicit): "
+                  f"{[v/1e3 for v in N_levels_analysis]} kN")
+        elif n_levels_mode == "auto":
+            N_min_d = float(nm_data["N"].min())
+            N_max_d = float(nm_data["N"].max())
+            N_levels_analysis = sorted(
+                np.linspace(N_min_d, N_max_d, n_levels_count).tolist())
+            print(f"\n  N levels (auto, {n_levels_count} values): "
+                  f"[{N_min_d/1e3:.0f}, {N_max_d/1e3:.0f}] kN")
+        else:
+            N_levels_analysis = sorted(
+                set(d["N"] for d in demands)) if demands else [0.0]
+            print(f"\n  N levels (from demands): "
+                  f"{[v/1e3 for v in N_levels_analysis]} kN")
+
+        if not any(abs(n) < 1.0 for n in N_levels_analysis):
+            N_levels_analysis.append(0.0)
+            N_levels_analysis.sort()
+            print(f"  Added N=0 (pure bending)")
 
     # --- Mx-My diagrams ---
     if is_biaxial and do_mx_my:
@@ -589,60 +604,62 @@ def _run(args):
     # --- Moment-curvature diagrams ---
     mc_collection_x = []
     mc_collection_y = []
-    for N_fixed in N_levels_analysis:
-        N_label = f"{N_fixed/1e3:.0f}".replace("-", "m")
+    if do_moment_curvature:
+        for N_fixed in N_levels_analysis:
+            N_label = f"{N_fixed/1e3:.0f}".replace("-", "m")
 
-        print(f"  Generating Mx-chi at N={N_fixed/1e3:.0f} kN...")
-        mc_x = nm_gen.generate_moment_curvature(
-            N_fixed, n_points=args.n_points, direction='x')
-        mc_collection_x.append(mc_x)
-        # Data export (always).
-        p_json = os.path.join(outdir, f"mx_chi_N{N_label}.json")
-        export_moment_curvature_json(mc_x, p_json)
-        export_moment_curvature_csv(
-            mc_x, os.path.join(outdir, f"mx_chi_N{N_label}.csv"))
-        # Plot.
-        fig = plot_moment_curvature(mc_x)
-        p = os.path.join(outdir, f"mx_chi_N{N_label}.png")
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f"    Exported: {p_json}, {p}")
-
-        if is_biaxial:
-            print(f"  Generating My-chi at"
-                  f" N={N_fixed/1e3:.0f} kN...")
-            mc_y = nm_gen.generate_moment_curvature(
-                N_fixed, n_points=args.n_points, direction='y')
-            mc_collection_y.append(mc_y)
-            p_json = os.path.join(outdir, f"my_chi_N{N_label}.json")
-            export_moment_curvature_json(mc_y, p_json)
+            print(f"  Generating Mx-chi at N={N_fixed/1e3:.0f} kN...")
+            mc_x = nm_gen.generate_moment_curvature(
+                N_fixed, n_points=args.n_points, direction='x')
+            mc_collection_x.append(mc_x)
+            # Data export (always).
+            p_json = os.path.join(outdir, f"mx_chi_N{N_label}.json")
+            export_moment_curvature_json(mc_x, p_json)
             export_moment_curvature_csv(
-                mc_y, os.path.join(outdir, f"my_chi_N{N_label}.csv"))
-            fig = plot_moment_curvature(mc_y)
-            p = os.path.join(outdir, f"my_chi_N{N_label}.png")
+                mc_x, os.path.join(outdir, f"mx_chi_N{N_label}.csv"))
+            # Plot.
+            fig = plot_moment_curvature(mc_x)
+            p = os.path.join(outdir, f"mx_chi_N{N_label}.png")
             fig.savefig(p, dpi=150)
             plt.close(fig)
             print(f"    Exported: {p_json}, {p}")
 
-    if len(mc_collection_x) > 1:
-        print("\n  Generating Mx-chi bundle...")
-        fig = plot_moment_curvature_bundle(mc_collection_x,
-                                           direction='x')
-        p = os.path.join(outdir, "mx_chi_bundle.png")
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f"  Exported: {p}")
+            if is_biaxial:
+                print(f"  Generating My-chi at"
+                      f" N={N_fixed/1e3:.0f} kN...")
+                mc_y = nm_gen.generate_moment_curvature(
+                    N_fixed, n_points=args.n_points, direction='y')
+                mc_collection_y.append(mc_y)
+                p_json = os.path.join(outdir, f"my_chi_N{N_label}.json")
+                export_moment_curvature_json(mc_y, p_json)
+                export_moment_curvature_csv(
+                    mc_y, os.path.join(outdir, f"my_chi_N{N_label}.csv"))
+                fig = plot_moment_curvature(mc_y)
+                p = os.path.join(outdir, f"my_chi_N{N_label}.png")
+                fig.savefig(p, dpi=150)
+                plt.close(fig)
+                print(f"    Exported: {p_json}, {p}")
 
-    if len(mc_collection_y) > 1:
-        print("  Generating My-chi bundle...")
-        fig = plot_moment_curvature_bundle(mc_collection_y,
-                                           direction='y')
-        p = os.path.join(outdir, "my_chi_bundle.png")
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f"  Exported: {p}")
+        if len(mc_collection_x) > 1:
+            print("\n  Generating Mx-chi bundle...")
+            fig = plot_moment_curvature_bundle(mc_collection_x,
+                                               direction='x')
+            p = os.path.join(outdir, "mx_chi_bundle.png")
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            print(f"  Exported: {p}")
 
-    if is_biaxial:
+        if len(mc_collection_y) > 1:
+            print("  Generating My-chi bundle...")
+            fig = plot_moment_curvature_bundle(mc_collection_y,
+                                               direction='y')
+            p = os.path.join(outdir, "my_chi_bundle.png")
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            print(f"  Exported: {p}")
+
+    # --- Polar ductility diagrams ---
+    if is_biaxial and do_polar_ductility:
         for N_fixed in N_levels_analysis:
             N_label = f"{N_fixed/1e3:.0f}".replace("-", "m")
             print(f"  Generating polar ductility at"
@@ -656,23 +673,25 @@ def _run(args):
             plt.close(fig)
             print(f"    Exported: {p}")
 
-    if len(mc_collection_x) > 1:
-        print("\n  Generating 3D Mx-chi-N surface...")
-        fig = plot_moment_curvature_surface(
-            mc_collection_x, direction='x')
-        p = os.path.join(outdir, "mx_chi_N_surface.png")
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f"  Exported: {p}")
+    # --- 3D moment-curvature surfaces ---
+    if do_3d_moment_curvature:
+        if len(mc_collection_x) > 1:
+            print("\n  Generating 3D Mx-chi-N surface...")
+            fig = plot_moment_curvature_surface(
+                mc_collection_x, direction='x')
+            p = os.path.join(outdir, "mx_chi_N_surface.png")
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            print(f"  Exported: {p}")
 
-    if len(mc_collection_y) > 1:
-        print("  Generating 3D My-chi-N surface...")
-        fig = plot_moment_curvature_surface(
-            mc_collection_y, direction='y')
-        p = os.path.join(outdir, "my_chi_N_surface.png")
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f"  Exported: {p}")
+        if len(mc_collection_y) > 1:
+            print("  Generating 3D My-chi-N surface...")
+            fig = plot_moment_curvature_surface(
+                mc_collection_y, direction='y')
+            p = os.path.join(outdir, "my_chi_N_surface.png")
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            print(f"  Exported: {p}")
 
     # ==============================================================
     #  Final summary

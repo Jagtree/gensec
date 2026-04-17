@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
+
 r"""
 Fiber integrator and equilibrium solver — biaxial bending.
 
@@ -30,6 +31,16 @@ The strain plane has 3 parameters
 are :math:`(N, M_x, M_y)`.
 
 Uniaxial bending is the special case :math:`\chi_y = 0`.
+
+Performance features
+--------------------
+- **Batch integration** (:meth:`integrate_batch`): evaluate many
+  strain configurations in a single vectorized call, eliminating
+  Python-loop overhead in capacity-surface generators.
+- **Analytical tangent stiffness** (:meth:`integrate_with_tangent`):
+  compute internal forces *and* the 3×3 tangent matrix in one pass,
+  halving the cost of each Newton-Raphson iteration compared to a
+  finite-difference Jacobian.
 """
 
 import numpy as np
@@ -130,6 +141,10 @@ class FiberSolver:
             idx = np.where(mat_indices == mi)[0]
             groups.append((all_mats[mi], idx))
         return groups
+
+    # ==================================================================
+    #  Single-configuration integration
+    # ==================================================================
 
     def strain_field(self, eps0, chi_x, chi_y=0.0):
         r"""
@@ -236,9 +251,215 @@ class FiberSolver:
 
         return N, Mx, My
 
+    # ==================================================================
+    #  Analytical tangent stiffness
+    # ==================================================================
+
+    def integrate_with_tangent(self, eps0, chi_x, chi_y=0.0):
+        r"""
+        Internal forces **and** 3×3 tangent stiffness in one pass.
+
+        The tangent stiffness matrix relates infinitesimal changes in
+        the strain-plane parameters to changes in internal forces:
+
+        .. math::
+
+            \mathbf{K} =
+            \frac{\partial (N,\,M_x,\,M_y)}
+                 {\partial (\varepsilon_0,\,\chi_x,\,\chi_y)}
+            = \sum_i E_{t,i} \, A_i \;
+              \boldsymbol{\varphi}_i \, \boldsymbol{\varphi}_i^T
+
+        where the shape-function vector for fiber *i* is
+
+        .. math::
+
+            \boldsymbol{\varphi}_i =
+            \bigl[1,\; (y_i - y_{\text{ref}}),\;
+                  -(x_i - x_{\text{ref}})\bigr]^T
+
+        and :math:`E_{t,i} = d\sigma_i / d\varepsilon_i` is the
+        tangent modulus at the current strain.
+
+        Parameters
+        ----------
+        eps0 : float
+        chi_x : float
+        chi_y : float, optional
+
+        Returns
+        -------
+        N, Mx, My : float
+            Internal forces [N, N·mm].
+        K : numpy.ndarray
+            3×3 tangent stiffness matrix.
+        """
+        eb, er = self.strain_field(eps0, chi_x, chi_y)
+
+        # ---- Bulk: stress and tangent ----
+        if not self._is_multi_material:
+            sb = self.sec.bulk_material.stress_array(eb)
+            Et_b = self.sec.bulk_material.tangent_array(eb)
+        else:
+            sb = np.zeros_like(eb)
+            Et_b = np.zeros_like(eb)
+            for mat, idx in self._bulk_groups:
+                sb[idx] = mat.stress_array(eb[idx])
+                Et_b[idx] = mat.tangent_array(eb[idx])
+
+        A = self.sec.A_fibers
+        ly = self._ly_bulk
+        lx = self._lx_bulk
+
+        fA = sb * A
+        N = float(np.sum(fA))
+        Mx = float(np.sum(fA * ly))
+        My = -float(np.sum(fA * lx))
+
+        # Tangent stiffness from bulk fibers
+        #   phi = [1, ly, -lx]
+        #   K[i,j] = sum(Et * A * phi_i * phi_j)
+        EtA = Et_b * A
+        K = np.empty((3, 3))
+        K[0, 0] = float(np.sum(EtA))
+        K[0, 1] = float(np.sum(EtA * ly))
+        K[0, 2] = -float(np.sum(EtA * lx))
+        K[1, 0] = K[0, 1]
+        K[1, 1] = float(np.sum(EtA * ly * ly))
+        K[1, 2] = -float(np.sum(EtA * ly * lx))
+        K[2, 0] = K[0, 2]
+        K[2, 1] = K[1, 2]
+        K[2, 2] = float(np.sum(EtA * lx * lx))
+
+        # ---- Rebar contribution ----
+        sb_at_rebars = self.sec.bulk_material.stress_array(er)
+        Et_bulk_r = self.sec.bulk_material.tangent_array(er)
+        embedded = self.sec.embedded_rebars
+
+        for mat, idx in self._rebar_groups:
+            s_rebar = mat.stress_array(er[idx])
+            Et_rebar = mat.tangent_array(er[idx])
+            a = self.sec.A_rebars[idx]
+            emb = embedded[idx]
+            ly_r = self._ly_rebar[idx]
+            lx_r = self._lx_rebar[idx]
+
+            s_net = s_rebar.copy()
+            s_net[emb] -= sb_at_rebars[idx][emb]
+
+            Et_net = Et_rebar.copy()
+            Et_net[emb] -= Et_bulk_r[idx][emb]
+
+            fa = s_net * a
+            N += float(np.sum(fa))
+            Mx += float(np.sum(fa * ly_r))
+            My -= float(np.sum(fa * lx_r))
+
+            EtA_r = Et_net * a
+            K[0, 0] += float(np.sum(EtA_r))
+            K[0, 1] += float(np.sum(EtA_r * ly_r))
+            K[0, 2] -= float(np.sum(EtA_r * lx_r))
+            K[1, 1] += float(np.sum(EtA_r * ly_r * ly_r))
+            K[1, 2] -= float(np.sum(EtA_r * ly_r * lx_r))
+            K[2, 2] += float(np.sum(EtA_r * lx_r * lx_r))
+
+        # Symmetric
+        K[1, 0] = K[0, 1]
+        K[2, 0] = K[0, 2]
+        K[2, 1] = K[1, 2]
+
+        return N, Mx, My, K
+
+    # ==================================================================
+    #  Batch integration — many configurations in one NumPy call
+    # ==================================================================
+
+    def integrate_batch(self, eps0, chi_x, chi_y):
+        r"""
+        Evaluate internal forces for many strain configurations at once.
+
+        All inputs are 1-D arrays of the same length *n*.  The
+        computation is fully vectorized: strain fields are built as
+        2-D arrays of shape ``(n, n_fibers)`` and passed through the
+        constitutive laws in one call, eliminating Python-loop
+        overhead.
+
+        Parameters
+        ----------
+        eps0 : numpy.ndarray
+            Shape ``(n,)``.  Strains at the reference point.
+        chi_x : numpy.ndarray
+            Shape ``(n,)``.  Curvatures about the x-axis [1/mm].
+        chi_y : numpy.ndarray
+            Shape ``(n,)``.  Curvatures about the y-axis [1/mm].
+
+        Returns
+        -------
+        N : numpy.ndarray
+            Shape ``(n,)``.  Axial forces [N].
+        Mx : numpy.ndarray
+            Shape ``(n,)``.  Bending moments about x [N·mm].
+        My : numpy.ndarray
+            Shape ``(n,)``.  Bending moments about y [N·mm].
+        """
+        eps0 = np.asarray(eps0, dtype=np.float64)
+        chi_x = np.asarray(chi_x, dtype=np.float64)
+        chi_y = np.asarray(chi_y, dtype=np.float64)
+
+        # Bulk strains: (n, n_fibers)
+        eb = (eps0[:, None]
+              + chi_x[:, None] * self._ly_bulk[None, :]
+              - chi_y[:, None] * self._lx_bulk[None, :])
+
+        # Bulk stresses: (n, n_fibers)
+        if not self._is_multi_material:
+            sb = self.sec.bulk_material.stress_array(eb)
+        else:
+            sb = np.zeros_like(eb)
+            for mat, idx in self._bulk_groups:
+                sb[:, idx] = mat.stress_array(eb[:, idx])
+
+        fA = sb * self.sec.A_fibers[None, :]        # (n, n_fibers)
+        N = fA.sum(axis=1)                           # (n,)
+        Mx = (fA * self._ly_bulk[None, :]).sum(axis=1)
+        My = -(fA * self._lx_bulk[None, :]).sum(axis=1)
+
+        # Rebar strains: (n, n_rebars)
+        n_rebars = len(self.sec.y_rebars)
+        if n_rebars == 0:
+            return N, Mx, My
+
+        er = (eps0[:, None]
+              + chi_x[:, None] * self._ly_rebar[None, :]
+              - chi_y[:, None] * self._lx_rebar[None, :])
+
+        sb_at_rebars = self.sec.bulk_material.stress_array(er)
+        embedded = self.sec.embedded_rebars
+
+        for mat, idx in self._rebar_groups:
+            s_rebar = mat.stress_array(er[:, idx])
+            a = self.sec.A_rebars[idx]
+            emb = embedded[idx]
+            ly_r = self._ly_rebar[idx]
+            lx_r = self._lx_rebar[idx]
+
+            s_net = s_rebar.copy()
+            s_net[:, emb] -= sb_at_rebars[:, idx][:, emb]
+
+            fa = s_net * a[None, :]                  # (n, len(idx))
+            N += fa.sum(axis=1)
+            Mx += (fa * ly_r[None, :]).sum(axis=1)
+            My -= (fa * lx_r[None, :]).sum(axis=1)
+
+        return N, Mx, My
+
+    # ==================================================================
+    #  Numerical Jacobian (kept for validation / fallback)
+    # ==================================================================
+
     def jacobian(self, eps0, chi_x, chi_y=0.0, deps=1e-8):
         r"""
-        Numerical 3x3 Jacobian via forward finite differences.
+        Numerical 3×3 Jacobian via forward finite differences.
 
         .. math::
 
@@ -284,6 +505,10 @@ class FiberSolver:
                     else np.max(np.abs(self._lx_bulk)))
         return lx_range < 1e-6
 
+    # ==================================================================
+    #  Main solver entry point
+    # ==================================================================
+
     def solve_equilibrium(self, N_target, Mx_target, My_target=0.0,
                           eps0_init=0.0, chi_x_init=1e-6,
                           chi_y_init=0.0,
@@ -291,10 +516,11 @@ class FiberSolver:
         r"""
         Inverse problem: find strain plane for target (N, Mx, My).
 
-        Newton-Raphson with backtracking line search.  Automatically
-        reduces to a 2×2 system when the section is uniaxial, and
-        further to a **1×1 bisection** when both target moments are
-        negligible (pure axial load).
+        Newton-Raphson with **analytical tangent stiffness** and
+        backtracking line search.  Automatically reduces to a 2×2
+        system when the section is uniaxial, and further to a
+        **1×1 bisection** when both target moments are negligible
+        (pure axial load).
 
         The pure-axial branch exploits the monotonicity of
         :math:`N(\varepsilon_0)` at :math:`\chi_x = \chi_y = 0`:
@@ -381,7 +607,8 @@ class FiberSolver:
         Strategy:
 
         1.  Scan :math:`N(\varepsilon_0)` on a fine grid spanning
-            the full material strain range.
+            the full material strain range — using
+            :meth:`integrate_batch` for speed.
         2.  Find consecutive grid points where :math:`N` crosses
             :math:`N_{\text{target}}`.  Among all crossings, pick
             the one in the monotone working region (closest to the
@@ -412,12 +639,11 @@ class FiberSolver:
         eps_lo *= 1.01
         eps_hi *= 1.01
 
-        # --- Fine scan ---
+        # --- Batch scan ---
         n_scan = 120
         eps_vals = np.linspace(eps_lo, eps_hi, n_scan)
-        N_vals = np.empty(n_scan)
-        for k in range(n_scan):
-            N_vals[k], _, _ = self.integrate(eps_vals[k], 0.0, 0.0)
+        chi_zero = np.zeros(n_scan)
+        N_vals, _, _ = self.integrate_batch(eps_vals, chi_zero, chi_zero)
 
         # --- Find all crossings of N_target ---
         crossings = []
@@ -475,14 +701,17 @@ class FiberSolver:
         r"""
         Estimate initial (eps0, chi_x, chi_y) from linear-elastic theory.
 
+        Uses the **analytical** tangent stiffness at the origin,
+        which is the elastic stiffness matrix.
+
         Returns
         -------
         eps0, chi_x, chi_y : float
         """
         try:
-            J0 = self.jacobian(0.0, 0.0, 0.0)
+            _, _, _, K0 = self.integrate_with_tangent(0.0, 0.0, 0.0)
             target = np.array([N_target, Mx_target, My_target])
-            x0 = np.linalg.solve(J0, target)
+            x0 = np.linalg.solve(K0, target)
             x0[0] = np.clip(x0[0], -0.003, 0.003)
             x0[1] = np.clip(x0[1], -1e-4, 1e-4)
             x0[2] = np.clip(x0[2], -1e-4, 1e-4)
@@ -496,21 +725,8 @@ class FiberSolver:
                          if I_approx > 0 else 1e-6)
             return float(eps0_est), float(chi_x_est), 0.0
 
-    def _adaptive_deps(self, eps0, chi_x, chi_y=0.0):
-        r"""
-        Adaptive perturbation size for the Jacobian.
-
-        Returns
-        -------
-        deps_e, deps_cx, deps_cy : float
-        """
-        deps_e = max(abs(eps0) * 1e-7, 1e-10)
-        deps_cx = max(abs(chi_x) * 1e-7, 1e-10)
-        deps_cy = max(abs(chi_y) * 1e-7, 1e-10)
-        return deps_e, deps_cx, deps_cy
-
     # ------------------------------------------------------------------
-    #  Uniaxial solver
+    #  Uniaxial solver (analytical Jacobian)
     # ------------------------------------------------------------------
 
     def _solve_uniaxial(self, N_target, Mx_target,
@@ -591,9 +807,14 @@ class FiberSolver:
 
     def _nr_uniaxial(self, N_target, Mx_target, eps0, chi_x,
                      tol, max_iter):
-        """Core Newton-Raphson for uniaxial case."""
+        r"""
+        Core Newton-Raphson for uniaxial case.
+
+        Uses the **analytical** 2×2 sub-block of the tangent
+        stiffness matrix instead of finite-difference perturbations.
+        """
         for i in range(max_iter):
-            N, Mx, My = self.integrate(eps0, chi_x, 0.0)
+            N, Mx, My, K = self.integrate_with_tangent(eps0, chi_x, 0.0)
             r = np.array([N - N_target, Mx - Mx_target])
 
             if abs(r[0]) < tol and abs(r[1]) < tol * 1000:
@@ -603,12 +824,8 @@ class FiberSolver:
                     "converged": True, "iterations": i + 1,
                 }
 
-            de, dc, _ = self._adaptive_deps(eps0, chi_x, 0.0)
-            N1, Mx1, _ = self.integrate(eps0 + de, chi_x, 0.0)
-            N2, Mx2, _ = self.integrate(eps0, chi_x + dc, 0.0)
-            J = np.array([[(N1 - N) / de, (N2 - N) / dc],
-                          [(Mx1 - Mx) / de, (Mx2 - Mx) / dc]])
-
+            # Extract 2×2 sub-block [dN/de, dN/dc; dMx/de, dMx/dc]
+            J = K[:2, :2]
             det = abs(J[0, 0] * J[1, 1] - J[0, 1] * J[1, 0])
             if det < 1e-20:
                 eps0 += 1e-5
@@ -622,6 +839,7 @@ class FiberSolver:
                 chi_x += 1e-7
                 continue
 
+            # Backtracking line search
             alpha = 1.0
             r_norm = np.linalg.norm(r)
             for _ in range(15):
@@ -643,7 +861,7 @@ class FiberSolver:
         }
 
     # ------------------------------------------------------------------
-    #  Biaxial solver
+    #  Biaxial solver (analytical Jacobian)
     # ------------------------------------------------------------------
 
     def _solve_biaxial(self, N_target, Mx_target, My_target,
@@ -685,13 +903,19 @@ class FiberSolver:
 
     def _nr_biaxial(self, N_target, Mx_target, My_target,
                     eps0, chi_x, chi_y, tol, max_iter):
-        """Core Newton-Raphson for biaxial case."""
+        r"""
+        Core Newton-Raphson for biaxial case.
+
+        Uses the **analytical** 3×3 tangent stiffness matrix.
+        """
         x = np.array([eps0, chi_x, chi_y])
         target = np.array([N_target, Mx_target, My_target])
         tol_vec = np.array([tol, tol * 1000, tol * 1000])
 
         for i in range(max_iter):
-            f = np.array(self.integrate(x[0], x[1], x[2]))
+            N, Mx, My, K = self.integrate_with_tangent(
+                x[0], x[1], x[2])
+            f = np.array([N, Mx, My])
             r = f - target
 
             if np.all(np.abs(r) < tol_vec):
@@ -701,24 +925,13 @@ class FiberSolver:
                     "converged": True, "iterations": i + 1,
                 }
 
-            de, dcx, dcy = self._adaptive_deps(x[0], x[1], x[2])
-            f0 = f
-            J = np.empty((3, 3))
-            for j, dp in enumerate([
-                np.array([de, 0, 0]),
-                np.array([0, dcx, 0]),
-                np.array([0, 0, dcy]),
-            ]):
-                x_p = x + dp
-                f_p = np.array(self.integrate(x_p[0], x_p[1], x_p[2]))
-                J[:, j] = (f_p - f0) / dp[j]
-
             try:
-                d = np.linalg.solve(J, -r)
+                d = np.linalg.solve(K, -r)
             except np.linalg.LinAlgError:
                 x += np.array([1e-5, 1e-7, 1e-7])
                 continue
 
+            # Backtracking line search
             alpha = 1.0
             r_norm = np.linalg.norm(r)
             for _ in range(15):

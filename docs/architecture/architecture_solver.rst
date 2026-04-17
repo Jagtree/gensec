@@ -93,26 +93,40 @@ search:
 
    flowchart TD
        A["Initial guess: (ε₀, χₓ, χᵧ)"]
-       B["Evaluate direct problem → (N, Mx, My)"]
+       B["Evaluate integrate_with_tangent<br/>→ (N, Mx, My) + 3×3 tangent K"]
        C{"Residual r = (N−N*, Mx−Mx*, My−My*)<br/>|r| < tolerance?"}
-       D["Compute 3×3 Jacobian<br/>J = ∂(N,Mx,My)/∂(ε₀,χₓ,χᵧ)<br/>(numerical finite differences)"]
-       E["Solve J · Δx = −r"]
+       E["Solve K · Δx = −r"]
        F["Backtracking line search:<br/>find α such that |r(x + α·Δx)| < |r(x)|"]
        G["Update: x ← x + α·Δx"]
        H["Converged!<br/>Return (ε₀, χₓ, χᵧ, N, Mx, My)"]
 
        A --> B --> C
-       C -- No --> D --> E --> F --> G --> B
+       C -- No --> E --> F --> G --> B
        C -- Yes --> H
 
-The Jacobian is computed by **numerical finite differences** (three
-extra direct-problem evaluations per iteration).  The line search
-halves the step size up to 15 times if the full Newton step would
-increase the residual.
+The Jacobian is computed **analytically** from the tangent stiffness
+matrix:
+
+.. math::
+
+   \mathbf{K} = \sum_i E_{t,i} \, A_i \;
+     \boldsymbol{\varphi}_i \, \boldsymbol{\varphi}_i^T
+
+where :math:`E_{t,i} = d\sigma_i / d\varepsilon_i` is the tangent
+modulus at the current strain and
+:math:`\boldsymbol{\varphi}_i = [1,\; (y_i - y_{\text{ref}}),\;
+-(x_i - x_{\text{ref}})]^T` is the shape-function vector.  This is
+computed in a single pass together with the internal forces by
+:meth:`~gensec.solver.FiberSolver.integrate_with_tangent`, halving
+the cost per iteration compared to the former finite-difference
+approach.
+
+The line search halves the step size up to 15 times if the full
+Newton step would increase the residual.
 
 For uniaxial bending (:math:`\chi_y = 0`), the system reduces to
-2×2 (only :math:`\varepsilon_0` and :math:`\chi_x` are unknowns),
-which converges faster.  GenSec detects this case automatically.
+2×2 (the upper-left sub-block of :math:`\mathbf{K}`), which
+converges faster.  GenSec detects this case automatically.
 
 
 Layer 2: NMDiagram
@@ -305,18 +319,26 @@ Material constitutive laws
 ---------------------------
 
 Each material class inherits from the abstract ``Material`` base and
-implements two methods:
+implements four methods:
 
 - ``stress(eps)`` — scalar: one strain in, one stress out.
 - ``stress_array(eps)`` — vectorized: array in, array out (fast path).
+  Accepts arrays of **any shape** (1-D, 2-D, …).
+- ``tangent(eps)`` — scalar tangent modulus
+  :math:`E_t = d\sigma/d\varepsilon`.
+- ``tangent_array(eps)`` — vectorized tangent modulus (any shape).
 
 .. mermaid::
 
    flowchart LR
        E["ε (strain)"] --> M["Material.stress(ε)"] --> S["σ (stress)"]
+       E --> T["Material.tangent(ε)"] --> Et["Eₜ (tangent)"]
 
-The fiber solver calls ``stress_array`` on entire fiber arrays at
-once, leveraging NumPy vectorization for speed.
+The fiber solver calls ``stress_array`` and ``tangent_array`` on
+entire fiber arrays at once, leveraging NumPy vectorization for speed.
+When `numba <https://numba.pydata.org>`_ is installed, the built-in
+``Concrete`` and ``Steel`` classes use JIT-compiled kernels for these
+methods, providing a further ~2–3× speed-up.
 
 **Concrete** (parabola-rectangle, EC2 3.1.7):
 
@@ -350,7 +372,67 @@ once, leveraging NumPy vectorization for speed.
 
 **TabulatedMaterial**: piecewise-linear interpolation of user-supplied
 (ε, σ) data points.  Supports any shape, including descending
-branches (Kent-Park concrete, softening, etc.).
+branches (Kent-Park concrete, softening, etc.).  The tangent modulus
+is the slope of each linear segment.
+
+
+Performance architecture
+-------------------------
+
+GenSec uses three complementary strategies to achieve high
+computational throughput on the fiber integration pipeline.
+
+
+Batch integration
+~~~~~~~~~~~~~~~~~~
+
+The capacity generators (N-M diagram, 3-D surface, Mx-My contour)
+evaluate tens of thousands of strain configurations.  Rather than
+calling :meth:`~gensec.solver.FiberSolver.integrate` in a Python
+loop, they use :meth:`~gensec.solver.FiberSolver.integrate_batch`,
+which operates on 1-D arrays of :math:`(\varepsilon_0, \chi_x,
+\chi_y)` and produces 1-D arrays of :math:`(N, M_x, M_y)`.
+
+Internally, the strain field is built as a 2-D array of shape
+:math:`(n_{\text{configs}}, n_{\text{fibers}})` and passed through the
+constitutive law in one NumPy call.  This eliminates the per-call
+Python overhead and enables SIMD vectorization at the C level.
+
+
+Mega-batch with chunking
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For biaxial generators (``generate_biaxial``, ``generate_mx_my``),
+configurations from **all curvature directions** are concatenated
+into a single flat array before integration.  This avoids the overhead
+of calling ``integrate_batch`` once per angle (e.g. 144 calls of 550
+configs each) and replaces it with a few large chunked calls (e.g. 2
+calls of 40 000 configs each).
+
+The chunk size is bounded to limit peak memory usage:
+
+.. math::
+
+   n_{\text{chunk}} = \max\!\left(2000,\;
+       \left\lfloor\frac{50 \times 10^6}{n_{\text{fibers}}}
+       \right\rfloor\right)
+
+For a section with 5 000 fibers, this gives chunks of 10 000 configs
+(~400 MB peak), reducing the number of batch calls from 144 to ~8.
+
+
+Optional Numba JIT
+~~~~~~~~~~~~~~~~~~~
+
+When `numba <https://numba.pydata.org>`_ is installed, the element-wise
+stress and tangent kernels of ``Concrete`` and ``Steel`` are
+JIT-compiled to native code.  This provides a ~2–3× speed-up on
+large fiber arrays where NumPy's Python-to-C dispatch overhead becomes
+significant.
+
+Numba is **optional**: if not installed, the pure-NumPy fallback is
+used transparently.  Install with ``pip install gensec[fast]`` or
+``uv sync --all-extras``.
 
 
 Section meshing
@@ -378,6 +460,14 @@ Each grid cell is intersected with the polygon.  Partial cells at
 the boundary receive the area of the intersection, not the full cell
 area.  This gives a good area representation even with coarse meshes.
 
-The ``RectSection`` class is a thin wrapper that creates a rectangular
-polygon and calls ``GenericSection`` internally.  It exists for
-backward compatibility with YAML files that use ``B`` + ``H``.
+When explicit grid dimensions are provided via ``n_grid_x`` /
+``n_grid_y`` (used internally by the ``RectSection`` factory
+function), they override the ``mesh_size``-based computation.
+This allows anisotropic grids when needed.
+
+The ``RectSection`` convenience function creates a rectangular
+polygon and calls ``GenericSection`` internally.  It derives an
+isotropic mesh size from ``n_fibers_y`` (i.e.,
+:math:`s = H / n_y`), ensuring approximately square cells.  When
+``n_fibers_x > 1`` is specified explicitly, it is passed as
+``n_grid_x`` to override the x-resolution.

@@ -1,0 +1,11 @@
+[run]
+omit =
+    src\gensec\__init__.py 
+    src\gensec\_version.py  
+    src\gensec\cli.py
+    src\gensec\geometry\__init__.py
+    src\gensec\materials\__init__.py
+    src\gensec\materials\__init__.py
+    src\gensec\output\__init__.py
+    src\gensec\output\plots.py 
+    src\gensec\output\report.py

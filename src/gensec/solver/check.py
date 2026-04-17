@@ -14,7 +14,7 @@
 # License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
+# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
 
 r"""
@@ -424,7 +424,20 @@ class VerificationEngine:
         self.delta_N_tol = float(output_flags.get("delta_N_tol", 0.03))
         self.n_angles = int(output_flags.get("n_angles_mx_my", 144))
 
-        # Contour cache: N_level (float, in N) → MxMyContour.
+        # Auto-disable 2-D contour operations when the resistance
+        # domain is 2-D (uniaxial N-M only).  In that case every
+        # Mx-My contour is degenerate (a single point or segment)
+        # and QHull cannot build a 2-D convex hull.
+        if self.domain.ndim == 2 and (self.do_2D or self.do_path_2D):
+            import sys
+            print("  INFO: eta_2D / eta_path_2D disabled — resistance "
+                  "domain is 2-D (no My data).  Consider using a "
+                  "biaxial mesh (n_fibers_x > 1) or GenericSection.",
+                  file=sys.stderr)
+            self.do_2D = False
+            self.do_path_2D = False
+
+        # Contour cache: N_level (float, in N) → MxMyContour or None.
         self._contour_cache = {}
 
     # ------------------------------------------------------------------
@@ -436,6 +449,11 @@ class VerificationEngine:
         Return the :class:`MxMyContour` at *N_fixed*, generating it
         on demand and caching the result.
 
+        If the contour is degenerate (e.g. at an extreme N near
+        pure compression/tension where the cross-section collapses
+        to a point), ``None`` is returned and cached so the
+        expensive generation is not retried.
+
         Parameters
         ----------
         N_fixed : float
@@ -443,17 +461,25 @@ class VerificationEngine:
 
         Returns
         -------
-        MxMyContour
+        MxMyContour or None
+            ``None`` when the contour cannot be built (degenerate
+            geometry at this N level).
         """
         # Use a coarse key to avoid near-duplicate contours.
         key = round(N_fixed, 0)
         if key not in self._contour_cache:
-            mx_my_data = self.nm_gen.generate_mx_my(
-                N_fixed,
-                n_angles=self.n_angles,
-                n_points_per_angle=self.n_points,
-            )
-            self._contour_cache[key] = MxMyContour(mx_my_data)
+            try:
+                mx_my_data = self.nm_gen.generate_mx_my(
+                    N_fixed,
+                    n_angles=self.n_angles,
+                    n_points_per_angle=self.n_points,
+                )
+                self._contour_cache[key] = MxMyContour(mx_my_data)
+            except Exception:
+                # Degenerate contour (collinear points, extreme N,
+                # near-zero moment capacity, …).
+                # Cache None to avoid retrying.
+                self._contour_cache[key] = None
         return self._contour_cache[key]
 
     # ------------------------------------------------------------------
@@ -563,9 +589,12 @@ class VerificationEngine:
         if self.do_2D:
             try:
                 contour = self._get_contour(N)
-                e2 = contour.eta_2D(Mx, My)
-                result["eta_2D"] = round(e2, 4)
-                etas.append(e2)
+                if contour is not None:
+                    e2 = contour.eta_2D(Mx, My)
+                    result["eta_2D"] = round(e2, 4)
+                    etas.append(e2)
+                else:
+                    result["eta_2D"] = None
             except Exception as exc:
                 import sys
                 print(f"  WARNING: eta_2D failed at N={N/1e3:.1f} kN:"
@@ -766,10 +795,18 @@ class VerificationEngine:
 
                     if delta_N_ratio < self.delta_N_tol:
                         contour = self._get_contour(cum_N)
-                        ep2 = contour.eta_path_2D(
-                            prev_Mx, prev_My, cum_Mx, cum_My)
-                        sr["eta_path_2D"] = round(ep2, 4)
-                        all_etas.append(ep2)
+                        if contour is not None:
+                            ep2 = contour.eta_path_2D(
+                                prev_Mx, prev_My, cum_Mx, cum_My)
+                            sr["eta_path_2D"] = round(ep2, 4)
+                            all_etas.append(ep2)
+                        else:
+                            sr["eta_path_2D"] = None
+                            sr["warning"] = (
+                                "Mx-My contour degenerate at "
+                                f"N={cum_N/1e3:.1f} kN, "
+                                "eta_path_2D skipped"
+                            )
                     else:
                         sr["eta_path_2D"] = None
                         sr["warning"] = (

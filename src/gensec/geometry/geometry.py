@@ -117,6 +117,13 @@ class GenericSection:
         that zone's material instead of ``bulk_material``.
         Zones are checked in order; first match wins.
         Default empty (single-material section).
+    n_grid_x : int or None, optional
+        Explicit number of grid columns for the ``'grid'`` mesher.
+        When set, overrides the ``mesh_size``-based computation
+        for the x-direction.  Default ``None`` (derive from
+        ``mesh_size``).
+    n_grid_y : int or None, optional
+        Explicit number of grid rows.  Default ``None``.
 
     Attributes
     ----------
@@ -164,6 +171,8 @@ class GenericSection:
     mesh_size: float = 10.0
     mesh_method: Literal["grid", "triangle"] = "grid"
     bulk_materials: List[tuple] = field(default_factory=list)
+    n_grid_x: Optional[int] = None
+    n_grid_y: Optional[int] = None
 
     def __post_init__(self):
         # ---- Validate polygon ----
@@ -219,7 +228,9 @@ class GenericSection:
         correctly handles partial cells at the boundary and cells
         spanning holes.
 
-        The grid resolution is determined by ``mesh_size``:
+        When ``n_grid_x`` / ``n_grid_y`` are explicitly set, they
+        override the ``mesh_size``-based computation.  Otherwise
+        the grid resolution is:
 
         .. math::
 
@@ -232,11 +243,19 @@ class GenericSection:
         minx, miny, maxx, maxy = self._bounds
         s = self.mesh_size
 
-        self.n_fibers_x = max(1, int(np.ceil(self.B / s)))
-        self.n_fibers_y = max(1, int(np.ceil(self.H / s)))
+        if self.n_grid_x is not None:
+            self.n_fibers_x = max(1, self.n_grid_x)
+        else:
+            self.n_fibers_x = max(1, int(np.ceil(self.B / s)))
+        if self.n_grid_y is not None:
+            self.n_fibers_y = max(1, self.n_grid_y)
+        else:
+            self.n_fibers_y = max(1, int(np.ceil(self.H / s)))
 
         dx = self.B / self.n_fibers_x
         dy = self.H / self.n_fibers_y
+        self.dx = dx
+        self.dy = dy
 
         xc_list = []
         yc_list = []
@@ -351,6 +370,8 @@ class GenericSection:
         self.n_fibers = len(self.x_fibers)
         self.n_fibers_x = -1  # not applicable
         self.n_fibers_y = -1
+        self.dx = self.mesh_size
+        self.dy = self.mesh_size
 
     def _polygon_to_pslg(self):
         r"""

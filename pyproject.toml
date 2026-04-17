@@ -6,7 +6,7 @@ readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 authors = [{name = "Andrea Albero", email = "albero.andrea@outlook.it"}]
 urls = {Homepage = "https://alberoandrea.com", Repository = "https://github.com/jagtree/gensec"}
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.13.13,<3.14"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -16,6 +16,10 @@ dependencies = [
     "triangle",
     "setuptools_scm",        # Necessary for dynamic versioning
 ]
+
+[project.optional-dependencies]
+fast = ["numba>=0.58"]
+
 
 [project.scripts]
 gensec = "gensec.cli:main"

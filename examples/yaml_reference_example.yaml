@@ -6,7 +6,7 @@
 #  It is a valid input file and can be run as-is.
 #
 #  Usage:
-#    uv run gensec run yaml_reference.yaml --output-dir results/
+#    uv run gensec run yaml_reference_example.yaml --output-dir results/
 #
 #  Regenerate a plot from exported data:
 #    uv run gensec plot results/mx_chi_N0.json
@@ -24,20 +24,24 @@ materials:
 
   # --- Concrete: direct parameters ---
   # Use when you want full control over constitutive parameters.
+  # Type: concrete_ec2_gen1_custom  (legacy alias: concrete)
   concrete_direct:
-    type: concrete
+    type: concrete_ec2_gen1_custom
     fck: 25.0             # characteristic cylinder strength [MPa] (required)
     gamma_c: 1.5          # partial safety factor (default 1.5)
     alpha_cc: 0.85        # long-term coefficient (default 0.85)
     n_parabola: 2.0       # parabolic exponent (default 2.0)
     eps_c2: -0.002        # peak-stress strain (default -0.002)
     eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+    # fct: 0.0            # tensile strength [MPa] (default 0 = no tension)
+    # Ec: 0.0             # elastic modulus [MPa] for tension (default 0)
 
   # --- Concrete: from EC2 class ---
   # All Table 3.1 properties (fcm, fctm, Ecm, eps_c2, eps_cu2, n)
   # are computed automatically.  Enables cracking detection in M-chi.
+  # Type: concrete_ec2_gen1  (legacy alias: concrete_ec2)
   C30:
-    type: concrete_ec2
+    type: concrete_ec2_gen1
     class: C30/37          # EC2 class: C12/15 … C90/105
     ls: F                  # limit state: 'F' fundamental, 'A' accidental, 'S' service
     loadtype: slow         # 'slow' or 'fast' (default 'slow')
@@ -70,14 +74,18 @@ materials:
 #  SECTION
 # ================================================================
 #  Two formats: legacy rectangular (B + H) or generic (shape + params).
+#
+#  Legacy rectangular:
+#    n_fibers_y controls the mesh resolution.  When n_fibers_x is
+#    omitted or set to 1, an isotropic grid is used (same cell size
+#    in both directions).  Set n_fibers_x > 1 for explicit control.
 
 section:
-  # --- Legacy rectangular format ---
   B: 400                   # width [mm]
   H: 600                   # height [mm]
   bulk_material: C30       # reference to materials block
   n_fibers_y: 40           # fiber count along height
-  n_fibers_x: 20           # 1 = uniaxial, >1 = biaxial grid
+  n_fibers_x: 20           # >1 = explicit x resolution; 1 = isotropic grid
 
   # --- Generic format (uncomment to use instead) ---
   # shape: tee             # rect, circle, annulus, tee, inv_tee, h, box,
@@ -92,16 +100,24 @@ section:
   # mesh_method: grid      # 'grid' (default) or 'triangle'
 
   rebars:
-    # Each rebar needs: y, As, material.  x required for biaxial.
-    # Optional: n_bars, diameter (reporting), embedded (default true).
+    # Each rebar needs: y, material, and EITHER As OR diameter.
+    # If both As and diameter are given, As takes precedence.
+    # If only diameter is given, As = n_bars * pi/4 * d^2.
+    # x is required for biaxial sections.
+
+    # Example with explicit As:
     - {y: 45, x: 50,  As: 490.87, material: B450C, n_bars: 1, diameter: 25}
     - {y: 45, x: 200, As: 314.16, material: B450C, n_bars: 1, diameter: 20}
     - {y: 45, x: 350, As: 490.87, material: B450C, n_bars: 1, diameter: 25}
-    - {y: 555, x: 50,  As: 490.87, material: B450C, n_bars: 1, diameter: 25}
-    - {y: 555, x: 200, As: 314.16, material: B450C, n_bars: 1, diameter: 20}
-    - {y: 555, x: 350, As: 490.87, material: B450C, n_bars: 1, diameter: 25}
-    - {y: 300, x: 50,  As: 201.06, material: B450C, n_bars: 1, diameter: 16}
-    - {y: 300, x: 350, As: 201.06, material: B450C, n_bars: 1, diameter: 16}
+
+    # Example with diameter only (As computed automatically):
+    - {y: 555, x: 50,  diameter: 25, material: B450C}
+    - {y: 555, x: 200, diameter: 20, material: B450C}
+    - {y: 555, x: 350, diameter: 25, material: B450C}
+
+    # Mid-height bars:
+    - {y: 300, x: 50,  diameter: 16, material: B450C}
+    - {y: 300, x: 350, diameter: 16, material: B450C}
 
 
 # ================================================================
@@ -135,21 +151,13 @@ demands:
 # ================================================================
 #  COMBINATIONS — factored sums of demands, optionally staged
 # ================================================================
-#  Two forms:
-#    Simple: 'components' list → single resultant.
-#    Staged: 'stages' list → sequential accumulation with per-stage eta.
 
 combinations:
-  # --- Simple combination (factored sum) ---
   - name: SLU_1
     components:
-      - {ref: G, factor: 1.3}       # ref = name of a demand
-      - {ref: Q1, factor: 1.5}      # factor defaults to 1.0
+      - {ref: G, factor: 1.3}
+      - {ref: Q1, factor: 1.5}
 
-  # --- Staged combination (seismic) ---
-  # Stage 0 (gravitazionale): verified from origin.
-  # Stage 1 (sisma): verified from cumulative of stage 0.
-  # eta_path measures the margin of the seismic increment only.
   - name: SLU_sismico_Ex
     stages:
       - name: gravitazionale
@@ -174,19 +182,13 @@ combinations:
 # ================================================================
 #  ENVELOPES — max eta among members
 # ================================================================
-#  Members can be:
-#    - {ref: <demand_or_combination_name>}       → resolved
-#    - {ref: <name>, factor: 1.2}                → scaled resultant
-#    - {N_kN: ..., Mx_kNm: ..., My_kNm: ...}    → inline demand
 
 envelopes:
-  # Envelope of combinations.
   - name: Envelope_SLU_sismico
     members:
       - {ref: SLU_sismico_Ex}
       - {ref: SLU_sismico_Ey}
 
-  # Envelope with inline demands (e.g. from external software).
   - name: Envelope_diretto
     members:
       - {ref: G}
@@ -201,18 +203,10 @@ envelopes:
 
 output:
   # ── Utilization ratio flags ──
-  # eta_3D:      3D ray from origin on N-Mx-My hull (fast, always recommended)
-  # eta_2D:      2D ray on Mx-My contour at fixed N (slower, generates contours)
-  # eta_path:    3D ray from base to target (staged combinations)
-  # eta_path_2D: 2D ray from base to target on Mx-My contour (staged, slow)
   eta_3D: true             # default: true
   eta_2D: true             # default: false
   eta_path: true           # default: true
   eta_path_2D: true        # default: false
-
-  # delta_N tolerance for eta_path_2D applicability.
-  # If |delta_N| / N_range > delta_N_tol, eta_path_2D is skipped
-  # and eta_path (3D) is used instead.
   delta_N_tol: 0.03        # default: 0.03 (3%)
 
   # ── Domain generation ──
@@ -220,10 +214,12 @@ output:
   generate_3d_surface: true # 3D surface CSV/JSON/plot (default: false)
   n_angles_mx_my: 144      # angular resolution for Mx-My (default: 144)
 
-  # ── N-level strategy for M-chi and Mx-My diagrams ──
-  # n_levels_mode: "demands"   → one per unique demand N (default)
-  #                "auto"      → auto-discretize Nmin..Nmax
-  #                "explicit"  → user-specified list
+  # ── Moment-curvature and ductility ──
+  generate_moment_curvature: true     # M-χ diagrams per N level (default: true)
+  generate_polar_ductility: true      # polar ductility plot (default: true)
+  generate_3d_moment_curvature: true  # 3D M-χ-N surface (default: true)
+
+  # ── N-level strategy ──
   n_levels_mode: demands
-  # n_levels_count: 10         # for "auto" mode
-  # n_levels_values: [-3000, -1500, 0]  # for "explicit" mode [kN]
+  # n_levels_count: 10
+  # n_levels_values: [-3000, -1500, 0]

@@ -197,11 +197,11 @@ class TestEC2BridgeTension(unittest.TestCase):
 
     def test_ec2_eps_ct_attributes(self):
         """fben2 must expose eps_ct and eps_ctd."""
-<<<<<<< HEAD
-        ec2 = fben2(fck=30, ls='F')
-=======
+
+        # ec2 = fben2(fck=30, ls='F')
+
         ec2 = fben2(fck=30, ls='F', loadtype='slow', TypeConc='R')
->>>>>>> 1c915a136cc4ef20c1bdcca74cc22b62f3cb58b3
+
         self.assertGreater(ec2.eps_ct, 0.0)
         self.assertGreater(ec2.eps_ctd, 0.0)
         # eps_ct = fctm / ecm

@@ -100,7 +100,7 @@ from .materials.ec2_bridge import concrete_from_class, concrete_from_ec2
 # ---- Material builders (unchanged) ----
 
 _MATERIAL_BUILDERS = {
-    "concrete": {
+    "concrete_ec2_gen1_custom": {
         "cls": Concrete,
         "params": ["fck", "gamma_c", "alpha_cc", "n_parabola",
                     "eps_c2", "eps_cu2", "fct", "Ec"],
@@ -116,13 +116,21 @@ _MATERIAL_BUILDERS = {
     },
 }
 
+# Backward-compatible aliases for material type names.
+_MATERIAL_ALIASES = {
+    "concrete": "concrete_ec2_gen1_custom",
+    "concrete_ec2": "concrete_ec2_gen1",
+}
+
 
 def _build_material(name, spec):
     """
     Build a Material instance from a YAML specification dict.
 
-    Supported types: ``concrete``, ``concrete_ec2``, ``steel``,
-    ``tabulated``.
+    Supported types: ``concrete_ec2_gen1_custom``,
+    ``concrete_ec2_gen1``, ``steel``, ``tabulated``.
+    Legacy aliases ``concrete`` and ``concrete_ec2`` are also
+    accepted.
 
     Parameters
     ----------
@@ -142,7 +150,10 @@ def _build_material(name, spec):
     """
     mat_type = spec.get("type", "").lower()
 
-    if mat_type == "concrete_ec2":
+    # Resolve backward-compatible aliases.
+    mat_type = _MATERIAL_ALIASES.get(mat_type, mat_type)
+
+    if mat_type == "concrete_ec2_gen1":
         # Tension branch flags (common to both class-based and fck-based).
         enable_tension = bool(spec.get("enable_tension", False))
         tension_fct = spec.get("tension_fct", "fctd")
@@ -162,8 +173,8 @@ def _build_material(name, spec):
         fck = spec.get("fck")
         if fck is None:
             raise ValueError(
-                f"Material '{name}': concrete_ec2 requires 'class' "
-                f"(e.g. 'C30/37') or 'fck'."
+                f"Material '{name}': concrete_ec2_gen1 requires "
+                f"'class' (e.g. 'C30/37') or 'fck'."
             )
         return concrete_from_ec2(
             fck=float(fck),
@@ -179,7 +190,8 @@ def _build_material(name, spec):
     if mat_type not in _MATERIAL_BUILDERS:
         raise ValueError(
             f"Unknown material type '{mat_type}' for '{name}'. "
-            f"Valid: {list(_MATERIAL_BUILDERS.keys())} + 'concrete_ec2'"
+            f"Valid: {list(_MATERIAL_BUILDERS.keys())} "
+            f"+ 'concrete_ec2_gen1'"
         )
 
     builder = _MATERIAL_BUILDERS[mat_type]
@@ -355,6 +367,11 @@ def _parse_rebars(sec_spec, materials):
     """
     Parse the ``rebars`` list from a section YAML block.
 
+    If ``As`` is omitted but ``diameter`` is given, the area is
+    computed automatically as
+    :math:`A_s = n_{\\text{bars}} \\cdot \\pi/4 \\cdot d^2`.
+    If both are given, ``As`` takes precedence.
+
     Parameters
     ----------
     sec_spec : dict
@@ -375,7 +392,7 @@ def _parse_rebars(sec_spec, materials):
             )
         rebars.append(RebarLayer(
             y=float(rb_spec["y"]),
-            As=float(rb_spec["As"]),
+            As=float(rb_spec.get("As", 0)),
             material=materials[mat_name],
             x=float(rb_spec["x"]) if "x" in rb_spec else None,
             embedded=bool(rb_spec.get("embedded", True)),
@@ -605,5 +622,10 @@ def _parse_output_flags(output_spec):
     flags.setdefault("generate_mx_my", False)
     flags.setdefault("generate_3d_surface", False)
     flags.setdefault("n_angles_mx_my", 144)
+
+    # Moment-curvature and ductility generation defaults.
+    flags.setdefault("generate_moment_curvature", True)
+    flags.setdefault("generate_polar_ductility", True)
+    flags.setdefault("generate_3d_moment_curvature", True)
 
     return flags

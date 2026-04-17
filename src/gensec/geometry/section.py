@@ -17,19 +17,33 @@
 # along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
 # ---------------------------------------------------------------------------
 r"""
-Section assembly — backward-compatible wrappers.
+Rectangular section factory — convenience wrapper.
 
-The :class:`RectSection` class is retained for backward compatibility
-and YAML files that specify simple rectangular sections. Internally,
-it creates a :class:`GenericSection` with a rectangular polygon.
+:func:`RectSection` is a factory function (not a class) that builds
+a :class:`GenericSection` with a rectangular polygon and grid
+meshing.  It replaces the former ``RectSection`` dataclass, which
+was a thin delegation wrapper that introduced a mesh-size bug on
+anisotropic grids.
 
-For new code, use :class:`GenericSection` directly with any
-Shapely polygon, or use the factory functions in
-:mod:`gensec.geometry.primitives`.
+The returned object **is** a :class:`GenericSection`.  All
+attributes expected by :class:`~gensec.solver.FiberSolver` are
+available directly (``x_fibers``, ``y_fibers``, ``A_fibers``,
+``B``, ``H``, ``n_fibers_x``, ``n_fibers_y``, ``dx``, ``dy``,
+``polygon``, …).
+
+Grid resolution
+---------------
+The mesh resolution in the y-direction is controlled by
+``n_fibers_y``.  The x-direction follows one of two rules:
+
+- **Isotropic** (default, ``n_fibers_x ≤ 1``): the x-resolution
+  is derived from the same ``mesh_size = H / n_fibers_y``, giving
+  a square-celled grid.  Example: B = 300, H = 600, n_fibers_y = 100
+  → mesh_size = 6 → n_fibers_x = ceil(300/6) = 50.
+- **Explicit** (``n_fibers_x > 1``): the user-specified value is
+  passed as ``n_grid_x``.
 """
 
-import numpy as np
-from dataclasses import dataclass
 from typing import List
 
 from .fiber import RebarLayer
@@ -38,17 +52,10 @@ from .primitives import rect_poly
 from ..materials.base import Material
 
 
-@dataclass
-class RectSection:
+def RectSection(B, H, bulk_material, rebars,
+                n_fibers_y=100, n_fibers_x=1):
     r"""
-    Rectangular cross-section — backward-compatible wrapper.
-
-    Constructs a :class:`GenericSection` with a rectangular polygon
-    of size :math:`B \times H`. All attributes expected by
-    :class:`~gensec.solver.FiberSolver` are delegated to the inner
-    ``GenericSection``.
-
-    For new code, prefer using :class:`GenericSection` directly.
+    Create a rectangular :class:`GenericSection`.
 
     Parameters
     ----------
@@ -57,103 +64,42 @@ class RectSection:
     H : float
         Height (y-direction) [mm].
     bulk_material : Material
-        Bulk material (concrete, timber, ...).
+        Bulk material (concrete, timber, …).
     rebars : list of RebarLayer
         Point fibers.
     n_fibers_y : int, optional
-        Fiber rows. Default 100.
+        Fiber rows.  Controls the isotropic mesh size:
+        :math:`s = H / n_y`.  Default 100.
     n_fibers_x : int, optional
-        Fiber columns. Default 1 (uniaxial mode).
+        Fiber columns.  When ``> 1``, overrides the x-resolution
+        explicitly.  When ``≤ 1`` (default), the x-resolution is
+        derived from the isotropic mesh size :math:`s`.
 
-    Attributes
-    ----------
-    _generic : GenericSection
-        Inner section object that does all the work.
+    Returns
+    -------
+    GenericSection
+        Fully meshed rectangular section with all attributes
+        expected by the solver (``x_fibers``, ``y_fibers``,
+        ``A_fibers``, ``B``, ``H``, ``n_fibers_x``, ``n_fibers_y``,
+        ``dx``, ``dy``, ``polygon``, …).
     """
+    poly = rect_poly(B, H)
+    dy = H / max(n_fibers_y, 1)
 
-    B: float
-    H: float
-    bulk_material: Material
-    rebars: List[RebarLayer]
-    n_fibers_y: int = 100
-    n_fibers_x: int = 1
+    kwargs = dict(
+        polygon=poly,
+        bulk_material=bulk_material,
+        rebars=rebars,
+        mesh_size=dy,
+        mesh_method="grid",
+        n_grid_y=n_fibers_y,
+    )
 
-    def __post_init__(self):
-        # Compute mesh_size from the requested grid resolution.
-        # The grid mesher in GenericSection uses ceil(B/s) and
-        # ceil(H/s), so we pick s to reproduce the exact nx, ny.
-        dx = self.B / max(self.n_fibers_x, 1)
-        dy = self.H / max(self.n_fibers_y, 1)
-        # Use the smaller of the two so neither axis is coarser
-        # than requested.
-        mesh_size = min(dx, dy)
+    if n_fibers_x > 1:
+        # User explicitly requests a specific x resolution.
+        kwargs["n_grid_x"] = n_fibers_x
 
-        poly = rect_poly(self.B, self.H)
-        self._generic = GenericSection(
-            polygon=poly,
-            bulk_material=self.bulk_material,
-            rebars=self.rebars,
-            mesh_size=mesh_size,
-            mesh_method="grid",
-        )
+    # Otherwise: n_grid_x is None → GenericSection derives
+    # n_fibers_x from mesh_size (isotropic square cells).
 
-        # Expose grid dimensions (may differ slightly due to ceil)
-        self.n_fibers_x = self._generic.n_fibers_x
-        self.n_fibers_y = self._generic.n_fibers_y
-        self.n_fibers = self._generic.n_fibers
-        self.dx = self.B / self.n_fibers_x
-        self.dy = self.H / self.n_fibers_y
-
-    # ------------------------------------------------------------------
-    #  Delegated array attributes
-    # ------------------------------------------------------------------
-
-    @property
-    def x_fibers(self):
-        """x-coordinates of bulk fiber centroids [mm]."""
-        return self._generic.x_fibers
-
-    @property
-    def y_fibers(self):
-        """y-coordinates of bulk fiber centroids [mm]."""
-        return self._generic.y_fibers
-
-    @property
-    def A_fibers(self):
-        """Bulk fiber areas [mm²]."""
-        return self._generic.A_fibers
-
-    @property
-    def x_rebars(self):
-        """x-coordinates of rebar layers [mm]."""
-        return self._generic.x_rebars
-
-    @property
-    def y_rebars(self):
-        """y-coordinates of rebar layers [mm]."""
-        return self._generic.y_rebars
-
-    @property
-    def A_rebars(self):
-        """Rebar areas [mm²]."""
-        return self._generic.A_rebars
-
-    @property
-    def embedded_rebars(self):
-        """Embedded flags for rebars."""
-        return self._generic.embedded_rebars
-
-    @property
-    def x_centroid(self):
-        r"""Gross centroid x-coordinate: :math:`B/2` [mm]."""
-        return self._generic.x_centroid
-
-    @property
-    def y_centroid(self):
-        r"""Gross centroid y-coordinate: :math:`H/2` [mm]."""
-        return self._generic.y_centroid
-
-    @property
-    def polygon(self):
-        """Underlying Shapely polygon."""
-        return self._generic.polygon
+    return GenericSection(**kwargs)

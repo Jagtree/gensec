@@ -2,7 +2,7 @@
 
 materials:
   concrete_1:
-    type: concrete
+    type: concrete_ec2_gen1_custom
     fck: 30.0
     gamma_c: 1.5
     alpha_cc: 0.85
@@ -52,3 +52,6 @@ output:
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144
+  generate_moment_curvature: false
+  generate_polar_ductility: false
+  generate_3d_moment_curvature: false
