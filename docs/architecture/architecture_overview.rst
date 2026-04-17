@@ -12,9 +12,6 @@ No prior software engineering knowledge is required beyond a basic
 familiarity with the concept of *functions* and *objects* (containers
 that group data and operations together).
 
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 
 What GenSec does

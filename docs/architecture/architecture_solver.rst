@@ -9,9 +9,6 @@ goes from a section definition to resistance domains and utilization
 ratios.  Each step is explained with both the engineering meaning and
 the software mechanism.
 
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 
 Overview: three layers

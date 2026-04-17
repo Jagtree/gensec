@@ -8,10 +8,6 @@ This document describes how data enters GenSec (YAML input), how
 it is processed (CLI orchestration), and how results leave (JSON,
 CSV, plots).
 
-.. contents:: On this page
-   :local:
-   :depth: 2
-
 
 Data flow
 ----------
