@@ -7,7 +7,7 @@ Installation
 Requirements
 ------------
 
-GenSec requires **Python 3.10** or later.
+GenSec requires **Python 3.10** or later (at the moment, 3.14 is not supported because of *triangle* package compatibility).
 
 Core dependencies (installed automatically):
 

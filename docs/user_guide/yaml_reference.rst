@@ -8,9 +8,6 @@ A GenSec YAML file has four top-level blocks: ``materials``, ``section``,
 ``demands`` (optional), and ``combinations`` (optional).  An ``output``
 block controls which post-processing artefacts are generated.
 
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 
 ``materials`` block
