@@ -1,6 +1,6 @@
 materials:
   concrete_1:
-    type: concrete
+    type: concrete_ec2_gen1_custom
     fck: 25.0
     gamma_c: 1.5
     alpha_cc: 0.85

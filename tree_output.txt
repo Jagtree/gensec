@@ -1,8 +1,13 @@
+├── 📁 .claude
 ├── 📁 .github
+├── 📁 .pytest_cache
 ├── 📁 docs
+├── 📁 htmlcov
 ├── 📁 src
 ├── 📁 tests
+├── 📄 .coverage
 ├── 📄 .gitignore
+├── 📄 benchmark_numba_lazy_all_examples.ps1
 ├── 📄 CHANGELOG_v0.2.0.md
 ├── 📄 CLA.md
 ├── 📄 COMMERCIAL_LICENSE.md
@@ -20,6 +25,8 @@
 ├── 📄 tree_output.txt
 └── 📄 uv.lock
 │   ├── 📄 __init__.py
+│   ├── 📄 test_capacity_v2.py
+│   ├── 📄 test_check.py
 │   ├── 📄 test_infrastructure.py
 │   ├── 📄 test_materials.py
 │   ├── 📄 test_solver_biaxial.py
@@ -72,7 +79,43 @@
 │   │   │           ├── 📄 logo_alone.png
 │   │   │           ├── 📄 logo_photoshop.psd
 │   │   │           └── 📄 logolight.png
+│   ├── 📄 .gitignore
+│   ├── 📄 class_index.html
+│   ├── 📄 coverage_html_cb_188fc9a4.js
+│   ├── 📄 favicon_32_cb_c827f16f.png
+│   ├── 📄 function_index.html
+│   ├── 📄 index.html
+│   ├── 📄 keybd_closed_cb_900cfef5.png
+│   ├── 📄 status.json
+│   ├── 📄 style_cb_5c747636.css
+│   ├── 📄 z_3c5b0bfc876ecd2f___init___py.html
+│   ├── 📄 z_3c5b0bfc876ecd2f_export_py.html
+│   ├── 📄 z_3c5b0bfc876ecd2f_plots_py.html
+│   ├── 📄 z_3c5b0bfc876ecd2f_report_py.html
+│   ├── 📄 z_49ee479fe981e52e___init___py.html
+│   ├── 📄 z_49ee479fe981e52e_capacity_py.html
+│   ├── 📄 z_49ee479fe981e52e_check_py.html
+│   ├── 📄 z_49ee479fe981e52e_integrator_py.html
+│   ├── 📄 z_7a81ea0209ae88f8___init___py.html
+│   ├── 📄 z_7a81ea0209ae88f8_fiber_py.html
+│   ├── 📄 z_7a81ea0209ae88f8_geometry_py.html
+│   ├── 📄 z_7a81ea0209ae88f8_primitives_py.html
+│   ├── 📄 z_7a81ea0209ae88f8_section_py.html
+│   ├── 📄 z_ce8e0162c3182114___init___py.html
+│   ├── 📄 z_ce8e0162c3182114_base_py.html
+│   ├── 📄 z_ce8e0162c3182114_concrete_py.html
+│   ├── 📄 z_ce8e0162c3182114_ec2_bridge_py.html
+│   ├── 📄 z_ce8e0162c3182114_ec2_properties_py.html
+│   ├── 📄 z_ce8e0162c3182114_en10025_properties_py.html
+│   ├── 📄 z_ce8e0162c3182114_steel_py.html
+│   ├── 📄 z_ce8e0162c3182114_tabulated_py.html
+│   ├── 📄 z_e6b90a2799370602___init___py.html
+│   ├── 📄 z_e6b90a2799370602__version_py.html
+│   ├── 📄 z_e6b90a2799370602_cli_py.html
+│   └── 📄 z_e6b90a2799370602_io_yaml_py.html
+│   ├── 📁 _templates
 │   ├── 📁 api
+│   ├── 📁 architecture
 │   ├── 📁 theory
 │   ├── 📁 user_guide
 │   ├── 📄 about.rst
@@ -90,6 +133,9 @@
 │   │   ├── 📄 demand_verification.rst
 │   │   ├── 📄 fiber_method.rst
 │   │   └── 📄 nm_diagram.rst
+│   │   ├── 📄 architecture_io.rst
+│   │   ├── 📄 architecture_overview.rst
+│   │   └── 📄 architecture_solver.rst
 │   │   ├── 📄 gensec.cli.rst
 │   │   ├── 📄 gensec.geometry.rst
 │   │   ├── 📄 gensec.io_yaml.rst
@@ -97,6 +143,17 @@
 │   │   ├── 📄 gensec.output.rst
 │   │   ├── 📄 gensec.solver.rst
 │   │   └── 📄 index.rst
+│   │   └── 📁 sidebar
+│   │       └── 📄 versioning.html
+│   ├── 📁 v
+│   ├── 📄 .gitignore
+│   ├── 📄 CACHEDIR.TAG
+│   └── 📄 README.md
+│   │   └── 📁 cache
+│   │       ├── 📄 lastfailed
+│   │       └── 📄 nodeids
 │   ├── 📁 workflows
 │   └── 📄 pull_request_template.md
 │   │   └── 📄 cla.yml
+│   ├── 📄 settings.json
+│   └── 📄 settings.local.json

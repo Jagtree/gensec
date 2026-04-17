@@ -7,8 +7,73 @@ Changelog
 This page tracks notable changes across GenSec releases.
 
 
-v0.1.0 (current)
+v0.2.0 (current)
 -----------------
+
+Performance overhaul and architecture refinements.
+
+**Performance**
+
+- **Batch integration** (:meth:`~gensec.solver.FiberSolver.integrate_batch`):
+  evaluate thousands of strain configurations in a single vectorized
+  NumPy call.  Eliminates Python-loop overhead in all capacity
+  generators.
+- **Mega-batch with chunking**: biaxial generators
+  (``generate_biaxial``, ``generate_mx_my``) concatenate all curvature
+  directions into a single flat array and integrate in large chunks,
+  reducing per-call overhead by 10–70×.
+- **Analytical tangent stiffness**
+  (:meth:`~gensec.solver.FiberSolver.integrate_with_tangent`):
+  compute internal forces and the 3×3 tangent matrix in one pass,
+  halving the cost of each Newton-Raphson iteration.
+- **Optional Numba JIT**: when ``numba`` is installed
+  (``pip install gensec[fast]``), stress and tangent kernels for
+  ``Concrete`` and ``Steel`` are JIT-compiled to native code
+  (~2–3× speed-up on large fiber arrays).
+- Measured end-to-end improvement: **15–40× faster** on typical
+  biaxial analyses.
+
+**Materials**
+
+- ``tangent(eps)`` and ``tangent_array(eps)`` added to the abstract
+  :class:`~gensec.materials.Material` interface.  Closed-form
+  implementations for ``Concrete``, ``Steel``, and
+  ``TabulatedMaterial``.  Finite-difference fallback in the base class
+  for custom materials.
+- ``stress_array`` now accepts arrays of **any shape** (1-D, 2-D, …)
+  across all built-in materials.
+
+**Geometry**
+
+- ``RectSection`` is now a **factory function** returning a
+  :class:`~gensec.geometry.GenericSection` directly, eliminating the
+  former wrapper class with its 15 delegated properties.
+- ``GenericSection`` accepts optional ``n_grid_x`` / ``n_grid_y``
+  parameters for explicit grid control.
+- ``GenericSection`` exposes ``dx`` and ``dy`` attributes.
+- Isotropic grid by default: when ``n_fibers_x`` is omitted or
+  set to 1, the grid cell size is derived from ``n_fibers_y``
+  (approximately square cells).
+
+**Verification**
+
+- ``VerificationEngine`` auto-disables ``eta_2D`` / ``eta_path_2D``
+  when the resistance domain is 2-D (no My data), preventing QHull
+  errors on degenerate contours.
+- ``_get_contour`` caches failures (degenerate contours at extreme N
+  levels) as ``None`` to avoid expensive retries.
+
+**Output flags**
+
+- New YAML flags: ``generate_moment_curvature``,
+  ``generate_polar_ductility``, ``generate_3d_moment_curvature``
+  (all default ``true`` for backward compatibility).
+- Setting all three to ``false`` skips the computationally expensive
+  moment-curvature pipeline entirely.
+
+
+v0.1.0
+-------
 
 Phase 2 complete: biaxial bending and generic sections.
 

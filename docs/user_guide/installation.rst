@@ -18,6 +18,12 @@ Core dependencies (installed automatically):
 - ``shapely >= 2.0``
 - ``triangle`` — constrained Delaunay triangulation for non-rectangular meshes.
 
+Optional performance dependencies:
+
+- ``numba >= 0.58`` — JIT compilation of material stress/tangent kernels.
+  Provides a ~2–3× speed-up on large fiber arrays.  Install with
+  ``pip install gensec[fast]`` or ``uv sync --all-extras``.
+
 Optional dependencies for building the documentation:
 
 - ``sphinx``
@@ -38,6 +44,12 @@ the virtual environment and dependencies:
    cd gensec
    uv sync
 
+To enable optional Numba acceleration:
+
+.. code-block:: bash
+
+   uv sync --all-groups --all-extras
+
 This creates a ``.venv`` in the project root, installs all dependencies
 (including dev dependencies for testing), and makes the ``gensec`` CLI
 available inside the virtual environment.
@@ -49,6 +61,12 @@ Install with pip
 .. code-block:: bash
 
    pip install -e .
+
+With Numba acceleration:
+
+.. code-block:: bash
+
+   pip install -e ".[fast]"
 
 For development (editable install with test dependencies):
 

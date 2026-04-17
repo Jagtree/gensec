@@ -19,7 +19,9 @@ Rectangular RC column — uniaxial bending
 
 A 300×600 mm reinforced concrete column with three layers of
 reinforcement (bottom, mid-height, top), verified under gravity and
-seismic demands in uniaxial bending.
+seismic demands.  The section uses an isotropic fiber grid
+(``n_fibers_y: 50`` with ``mesh_size = 12 mm``, giving a 25×50 grid
+with 1250 fibers).
 
 .. code-block:: bash
 
@@ -28,8 +30,10 @@ seismic demands in uniaxial bending.
 Key features exercised:
 
 - Direct concrete parameters (``type: concrete``).
-- Uniaxial :math:`N\text{-}M` diagram.
-- Individual demands and combinations with envelope verification.
+- Isotropic fiber grid for biaxial resistance (My from concrete).
+- Individual demands and envelope verification with ``eta_2D``.
+- Output flags: ``generate_moment_curvature: false`` to skip the
+  M-χ pipeline for faster runs.
 
 
 T-section beam
@@ -106,4 +110,35 @@ Key features exercised:
 
 - 2-D fiber grid (``n_fibers_x > 1``).
 - ``generate_3d_surface: true`` and ``generate_mx_my: true``.
+- ``generate_moment_curvature: true`` with polar ductility plots.
 - Multiple demands with :math:`M_y \neq 0`.
+
+
+Biaxial column with staged combinations (v2.1)
+-------------------------------------------------
+
+**File**: ``examples/example_v2_1.yaml``
+
+Demonstrates the full v2.1 demand architecture: simple combinations,
+staged combinations (gravity + seismic), and envelopes.  All four
+:math:`\eta` types are enabled (``eta_3D``, ``eta_2D``, ``eta_path``,
+``eta_path_2D``).
+
+.. code-block:: bash
+
+   uv run gensec examples/example_v2_1.yaml --output-dir results/v2_1
+
+
+YAML reference file
+---------------------
+
+**File**: ``examples/yaml_reference_example.yaml``
+
+A comprehensive YAML file that documents **every supported key** with
+inline comments.  It is a valid input file and can be run as-is.
+Use it as a starting point for new analyses or as a reference for the
+complete output block with all flags.
+
+.. code-block:: bash
+
+   uv run gensec examples/yaml_reference_example.yaml --output-dir results/reference
