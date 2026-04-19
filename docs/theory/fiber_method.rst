@@ -180,3 +180,17 @@ groups:
 
 This is handled transparently by the solver when the section exposes
 a ``mat_indices`` array.
+
+Accuracy and comparison with polygonal integration
+---------------------------------------------------
+
+The fiber method is GenSec's canonical tool for integrating
+non-polynomial integrands — i.e. anything involving the
+constitutive law :math:`\sigma(\varepsilon)`.  For purely
+geometric quantities (area, moments of inertia, section moduli)
+GenSec uses instead a closed-form polygonal integration via
+Green's theorem.  A detailed comparison of the two methods —
+their accuracy rates, their cost, and the specific
+implementation choices in GenSec (Shapely-based cell clipping,
+midpoint vs higher-order quadrature) — is given in
+:ref:`integration_methods`.

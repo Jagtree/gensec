@@ -32,7 +32,7 @@ def print_section_info(sec):
     Print a formatted summary of section properties.
 
     Adapts to the section type: shows bounding box dimensions,
-    gross area, mesh method and quality for generic sections;
+    ideal_gross area, mesh method and quality for generic sections;
     shows B x H and grid resolution for rectangular sections.
 
     Parameters
@@ -46,9 +46,9 @@ def print_section_info(sec):
     # Bounding box
     print(f"  Bounding box: {sec.B:.0f} x {sec.H:.0f} mm")
 
-    # Gross area
-    gross = getattr(sec, 'gross_area', sec.B * sec.H)
-    print(f"  Gross area: {gross:.1f} mm²")
+    # ideal_gross area
+    ideal_gross = getattr(sec, 'ideal_gross_area', sec.B * sec.H)
+    print(f"  ideal_gross area: {ideal_gross:.1f} mm²")
 
     # Mesh info
     mesh_summary = getattr(sec, 'mesh_summary', None)
@@ -93,7 +93,7 @@ def print_section_info(sec):
               f" {r.As:>8.1f} {mn:>10} {emb_str:>5}")
 
     As_tot = sum(r.As for r in sec.rebars)
-    rho = As_tot / gross * 100 if gross > 0 else 0
+    rho = As_tot / ideal_gross * 100 if ideal_gross > 0 else 0
     print(f"\n  As,tot = {As_tot:.1f} mm²  (rho = {rho:.2f}%)")
     print("=" * 70)
 

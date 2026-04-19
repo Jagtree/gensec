@@ -4,13 +4,21 @@
 :mod:`gensec.geometry`
 ===========================
 
-Section definition, fiber meshing, and parametric shape factories.
+Section definition, fiber meshing, parametric shape factories, and
+ideal_gross geometric-property computation.
 
 A cross-section in GenSec is represented as a collection of **bulk
 fibers** (from the meshed polygon) and **point fibers** (rebars,
 tendons, FRP strips).  The :class:`~gensec.geometry.geometry.GenericSection`
 class is the primary section object; :class:`~gensec.geometry.section.RectSection`
 is a backward-compatible wrapper.
+
+The *ideal_gross* geometric properties — area, centroid, centroidal and
+principal second-moments, central inertia ellipse, kern — are
+computed exactly on the polygon (independently of the fiber mesh)
+by the module :mod:`gensec.geometry.properties`.  See the
+dedicated page :doc:`ideal_gross_properties` for the mathematical
+formulation and usage.
 
 
 Point fibers (rebars)
@@ -38,20 +46,23 @@ for common section shapes.  Each polygon can be passed directly to
 
 .. automodule:: gensec.geometry.primitives
    :members:
-   :show-inheritance:
 
 
-Rectangular section (legacy wrapper)
---------------------------------------
+ideal_gross geometric properties
+---------------------------
 
-.. automodule:: gensec.geometry.section
+Exact polygon integrals (Green's theorem), centroidal and
+principal second-moments, central inertia ellipse, kern.
+Documented in detail in :doc:`ideal_gross_properties`.
+
+.. automodule:: gensec.geometry.properties
    :members:
    :show-inheritance:
 
 
-Package-level exports
-----------------------
+Legacy rectangular section
+---------------------------
 
-.. automodule:: gensec.geometry
+.. automodule:: gensec.geometry.section
    :members:
    :show-inheritance:

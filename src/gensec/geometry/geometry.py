@@ -153,8 +153,8 @@ class GenericSection:
         Number of grid columns (grid mesh only; triangular sets -1).
     n_fibers_y : int
         Number of grid rows (grid mesh only; triangular sets -1).
-    gross_area : float
-        Gross polygon area [mm²].
+    ideal_gross_area : float
+        ideal_gross polygon area [mm²].
 
     Raises
     ------
@@ -192,7 +192,7 @@ class GenericSection:
             # Take the largest component
             self.polygon = max(self.polygon.geoms, key=lambda g: g.area)
 
-        self.gross_area = self.polygon.area
+        self.ideal_gross_area = self.polygon.area
 
         # ---- Bounding box properties ----
         minx, miny, maxx, maxy = self.polygon.bounds
@@ -518,7 +518,7 @@ class GenericSection:
     @property
     def x_centroid(self):
         r"""
-        Gross centroid x-coordinate [mm].
+        ideal_gross centroid x-coordinate [mm].
 
         Computed from the Shapely polygon centroid (exact for
         arbitrary polygons, unlike the :math:`B/2` approximation
@@ -528,7 +528,7 @@ class GenericSection:
 
     @property
     def y_centroid(self):
-        r"""Gross centroid y-coordinate [mm]."""
+        r"""ideal_gross centroid y-coordinate [mm]."""
         return self.polygon.centroid.y
 
     @property
@@ -542,6 +542,25 @@ class GenericSection:
         """
         return self._bounds
 
+    @property
+    def ideal_gross_properties(self):
+        """Lazy-computed homogenized section properties."""
+        if getattr(self, '_ideal_gross_props_cache', None) is None:
+            from .properties import (
+                compute_section_properties, HomogenizedRebar,
+            )
+            homog = [
+                HomogenizedRebar(r.x, r.y, r.As, r.material.E)
+                for r in self.rebars
+                if r.embedded and r.x is not None
+            ]
+            self._ideal_gross_props_cache = compute_section_properties(
+                self.polygon,
+                rebars=homog,
+                E_bulk=self.bulk_material.E,
+            )
+        return self._ideal_gross_props_cache
+
     # ------------------------------------------------------------------
     #  Mesh quality diagnostics
     # ------------------------------------------------------------------
@@ -553,7 +572,7 @@ class GenericSection:
         Returns
         -------
         dict
-            Keys: ``n_fibers``, ``total_area``, ``gross_area``,
+            Keys: ``n_fibers``, ``total_area``, ``ideal_gross_area``,
             ``area_error_pct``, ``min_fiber_area``,
             ``max_fiber_area``, ``mean_fiber_area``,
             ``mesh_method``, ``mesh_size``.
@@ -562,10 +581,10 @@ class GenericSection:
         return {
             "n_fibers": self.n_fibers,
             "total_area": total,
-            "gross_area": self.gross_area,
-            "area_error_pct": abs(total - self.gross_area)
-                              / self.gross_area * 100
-                              if self.gross_area > 0 else 0.0,
+            "ideal_gross_area": self.ideal_gross_area,
+            "area_error_pct": abs(total - self.ideal_gross_area)
+                              / self.ideal_gross_area * 100
+                              if self.ideal_gross_area > 0 else 0.0,
             "min_fiber_area": float(self.A_fibers.min())
                               if self.n_fibers > 0 else 0.0,
             "max_fiber_area": float(self.A_fibers.max())
@@ -584,7 +603,7 @@ class GenericSection:
         return (
             f"GenericSection(B={self.B:.1f}, H={self.H:.1f}, "
             f"n_fibers={self.n_fibers}, "
-            f"gross_area={self.gross_area:.1f} mm², "
+            f"ideal_gross_area={self.ideal_gross_area:.1f} mm², "
             f"mesh={self.mesh_method}@{self.mesh_size}mm, "
             f"n_rebars={len(self.rebars)})"
         )

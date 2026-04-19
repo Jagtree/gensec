@@ -260,4 +260,4 @@ section's bounding box:
 - :math:`x` axis: horizontal (width direction).
 - :math:`y` axis: vertical (height direction, upward).
 - Reference point for moments: the **geometric centroid** of the
-  gross section (computed from the polygon, not from the bounding box).
+  ideal_gross section (computed from the polygon, not from the bounding box).

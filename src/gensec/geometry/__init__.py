@@ -26,4 +26,19 @@ and rectangular section assemblies (:class:`RectSection`).
 from .fiber import RebarLayer
 from .section import RectSection
 
-__all__ = ["RebarLayer", "RectSection"]
+
+from .properties import (
+    SectionProperties,
+    HomogenizedRebar,
+    compute_section_properties,
+    compute_inertia_ellipse,
+    compute_kern_polygon,
+)
+
+__all__ = ["RebarLayer", "RectSection",
+    "SectionProperties",
+    "HomogenizedRebar",
+    "compute_section_properties",
+    "compute_inertia_ellipse",
+    "compute_kern_polygon",
+    ]

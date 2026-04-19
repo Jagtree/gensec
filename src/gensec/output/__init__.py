@@ -41,6 +41,16 @@ from .export import (export_nm_domain_csv, export_nm_domain_json,
                     export_mx_my_csv,
                     )
 
+from .geometry_plot import (
+    plot_section_properties,
+    print_section_properties,
+    write_section_report,
+    # legacy aliases
+    plot_ideal_gross_section,
+    print_geometric_properties,
+    write_geometry_report,
+)
+
 __all__ = [
     "print_section_info", "print_fiber_results",
     "plot_nm_diagram", "plot_stress_profile", "plot_mx_my_diagram",
@@ -59,4 +69,11 @@ __all__ = [
     "plot_3d_surface", "plot_moment_curvature_bundle",
     "plot_polar_ductility", "plot_moment_curvature_surface",
     "plot_from_json",
+    "plot_section_properties",
+    "print_section_properties",
+    "write_section_report",
+    # legacy aliases
+    "plot_ideal_gross_section",
+    "print_geometric_properties",
+    "write_geometry_report",
 ]

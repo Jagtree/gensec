@@ -70,7 +70,9 @@ Key capabilities
    :caption: Theory
 
    theory/fiber_method
+   theory/integration_methods
    theory/constitutive_laws
+   theory/ideal_gross_properties
    theory/nm_diagram
    theory/demand_verification
 

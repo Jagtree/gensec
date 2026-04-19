@@ -6,9 +6,38 @@ Changelog
 
 This page tracks notable changes across GenSec releases.
 
-
-v0.2.0 (current)
+v0.3.0 (current)
 -----------------
+
+**Added**
+
+- New module `gensec.geometry.properties` computing homogenized
+  geometric properties on any polygon + rebar configuration:
+  area, centroid, principal axes, extreme-fiber distances,
+  elastic moduli (W), plastic moduli (Z via PNA bisection),
+  central inertia ellipse, and kern.  Torsional constant `I_t`
+  kept as placeholder for a future St.-Venant FEM solver.
+- `GenericSection.ideal_gross_properties` lazy property for
+  user-facing access.
+- New plot/report functions `plot_section_properties`,
+  `print_section_properties`, `write_section_report`
+  (`gensec.output.geometry_plot`); legacy aliases
+  `plot_ideal_gross_section` etc. preserved.
+- Documentation: `docs/theory/ideal_gross_properties.rst` covering
+  the EC2 homogenization convention; `docs/theory/
+  integration_methods.rst` comparing polygonal vs fiber
+  integration with convergence benchmarks on a disc and on a
+  realistic RC cross-section.
+
+**Tests**
+
+- 10 new analytical tests in `tests/test_properties.py` covering
+  mono-material degeneration, RC homogenization (symmetric and
+  asymmetric), plastic modulus of rectangle / circle / I-section
+  / rotated rectangle, and alternative-reference homogenization.
+
+v0.2.0
+-------
 
 Performance overhaul and architecture refinements.
 

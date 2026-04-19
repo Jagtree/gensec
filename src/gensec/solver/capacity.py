@@ -722,8 +722,8 @@ class NMDiagram:
 
         # Initial eps0 estimate
         if abs(chi_start) < 1e-15:
-            A_gross = getattr(sec, 'gross_area', sec.B * sec.H)
-            eps0_guess = N_fixed / (A_gross * 15000)
+            A_ideal_gross = getattr(sec, 'ideal_gross_area', sec.B * sec.H)
+            eps0_guess = N_fixed / (A_ideal_gross * 15000)
             eps0_guess = np.clip(eps0_guess, emb, -emb)
         else:
             eps0_guess = 0.0
