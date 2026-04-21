@@ -573,6 +573,7 @@ class FiberSolver:
                 N_target, Mx_target, eps0_init, chi_x_init,
                 tol, max_iter)
 
+        ### TODO: why only on My and not Mx? It makes no sense.
         if abs(My_target) < M_tol:
             sol = self._solve_uniaxial(
                 N_target, Mx_target, eps0_init, chi_x_init,

@@ -44,7 +44,7 @@ from gensec.output import (
 )
 
 _EXAMPLE_YAML = str(Path(__file__).parent.parent / "examples" / "example_input.yaml")
-_V21_YAML = str(Path(__file__).parent.parent / "examples" / "example_v2.1.yaml")
+_V21_YAML = str(Path(__file__).parent.parent / "examples" / "example_v2_1.yaml")
 _BIAXIAL_YAML = str(Path(__file__).parent.parent / "examples" / "biaxial_column.yaml")
 
 

@@ -1,0 +1,66 @@
+# GenSec — VCASLU validation case
+
+materials:
+  concrete_direct:
+    type: concrete
+    fck: 50.0             # characteristic cylinder strength [MPa] (required)
+    gamma_c: 1.5          # partial safety factor (default 1.5)
+    alpha_cc: 0.85        # long-term coefficient (default 0.85)
+    n_parabola: 2.0       # parabolic exponent (default 2.0)
+    eps_c2: -0.002        # peak-stress strain (default -0.002)
+    eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+
+  B450C:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+    works_in_compression: true
+
+section:
+  B: 1870
+  H: 300
+  bulk_material: concrete_direct
+  n_fibers_y: 100
+  n_fibers_x: 40
+  rebars:
+    - {y: 50, x: 50, material: B450C, n_bars: 1, diameter: 26}
+    - {y: 50, x: 150, material: B450C, n_bars: 1, diameter: 26}
+    - {y: 50, x: 1160, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 50, x: 1720, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 50, x: 1820, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 150, x: 50, material: B450C, n_bars: 1, diameter: 26}
+    - {y: 250, x: 50, material: B450C, n_bars: 1, diameter: 26}
+    - {y: 250, x: 150, material: B450C, n_bars: 1, diameter: 26}
+    - {y: 250, x: 1160, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 250, x: 1720, material: B450C, n_bars: 1, diameter: 20}
+    - {y: 250, x: 1820, material: B450C, n_bars: 1, diameter: 20}
+demands:
+  - name: 1
+    N_kN: 0
+    Mx_kNm: 207.93
+    My_kNm: 240.79
+ 
+output:
+
+  
+  # ── Utilization ratio flags ──
+  eta_3D: true             # default: true
+  eta_2D: true             # default: false
+  eta_path: false           # default: true
+  eta_path_2D: false        # default: false
+  delta_N_tol: 0.003        # default: 0.03 (3%)
+
+  # ── Domain generation ──
+  generate_mx_my: false     # Mx-My contour plots (default: false)
+  generate_3d_surface: true # 3D surface CSV/JSON/plot (default: false)
+  n_angles_mx_my: 144 #144      # angular resolution for Mx-My (default: 144)
+
+  # ── Moment-curvature and ductility ──
+  generate_moment_curvature: false     # M-χ diagrams per N level (default: true)
+  generate_polar_ductility: false      # polar ductility plot (default: true)
+  generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
+
+  # ── N-level strategy ──
+  n_levels_mode: demands
+  # n_levels_count: 10
+  # n_levels_values: [-3000, -1500, 0]

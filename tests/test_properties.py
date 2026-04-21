@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import numpy as np
 from shapely.geometry import Polygon, Point, box as sbox
 
-from properties import (
+from gensec.geometry import (
     compute_section_properties,
     compute_inertia_ellipse,
     compute_kern_polygon,
@@ -43,7 +43,7 @@ def _assert_close(got, want, rel=1e-6, abs_=1e-6, label=""):
 def test_rectangle_pure_geometry():
     B, H = 300.0, 600.0
     p = sbox(0, 0, B, H)
-    s = compute_section_properties(p)
+    s = compute_section_properties(p, compute_plastic=True)
     _assert_close(s.area, B * H, label="rect A")
     _assert_close(s.xg, B / 2, label="rect xG")
     _assert_close(s.yg, H / 2, label="rect yG")
@@ -83,7 +83,8 @@ def test_RC_rectangle_symmetric():
         HomogenizedRebar(B - cov, H - cov, As, E_s),
     ]
     s = compute_section_properties(p, rebars=rebars,
-                                    E_bulk=E_c, E_ref=E_c)
+                                    E_bulk=E_c, E_ref=E_c,
+                                    compute_plastic=True)
     # A_id = B H + 4 As (n_s - 1)
     A_id = B * H + 4.0 * As * (n_s - 1.0)
     _assert_close(s.area, A_id, label="RC A_id")
@@ -116,7 +117,8 @@ def test_RC_rectangle_asymmetric():
         HomogenizedRebar(B - cov, H - cov, As, E_s),
     ]
     s = compute_section_properties(p, rebars=rebars,
-                                    E_bulk=E_c, E_ref=E_c)
+                                    E_bulk=E_c, E_ref=E_c,
+                                    compute_plastic=True)
     A_id = B * H + 2.0 * As * (n_s - 1.0)
     yg_id = (B * H * (H / 2)
              + 2.0 * As * (n_s - 1.0) * (H - cov)) / A_id
@@ -141,8 +143,8 @@ def test_mono_material_degenerates():
         HomogenizedRebar(50, 50, 500.0, E),
         HomogenizedRebar(250, 50, 500.0, E),
     ]
-    s1 = compute_section_properties(p, E_bulk=E)
-    s2 = compute_section_properties(p, rebars=rebars, E_bulk=E)
+    s1 = compute_section_properties(p, E_bulk=E, compute_plastic=True)
+    s2 = compute_section_properties(p, rebars=rebars, E_bulk=E, compute_plastic=True)
     _assert_close(s1.area, s2.area, rel=1e-12, label="mono A")
     _assert_close(s1.Ix, s2.Ix, rel=1e-12, label="mono Ix")
     _assert_close(s1.Z_x, s2.Z_x, rel=1e-9, label="mono Z_x")
@@ -154,7 +156,7 @@ def test_mono_material_degenerates():
 def test_plastic_rectangle():
     B, H = 300.0, 600.0
     p = sbox(-B/2, -H/2, B/2, H/2)
-    s = compute_section_properties(p)
+    s = compute_section_properties(p, compute_plastic=True)
     _assert_close(s.Z_x, B * H ** 2 / 4, rel=1e-4, label="Z_x rect")
     _assert_close(s.Z_y, H * B ** 2 / 4, rel=1e-4, label="Z_y rect")
     # For rectangle: Z_xi = Z_x because α=0.
@@ -167,7 +169,7 @@ def test_plastic_rectangle():
 def test_plastic_circle():
     R = 500.0
     p = Point(0, 0).buffer(R, resolution=64)
-    s = compute_section_properties(p)
+    s = compute_section_properties(p, compute_plastic=True)
     # Z = 4 R^3 / 3 (analytical for full circle)
     Z_exact = 4.0 * R ** 3 / 3.0
     _assert_close(s.Z_x, Z_exact, rel=3e-3, label="Z circle")
@@ -200,7 +202,7 @@ def test_plastic_tsection_symmetric():
         (-bf/2, -hw/2),
     ]
     p = Polygon(coords)
-    s = compute_section_properties(p)
+    s = compute_section_properties(p, compute_plastic=True)
     # Half section (above x axis): flange centroid at (hw/2 + tf/2),
     # web centroid at (hw/4).  Z_x = 2 * [A_f d_f + A_hw d_hw]
     A_f = bf * tf
@@ -227,7 +229,7 @@ def test_plastic_rotated_rectangle():
     R = np.array([[c, -si], [si, c]])
     rot = pts @ R.T
     p = Polygon(rot)
-    s = compute_section_properties(p)
+    s = compute_section_properties(p, compute_plastic=True)
     # Z_xi of the rotated rectangle must equal Z_x of the
     # unrotated one.
     _assert_close(np.rad2deg(s.alpha), 35.0, abs_=1e-6,
@@ -260,7 +262,8 @@ def test_plastic_RC_asymmetric():
         HomogenizedRebar(B/2, H - cov - 50, As, E_s),
     ]
     s = compute_section_properties(p, rebars=rebars,
-                                    E_bulk=E_c, E_ref=E_c)
+                                    E_bulk=E_c, E_ref=E_c,
+                                    compute_plastic=True)
     Z_x_bare = B * H ** 2 / 4
     assert s.Z_x > Z_x_bare, \
         f"Top rebars must increase Z_x: got {s.Z_x:.1f}, " \
@@ -285,7 +288,7 @@ def test_homogenization_alt_reference():
     E_ref = 100000.0
     B, H = 100.0, 100.0
     p = sbox(0.0, 0.0, B, H)
-    s = compute_section_properties(p, E_bulk=E_bulk, E_ref=E_ref)
+    s = compute_section_properties(p, E_bulk=E_bulk, E_ref=E_ref, compute_plastic=True)
     _assert_close(s.n_bulk, 2.0, label="alt-ref n_bulk")
     _assert_close(s.area, 2.0 * B * H, label="alt-ref A")
     _assert_close(s.Ix, 2.0 * B * H ** 3 / 12,

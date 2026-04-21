@@ -254,7 +254,10 @@ class NMDiagram:
         etop_parts.append(b2)
 
         # Branch 3: near-uniform compression
-        n3 = n // 4
+        ### TODO: reduce from n3 = n // 4 to n3 = n // 16?
+        ### Tests to do
+        #n3 = n // 4
+        n3 = n // 2
         ev3 = np.linspace(emb * 0.5, emb, n3)
         sp = abs(emb) * 0.15
         d3 = np.linspace(-sp, sp, 3)
@@ -265,6 +268,9 @@ class NMDiagram:
             etop_parts.append(ev - d3)
 
         # Branch 4: pure tension
+        ### TODO: reduce from n4 = n // 2 to n4 = n // 8?
+        ### Tests to do
+        #n4 = n // 2
         n4 = n // 2
         ev4 = np.linspace(0, exg, n4)
         # Uniform tension
@@ -434,8 +440,10 @@ class NMDiagram:
     ### the same quality.
     ### Check also the consistency of 72 n_angles and default 144 n_angles.
     ### Can we do an optimization here with vectorization across angles?
+    ### Pass from 200 to 50 in n_points_per_angle? Enough?
+    ### Pass from 72 to 36 in n_angles? Enough?
 
-    def generate_biaxial(self, n_angles=72, n_points_per_angle=200):
+    def generate_biaxial(self, n_angles=180, n_points_per_angle=200):
         r"""
         Generate the 3D resistance surface (N, Mx, My).
 
