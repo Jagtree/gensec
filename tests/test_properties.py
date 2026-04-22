@@ -17,7 +17,7 @@ Covers:
    exactly the same result as no rebars.
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 from shapely.geometry import Polygon, Point, box as sbox
