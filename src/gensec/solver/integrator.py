@@ -641,7 +641,7 @@ class FiberSolver:
         eps_hi *= 1.01
 
         # --- Batch scan ---
-        n_scan = 120
+        n_scan = 20 #120
         eps_vals = np.linspace(eps_lo, eps_hi, n_scan)
         chi_zero = np.zeros(n_scan)
         N_vals, _, _ = self.integrate_batch(eps_vals, chi_zero, chi_zero)

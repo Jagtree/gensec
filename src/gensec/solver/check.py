@@ -278,9 +278,22 @@ class MxMyContour:
     """
 
     def __init__(self, mx_my_data):
-        Mx = mx_my_data["Mx"]
-        My = mx_my_data["My"]
+        Mx = np.asarray(mx_my_data["Mx"], dtype=float)
+        My = np.asarray(mx_my_data["My"], dtype=float)
         self.N_fixed = mx_my_data.get("N_fixed_kN", 0.0) * 1e3
+
+        # Filter NaN points (curvature directions where no valid
+        # N-crossing was found by generate_mx_my).
+        valid = np.isfinite(Mx) & np.isfinite(My)
+        Mx = Mx[valid]
+        My = My[valid]
+
+        if len(Mx) < 3:
+            raise ValueError(
+                f"MxMyContour: only {len(Mx)} valid points at "
+                f"N={self.N_fixed / 1e3:.1f} kN — cannot build "
+                f"convex hull (need >= 3).")
+
         pts = np.column_stack([Mx, My])
         self.hull = ConvexHull(pts)
         self._equations = self.hull.equations
@@ -475,10 +488,14 @@ class VerificationEngine:
                     n_points_per_angle=self.n_points,
                 )
                 self._contour_cache[key] = MxMyContour(mx_my_data)
-            except Exception:
+            except Exception as exc:
                 # Degenerate contour (collinear points, extreme N,
-                # near-zero moment capacity, …).
+                # near-zero moment capacity, insufficient crossings).
                 # Cache None to avoid retrying.
+                import sys
+                print(f"  WARNING: Mx-My contour at "
+                      f"N={N_fixed / 1e3:.1f} kN failed: {exc}",
+                      file=sys.stderr)
                 self._contour_cache[key] = None
         return self._contour_cache[key]
 

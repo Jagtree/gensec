@@ -555,7 +555,13 @@ class GenericSection:
                 compute_section_properties, HomogenizedRebar,
             )
             homog = [
-                HomogenizedRebar(r.x, r.y, r.As, r.material.E)
+                ### TODO: generalize Es to another flag which is more generic. Es is only for steel, but
+                ### how does it works with a generic rebar? Carbon? Fiberglass? 
+                ### Maybe we can add a method to the RebarLayer class to return the appropriate 
+                ### stiffness for homogenization, which by default returns Es but can be overridden 
+                ### for different materials.
+                ### At the moment, we stay on Es.
+                HomogenizedRebar(r.x, r.y, r.As, r.material.Es)
                 for r in self.rebars
                 if r.embedded and r.x is not None
             ]
@@ -567,10 +573,13 @@ class GenericSection:
                     "multi-material bulk zones."
                 )
             else:
+                ### TODO: generalize Ec to another flag which is more generic. Ec is only for steel, but
+                ### how does it works with a generic bulk? Wood? Other? 
+                ### At the moment, we stay on Ec.
                 self._ideal_gross_props_cache = compute_section_properties(
                     self.polygon,
                     rebars=homog,
-                    E_bulk=self.bulk_material.E,
+                    E_bulk=self.bulk_material.Ec,
                 )
         return self._ideal_gross_props_cache
 

@@ -41,6 +41,7 @@ from .output import (
     print_section_info, print_fiber_results,
     plot_nm_diagram, plot_stress_profile, plot_mx_my_diagram,
     plot_moment_curvature, plot_section, plot_section_state,
+    plot_section_properties,
     plot_demand_heatmap, plot_3d_surface,
     plot_moment_curvature_bundle, plot_polar_ductility,
     plot_moment_curvature_surface,
@@ -455,8 +456,15 @@ def _run(args):
     # ==============================================================
     demand_plot = []
     if demands:
-        # Geometry-only section drawing.
-        fig_geom = plot_section(section, title="Section geometry")
+        # Geometry + homogenized properties drawing.
+        # Falls back to plain geometry if the section does not
+        # expose ideal_gross_properties (e.g. legacy RectSection).
+        if hasattr(section, 'ideal_gross_properties'):
+            fig_geom = plot_section_properties(
+                section, title="Section geometry")
+        else:
+            fig_geom = plot_section(
+                section, title="Section geometry")
         p = os.path.join(outdir, "section_geometry.png")
         fig_geom.savefig(p, dpi=150)
         plt.close(fig_geom)

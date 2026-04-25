@@ -5,7 +5,8 @@
 ├── 📁 htmlcov
 ├── 📁 src
 ├── 📁 tests
-├── 📄 .coverage
+├── 📁 web
+├── 📄 .coveragerc
 ├── 📄 .gitignore
 ├── 📄 benchmark_numba_lazy_all_examples.ps1
 ├── 📄 CHANGELOG_v0.2.0.md
@@ -24,22 +25,31 @@
 ├── 📄 setup_licensing.py
 ├── 📄 tree_output.txt
 └── 📄 uv.lock
+│   ├── 📁 js
+│   └── 📄 index.html
+│   │   ├── 📄 app.jsx
+│   │   ├── 📄 data.jsx
+│   │   ├── 📄 panels.jsx
+│   │   ├── 📄 plots.jsx
+│   │   └── 📄 tweaks.jsx
 │   ├── 📄 __init__.py
 │   ├── 📄 test_capacity_v2.py
 │   ├── 📄 test_check.py
 │   ├── 📄 test_infrastructure.py
 │   ├── 📄 test_materials.py
+│   ├── 📄 test_properties.py
 │   ├── 📄 test_solver_biaxial.py
 │   └── 📄 test_solver_uniaxial.py
 │   ├── 📁 gensec
-│   └── 📁 gensec.egg-info
-│       ├── 📄 .gitignore
-│       ├── 📄 dependency_links.txt
-│       ├── 📄 entry_points.txt
-│       ├── 📄 PKG-INFO
-│       ├── 📄 requires.txt
-│       ├── 📄 SOURCES.txt
-│       └── 📄 top_level.txt
+│   ├── 📁 gensec.egg-info
+│   └── 📄 todo_postit.txt
+│   │   ├── 📄 .gitignore
+│   │   ├── 📄 dependency_links.txt
+│   │   ├── 📄 entry_points.txt
+│   │   ├── 📄 PKG-INFO
+│   │   ├── 📄 requires.txt
+│   │   ├── 📄 SOURCES.txt
+│   │   └── 📄 top_level.txt
 │   │   ├── 📁 _docs_assets
 │   │   ├── 📁 geometry
 │   │   ├── 📁 materials
@@ -54,9 +64,11 @@
 │   │   │   ├── 📄 __init__.py
 │   │   │   ├── 📄 capacity.py
 │   │   │   ├── 📄 check.py
+│   │   │   ├── 📄 checkbackupgemini.py
 │   │   │   └── 📄 integrator.py
 │   │   │   ├── 📄 __init__.py
 │   │   │   ├── 📄 export.py
+│   │   │   ├── 📄 geometry_plot.py
 │   │   │   ├── 📄 plots.py
 │   │   │   └── 📄 report.py
 │   │   │   ├── 📄 __init__.py
@@ -71,6 +83,7 @@
 │   │   │   ├── 📄 fiber.py
 │   │   │   ├── 📄 geometry.py
 │   │   │   ├── 📄 primitives.py
+│   │   │   ├── 📄 properties.py
 │   │   │   └── 📄 section.py
 │   │   │   └── 📁 static
 │   │   │       └── 📁 logo
@@ -90,6 +103,7 @@
 │   ├── 📄 style_cb_5c747636.css
 │   ├── 📄 z_3c5b0bfc876ecd2f___init___py.html
 │   ├── 📄 z_3c5b0bfc876ecd2f_export_py.html
+│   ├── 📄 z_3c5b0bfc876ecd2f_geometry_plot_py.html
 │   ├── 📄 z_3c5b0bfc876ecd2f_plots_py.html
 │   ├── 📄 z_3c5b0bfc876ecd2f_report_py.html
 │   ├── 📄 z_49ee479fe981e52e___init___py.html
@@ -100,6 +114,7 @@
 │   ├── 📄 z_7a81ea0209ae88f8_fiber_py.html
 │   ├── 📄 z_7a81ea0209ae88f8_geometry_py.html
 │   ├── 📄 z_7a81ea0209ae88f8_primitives_py.html
+│   ├── 📄 z_7a81ea0209ae88f8_properties_py.html
 │   ├── 📄 z_7a81ea0209ae88f8_section_py.html
 │   ├── 📄 z_ce8e0162c3182114___init___py.html
 │   ├── 📄 z_ce8e0162c3182114_base_py.html
@@ -110,6 +125,8 @@
 │   ├── 📄 z_ce8e0162c3182114_steel_py.html
 │   ├── 📄 z_ce8e0162c3182114_tabulated_py.html
 │   ├── 📄 z_e6b90a2799370602___init___py.html
+│   ├── 📄 z_e6b90a2799370602___main___py.html
+│   ├── 📄 z_e6b90a2799370602__about_py.html
 │   ├── 📄 z_e6b90a2799370602__version_py.html
 │   ├── 📄 z_e6b90a2799370602_cli_py.html
 │   └── 📄 z_e6b90a2799370602_io_yaml_py.html
@@ -132,6 +149,8 @@
 │   │   ├── 📄 constitutive_laws.rst
 │   │   ├── 📄 demand_verification.rst
 │   │   ├── 📄 fiber_method.rst
+│   │   ├── 📄 ideal_gross_properties.rst
+│   │   ├── 📄 integration_methods.rst
 │   │   └── 📄 nm_diagram.rst
 │   │   ├── 📄 architecture_io.rst
 │   │   ├── 📄 architecture_overview.rst

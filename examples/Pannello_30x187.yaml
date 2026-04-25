@@ -9,12 +9,14 @@ materials:
     n_parabola: 2.0       # parabolic exponent (default 2.0)
     eps_c2: -0.002        # peak-stress strain (default -0.002)
     eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+    Ec: 37000.0           # Young's modulus [MPa] (required)
 
   B450C:
     type: steel
     fyk: 450.0
     gamma_s: 1.15
     works_in_compression: true
+    Es: 200000.0          # Young's modulus [MPa] (required)
 
 section:
   B: 300
@@ -48,19 +50,19 @@ output:
   eta_2D: true             # default: false
   eta_path: false           # default: true
   eta_path_2D: false        # default: false
-  delta_N_tol: 0.003        # default: 0.03 (3%)
+  delta_N_tol: 0.001        # default: 0.03 (3%)
 
   # ── Domain generation ──
-  generate_mx_my: false     # Mx-My contour plots (default: false)
+  generate_mx_my: true     # Mx-My contour plots (default: false)
   generate_3d_surface: true # 3D surface CSV/JSON/plot (default: false)
-  n_angles_mx_my: 144 #144      # angular resolution for Mx-My (default: 144)
+  n_angles_mx_my: 360 #144      # angular resolution for Mx-My (default: 144)
 
   # ── Moment-curvature and ductility ──
-  generate_moment_curvature: false     # M-χ diagrams per N level (default: true)
+  generate_moment_curvature: true     # M-χ diagrams per N level (default: true)
   generate_polar_ductility: false      # polar ductility plot (default: true)
   generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
 
   # ── N-level strategy ──
   n_levels_mode: demands
-  # n_levels_count: 10
+  #n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]

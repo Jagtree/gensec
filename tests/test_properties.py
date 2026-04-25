@@ -168,7 +168,7 @@ def test_plastic_rectangle():
 
 def test_plastic_circle():
     R = 500.0
-    p = Point(0, 0).buffer(R, resolution=64)
+    p = Point(0, 0).buffer(R, quad_segs=64)
     s = compute_section_properties(p, compute_plastic=True)
     # Z = 4 R^3 / 3 (analytical for full circle)
     Z_exact = 4.0 * R ** 3 / 3.0

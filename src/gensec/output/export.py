@@ -424,6 +424,13 @@ def export_moment_curvature_json(mc_data, filepath):
                 data[f"{chi_key}_km"] = round(chi_val * 1e6, 6)
             if M_val is not None:
                 data[f"{M_key}_kNm"] = round(M_val / 1e6, 6)
+
+    # Ductility ratios: μ = χ_ultimate / χ_yield.
+    for suffix in ("_pos", "_neg"):
+        mu = mc_data.get(f"ductility{suffix}")
+        if mu is not None:
+            data[f"ductility{suffix}"] = round(mu, 4)
+
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
 

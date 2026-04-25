@@ -197,12 +197,90 @@ def _axis_label(ax, x, y, text, *,
 
 
 def _set_axis_limits(ax, bounds):
-    r"""Set axis limits with a 12% margin around a bounding box."""
+    r"""Set axis limits with a 20 % margin around a bounding box."""
     minx, miny, maxx, maxy = bounds
-    mx = (maxx - minx) * 0.12
-    my = (maxy - miny) * 0.12
+    mx = (maxx - minx) * 0.20
+    my = (maxy - miny) * 0.20
     ax.set_xlim(minx - mx, maxx + mx)
     ax.set_ylim(miny - my, maxy + my)
+
+
+# ==================================================================
+#  Info box with key numeric properties
+# ==================================================================
+
+
+def _compact_sci(value, decimals=2):
+    r"""
+    Format a float in compact scientific notation for the info
+    box, e.g. ``1.23e+06``.  Returns ``'--'`` for NaN or None.
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return '--'
+    return f"{value:.{decimals}e}"
+
+
+def _draw_properties_info_box(ax, props):
+    r"""
+    Draw an anchored text box in the upper-right corner of *ax*
+    showing the most important homogenized geometric properties.
+
+    The box contains:
+
+    - homogenized area :math:`A_{\mathrm{id}}`;
+    - centroid coordinates :math:`(x_G,\;y_G)`;
+    - centroidal second-moments :math:`I_x,\;I_y`;
+    - elastic section moduli :math:`W_x,\;W_y` (minimum of the
+      two sides);
+    - principal-axis angle :math:`\alpha` and principal moments
+      :math:`I_\xi,\;I_\eta` (only when the user and principal
+      frames differ by more than :math:`0.01^{\circ}`).
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Target axes.
+    props : SectionProperties
+        Homogenized properties bundle.
+    """
+    deg = np.degrees(props.alpha)
+
+    lines = [
+        f"A   = {_compact_sci(props.area)} mm²",
+        f"xG  = {props.xg:.1f} mm",
+        f"yG  = {props.yg:.1f} mm",
+        f"Ix  = {_compact_sci(props.Ix)} mm⁴",
+        f"Iy  = {_compact_sci(props.Iy)} mm⁴",
+    ]
+
+    # Elastic section moduli — report the smaller side.
+    W_x_min = min(getattr(props, 'W_x_top', float('inf')),
+                  getattr(props, 'W_x_bot', float('inf')))
+    W_y_min = min(getattr(props, 'W_y_left', float('inf')),
+                  getattr(props, 'W_y_right', float('inf')))
+    if W_x_min < float('inf'):
+        lines.append(f"Wx  = {_compact_sci(W_x_min)} mm³")
+    if W_y_min < float('inf'):
+        lines.append(f"Wy  = {_compact_sci(W_y_min)} mm³")
+
+    # Show principal frame only when it differs from the user
+    # frame by more than a negligible amount.
+    near_zero = abs(deg) < 0.01
+    near_90 = abs(abs(deg) - 90.0) < 0.01
+    if not (near_zero or near_90):
+        lines.append(f"α   = {deg:.2f}°")
+        lines.append(f"Iξ  = {_compact_sci(props.I_xi)} mm⁴")
+        lines.append(f"Iη  = {_compact_sci(props.I_eta)} mm⁴")
+
+    text = "\n".join(lines)
+    ax.text(0.98, 0.98, text,
+            transform=ax.transAxes,
+            fontsize=8, fontfamily='monospace',
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round,pad=0.5',
+                      facecolor='white', edgecolor='#AAAAAA',
+                      alpha=0.90),
+            zorder=15)
 
 
 # ==================================================================
@@ -214,8 +292,10 @@ def plot_section_properties(sec, props=None, *,
                              show_ellipse=True,
                              show_kern=True,
                              show_rebars=True,
+                             show_rebar_numbers=True,
                              show_principal=True,
                              show_reference=True,
+                             show_info_box=True,
                              title=None):
     r"""
     Draw the homogenized cross-section with its inertial overlays.
@@ -223,14 +303,15 @@ def plot_section_properties(sec, props=None, *,
     The figure contains:
 
     - the polygon outline (with hole carve-out);
-    - rebar layers (optional);
+    - rebar layers with optional numbering;
     - the centroid :math:`G` (of the *homogenized* section);
     - the user reference axes :math:`x, y` (dashed grey) through
       :math:`G`;
     - the principal axes :math:`\xi, \eta` (solid coloured)
       through :math:`G`;
     - the central inertia ellipse (Culmann, blue);
-    - the kern (semi-transparent orange fill).
+    - the kern (semi-transparent orange fill);
+    - an info box with the key numerical properties (optional).
 
     Axes are clipped to the plot frame and their labels are
     pulled inside to avoid overflow.
@@ -243,7 +324,25 @@ def plot_section_properties(sec, props=None, *,
     props : SectionProperties, optional
         Pre-computed homogenized properties.  If ``None``, uses
         ``sec.ideal_gross_properties``.
-    show_ellipse, show_kern, show_rebars, show_principal, show_reference : bool
+    show_ellipse : bool, optional
+        Show the central inertia ellipse.  Default ``True``.
+    show_kern : bool, optional
+        Show the kern polygon.  Default ``True``.
+    show_rebars : bool, optional
+        Show rebar circles.  Default ``True``.
+    show_rebar_numbers : bool, optional
+        Number each rebar with a 1-based index label.
+        Only effective when ``show_rebars`` is ``True``.
+        Default ``True``.
+    show_principal : bool, optional
+        Show the principal axes :math:`\xi, \eta`.  Default ``True``.
+    show_reference : bool, optional
+        Show the user reference axes :math:`x, y`.
+        Default ``True``.
+    show_info_box : bool, optional
+        Show a summary box with key properties
+        (:math:`A`, centroid, :math:`I_x`, :math:`I_y`,
+        :math:`\alpha`).  Default ``True``.
     title : str or None, optional
 
     Returns
@@ -254,7 +353,7 @@ def plot_section_properties(sec, props=None, *,
         props = sec.ideal_gross_properties
     poly = sec.polygon
 
-    fig, ax = plt.subplots(1, 1, figsize=(9.0, 9.0))
+    fig, ax = plt.subplots(1, 1, figsize=(12.0, 10.0))
 
     _draw_polygon_with_holes(ax, poly,
                               facecolor='#EFEFEF',
@@ -263,16 +362,29 @@ def plot_section_properties(sec, props=None, *,
                               zorder=1)
 
     if show_rebars:
-        for rb in sec.rebars:
+        for i, rb in enumerate(sec.rebars):
             if rb.x is None:
                 continue
             d = rb.diameter if getattr(rb, 'diameter', 0) > 0 \
                 else 16.0
+            color = '#333333' if getattr(rb, 'embedded', True) \
+                else '#CC6600'
             circ = Circle((rb.x, rb.y), d / 2.0,
-                          facecolor='#333333',
+                          facecolor=color,
                           edgecolor='black',
                           linewidth=0.7, zorder=4)
             ax.add_patch(circ)
+
+            if show_rebar_numbers:
+                ax.annotate(
+                    f"{i + 1}", (rb.x, rb.y),
+                    xytext=(12, -4),
+                    textcoords='offset points',
+                    fontsize=7, fontweight='bold',
+                    color='black', zorder=12,
+                    bbox=dict(boxstyle='round,pad=0.2',
+                              facecolor='white', alpha=0.8,
+                              edgecolor='none'))
 
     if show_ellipse:
         ell = compute_inertia_ellipse(props, n_points=240)
@@ -303,7 +415,8 @@ def plot_section_properties(sec, props=None, *,
     _set_axis_limits(ax, bounds)
     xmin, xmax = ax.get_xlim()
     ymin, ymax = ax.get_ylim()
-    limits = (xmin, xmax, ymin, ymax)
+    limits = (1.2*xmin, 1.2*xmax, 1.2*ymin, 1.2*ymax) ### TODO: check the x1.2 factor
+    ax.set_aspect('auto') ###TODO: Check this
 
     xg, yg = props.xg, props.yg
     alpha = props.alpha
@@ -374,6 +487,10 @@ def plot_section_properties(sec, props=None, *,
     if handles:
         ax.legend(handles, labels, loc='best',
                   fontsize=9, framealpha=0.92)
+
+    # ---- Summary info box ----
+    if show_info_box:
+        _draw_properties_info_box(ax, props)
 
     fig.tight_layout()
     return fig

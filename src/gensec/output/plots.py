@@ -29,11 +29,12 @@ Supports both rectangular and arbitrary polygon sections via the
 ``polygon`` attribute from :class:`GenericSection`.
 """
 
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import PathPatch, Circle, Rectangle
 from matplotlib.path import Path
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import TwoSlopeNorm, Normalize
 from scipy.spatial import ConvexHull
 
 
@@ -925,8 +926,9 @@ def plot_3d_surface(nm_3d, demands=None, title="",
     (compression-dominant) and one from below (tension-dominant, N
     axis visually inverted).
 
-    Contour rings ("parallels") and meridian lines ("longitudes")
-    are drawn on the surface to aid shape comprehension.
+    By default, the plot uses `set_box_aspect` to maintain proportional axes.
+    If `set_box_aspect` triggers a warning (e.g., incompatible with tight_layout),
+    the function falls back to normalized axes **automatically**.
 
     Parameters
     ----------
@@ -934,33 +936,45 @@ def plot_3d_surface(nm_3d, demands=None, title="",
         Output of :meth:`NMDiagram.generate_biaxial`. Must contain
         ``N_kN``, ``Mx_kNm``, ``My_kNm``.
     demands : list of dict, optional
+        List of demand points to plot on the surface. Each dict should contain
+        ``N``, ``Mx``, ``My`` (optional), and ``name``.
     title : str, optional
+        Title of the plot.
     n_levels : int, optional
-        Number of N-level slices. Default 20.
+        Number of N-level slices. Default is 20.
     n_angles : int, optional
-        Angular resolution of each contour. Default 72 (every 5°).
+        Angular resolution of each contour. Default is 72 (every 5°).
 
     Returns
     -------
     matplotlib.figure.Figure
+        The generated figure.
     """
-    from matplotlib.colors import Normalize
-
+    # Extract data from input
     N_all = nm_3d["N_kN"]
     Mx_all = nm_3d["Mx_kNm"]
     My_all = nm_3d["My_kNm"]
-    pts = np.column_stack([Mx_all, My_all, N_all])
 
+    # --- Check if we need to normalize (fallback) ---
+    # We'll set this flag if set_box_aspect fails
+    use_normalized = False
+
+    # --- First, try to plot with proportional axes ---
+    # Create a copy of the data for the first attempt
+    Mx_plot = Mx_all.copy()
+    My_plot = My_all.copy()
+
+    # --- Build the plot ---
+    pts = np.column_stack([Mx_plot, My_plot, N_all])
     N_min, N_max = N_all.min(), N_all.max()
     cmap = plt.cm.RdYlBu_r
     norm_c = Normalize(vmin=N_min, vmax=N_max)
 
-    # ---- Build structured surface from hull contour slices ----
+    # --- Build structured surface from hull contour slices ---
     hull = ConvexHull(pts)
     N_levels = np.linspace(N_min * 0.98, N_max * 0.98, n_levels)
 
-    # First pass: collect raw contours and find the largest one
-    # to use its centroid as the common angular reference.
+    # First pass: collect raw contours
     raw_contours = []
     raw_N = []
     max_area = 0.0
@@ -982,103 +996,197 @@ def plot_3d_surface(nm_3d, demands=None, title="",
             ref_cx = contour[:, 0].mean()
             ref_cy = contour[:, 1].mean()
 
-    # Second pass: resample all contours with the common centroid.
+    # Second pass: resample all contours
     grid_Mx = []
     grid_My = []
     grid_N = []
     valid_levels = []
 
     for contour, nl in zip(raw_contours, raw_N):
-        resampled = _resample_contour(contour, n_angles,
-                                      cx=ref_cx, cy=ref_cy)
-        n_cols = resampled.shape[0]  # n_angles + 1 (closed loop)
+        resampled = _resample_contour(contour, n_angles, cx=ref_cx, cy=ref_cy)
+        n_cols = resampled.shape[0]
         grid_Mx.append(resampled[:, 0])
         grid_My.append(resampled[:, 1])
         grid_N.append(np.full(n_cols, nl))
         valid_levels.append(nl)
 
     if len(grid_Mx) < 3:
-        # Fallback: scatter.
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8),
-                               subplot_kw={'projection': '3d'})
-        ax.scatter(Mx_all, My_all, N_all, s=1, alpha=0.3, c='blue')
+        # Fallback: scatter plot if not enough contours
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8), subplot_kw={'projection': '3d'})
+        ax.scatter(Mx_plot, My_plot, N_all, s=1, alpha=0.3, c='blue')
         ax.set_xlabel("Mx [kN·m]")
         ax.set_ylabel("My [kN·m]")
         ax.set_zlabel("N [kN]")
         ax.set_title(title or "3D Resistance Surface (fallback)")
-        fig.tight_layout()
+        fig.constrained_layout()
+        #fig.tight_layout()
         return fig
 
     GMx = np.array(grid_Mx)
     GMy = np.array(grid_My)
     GN = np.array(grid_N)
-
-    # ---- Face colours from N ----
     face_colors = cmap(norm_c(GN))
 
-    # ---- Two-panel figure: above + below ----
-    fig = plt.figure(figsize=(18, 9))
+    # --- Create the figure ---
+    fig = plt.figure(figsize=(20, 10))
     views = [
         (1, 30, -55, "Perspective — tension side"),
         (2, -30, -55, "Perspective — compression side"),
     ]
-
     n_meridians = min(12, n_angles)
-    meridian_idx = np.linspace(0, n_angles - 1, n_meridians,
-                               dtype=int)
+    meridian_idx = np.linspace(0, n_angles - 1, n_meridians, dtype=int)
 
+    # --- Try to plot with set_box_aspect ---
     for idx, elev, azim, vtitle in views:
         ax = fig.add_subplot(1, 2, idx, projection='3d')
 
-        # Surface.
-        ax.plot_surface(GMx, GMy, GN,
-                        facecolors=face_colors,
-                        rstride=1, cstride=1,
-                        shade=False, alpha=0.55,
-                        antialiased=True)
-
-        # Contour rings (parallels) — grid is already closed,
-        # so plotting the full row draws a closed ring.
+        # Plot the surface and contours
+        ax.plot_surface(GMx, GMy, GN, facecolors=face_colors, rstride=1, cstride=1, shade=False, alpha=0.55, antialiased=True)
         for i in range(len(valid_levels)):
-            ax.plot(GMx[i], GMy[i], GN[i],
-                    color='#333333', lw=0.4, alpha=0.5)
-
-        # Meridians (longitudes).
+            ax.plot(GMx[i], GMy[i], GN[i], color='#333333', lw=0.4, alpha=0.5)
         for j in meridian_idx:
-            ax.plot(GMx[:, j], GMy[:, j], GN[:, j],
-                    color='#555555', lw=0.3, alpha=0.4)
+            ax.plot(GMx[:, j], GMy[:, j], GN[:, j], color='#555555', lw=0.3, alpha=0.4)
 
-        # Demand points.
+        # Plot demand points if provided
         if demands:
             for d in demands:
                 n_d = d["N"] / 1e3
                 mx_d = d["Mx"] / 1e6
                 my_d = d.get("My", 0) / 1e6
-                ax.scatter([mx_d], [my_d], [n_d], c='red', s=80,
-                           zorder=10, depthshade=False,
-                           edgecolors='darkred', linewidths=0.8)
-                ax.text(mx_d, my_d, n_d, f"  {d['name']}",
-                        fontsize=9, color='darkred',
-                        fontweight='bold')
+                ax.scatter([mx_d], [my_d], [n_d], c='red', s=80, zorder=10, depthshade=False, edgecolors='darkred', linewidths=0.8)
+                ax.text(mx_d, my_d, n_d, f"  {d['name']}", fontsize=9, color='darkred', fontweight='bold')
 
-        ax.set_xlabel("Mx [kN·m]", fontsize=9, labelpad=8)
-        ax.set_ylabel("My [kN·m]", fontsize=9, labelpad=8)
-        ax.set_zlabel("N [kN]", fontsize=9, labelpad=8)
+        ax.set_xlabel("Mx [kN·m]", fontsize=9, labelpad=12)
+        ax.set_ylabel("My [kN·m]", fontsize=9, labelpad=12)
+        ax.set_zlabel("N [kN]", fontsize=9, labelpad=12)
         ax.set_title(vtitle, fontsize=11)
         ax.view_init(elev=elev, azim=azim)
-        ax.tick_params(labelsize=8)
+        ax.tick_params(axis='y', labelrotation=45, labelsize=8)
+        ax.tick_params(axis='x', labelsize=8)
+        ax.tick_params(axis='z', labelsize=8)
 
-    # Dedicated colour-bar axes between the two plots.
+
+        dx = GMx.max() - GMx.min() 
+        dy = GMy.max() - GMy.min()
+
+        if max(dx,dy) / min(dx,dy) < 5:
+            ax.set_box_aspect([GMx.max() - GMx.min(), GMy.max() - GMy.min(), GN.max() - GN.min()])
+        else:
+            print(f"Falling back to normalized axes.")
+            use_normalized = True
+            break  # Exit the loop and replot with normalized axes
+
+    # --- If set_box_aspect failed, replot with normalized axes ---
+    if use_normalized:
+        print("Replotting with normalized axes.")
+        fig.clf()  # Clear the current figure
+        plt.close(fig)  # Close the old figure
+
+        # Normalize Mx and My
+        Mx_min, Mx_max = Mx_all.min(), Mx_all.max()
+        My_min, My_max = My_all.min(), My_all.max()
+        global_min = min(Mx_min, My_min)
+        global_max = max(Mx_max, My_max)
+        Mx_norm = (Mx_all - Mx_min) / (Mx_max - Mx_min) * (global_max - global_min) + global_min
+        My_norm = (My_all - My_min) / (My_max - My_min) * (global_max - global_min) + global_min
+
+        # Rebuild the plot with normalized data
+        pts_norm = np.column_stack([Mx_norm, My_norm, N_all])
+        hull_norm = ConvexHull(pts_norm)
+
+        # Recompute contours with normalized data
+        raw_contours_norm = []
+        raw_N_norm = []
+        max_area_norm = 0.0
+        ref_cx_norm, ref_cy_norm = 0.0, 0.0
+
+        for nl in N_levels:
+            contour_norm = _hull_slice_at_N(pts_norm, hull_norm.simplices, nl)
+            if contour_norm is None or len(contour_norm) < 4:
+                continue
+            span_x_norm = contour_norm[:, 0].max() - contour_norm[:, 0].min()
+            span_y_norm = contour_norm[:, 1].max() - contour_norm[:, 1].min()
+            if span_x_norm < 1e-3 and span_y_norm < 1e-3:
+                continue
+            raw_contours_norm.append(contour_norm)
+            raw_N_norm.append(nl)
+            area_norm = span_x_norm * span_y_norm
+            if area_norm > max_area_norm:
+                max_area_norm = area_norm
+                ref_cx_norm = contour_norm[:, 0].mean()
+                ref_cy_norm = contour_norm[:, 1].mean()
+
+        # Resample contours with normalized data
+        grid_Mx_norm = []
+        grid_My_norm = []
+        grid_N_norm = []
+        valid_levels_norm = []
+
+        for contour_norm, nl in zip(raw_contours_norm, raw_N_norm):
+            resampled_norm = _resample_contour(contour_norm, n_angles, cx=ref_cx_norm, cy=ref_cy_norm)
+            n_cols_norm = resampled_norm.shape[0]
+            grid_Mx_norm.append(resampled_norm[:, 0])
+            grid_My_norm.append(resampled_norm[:, 1])
+            grid_N_norm.append(np.full(n_cols_norm, nl))
+            valid_levels_norm.append(nl)
+
+        if len(grid_Mx_norm) < 3:
+            # Fallback: scatter plot if not enough contours
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8), subplot_kw={'projection': '3d'})
+            ax.scatter(Mx_norm, My_norm, N_all, s=1, alpha=0.3, c='blue')
+            ax.set_xlabel("Mx [kN·m] (normalized)")
+            ax.set_ylabel("My [kN·m] (normalized)")
+            ax.set_zlabel("N [kN]")
+            ax.set_title(title or "3D Resistance Surface (fallback, normalized)")
+            fig.tight_layout()
+            return fig
+
+        GMx_norm = np.array(grid_Mx_norm)
+        GMy_norm = np.array(grid_My_norm)
+        GN_norm = np.array(grid_N_norm)
+        face_colors_norm = cmap(norm_c(GN_norm))
+
+        # Recreate the figure with normalized data
+        fig = plt.figure(figsize=(20, 10))
+        for idx, elev, azim, vtitle in views:
+            ax = fig.add_subplot(1, 2, idx, projection='3d')
+
+            ax.plot_surface(GMx_norm, GMy_norm, GN_norm, facecolors=face_colors_norm, rstride=1, cstride=1, shade=False, alpha=0.55, antialiased=True)
+            for i in range(len(valid_levels_norm)):
+                ax.plot(GMx_norm[i], GMy_norm[i], GN_norm[i], color='#333333', lw=0.4, alpha=0.5)
+            for j in meridian_idx:
+                ax.plot(GMx_norm[:, j], GMy_norm[:, j], GN_norm[:, j], color='#555555', lw=0.3, alpha=0.4)
+
+            if demands:
+                for d in demands:
+                    n_d = d["N"] / 1e3
+                    mx_d = d["Mx"] / 1e6
+                    my_d = d.get("My", 0) / 1e6
+                    # Normalize demand points
+                    mx_d_norm = (mx_d - Mx_min) / (Mx_max - Mx_min) * (global_max - global_min) + global_min
+                    my_d_norm = (my_d - My_min) / (My_max - My_min) * (global_max - global_min) + global_min
+                    ax.scatter([mx_d_norm], [my_d_norm], [n_d], c='red', s=80, zorder=10, depthshade=False, edgecolors='darkred', linewidths=0.8)
+                    ax.text(mx_d_norm, my_d_norm, n_d, f"  {d['name']}", fontsize=9, color='darkred', fontweight='bold')
+
+            ax.set_xlabel("Mx [kN·m] (normalized)", fontsize=9, labelpad=12)
+            ax.set_ylabel("My [kN·m] (normalized)", fontsize=9, labelpad=12)
+            ax.set_zlabel("N [kN]", fontsize=9, labelpad=12)
+            ax.set_title(vtitle + " (normalized)", fontsize=11)
+            ax.view_init(elev=elev, azim=azim)
+            ax.tick_params(axis='y', labelrotation=45, labelsize=8)
+            ax.tick_params(axis='x', labelsize=8)
+            ax.tick_params(axis='z', labelsize=8)
+
+    # --- Add colorbar ---
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_c)
     sm.set_array([])
-    cbar_ax = fig.add_axes([0.2, 0.05, 0.6, 0.02])  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.2, 0.05, 0.6, 0.02])
     fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', label="N [kN]")
 
-    fig.suptitle(
-        title or "3D Resistance Surface (N, Mx, My)",
-        fontsize=14, y=0.98)
-    fig.subplots_adjust(left=0.02, right=0.95, bottom=0.15,
-                        top=0.92, wspace=0.15)
+    fig.suptitle(title or "3D Resistance Surface (N, Mx, My)", fontsize=14, y=0.98)
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.92, wspace=0.2)
+
     return fig
 
 
@@ -1168,7 +1276,8 @@ def plot_moment_curvature_bundle(mc_list, direction='x', title=""):
 # ==================================================================
 
 def plot_polar_ductility(nm_gen, N_fixed, n_angles=72,
-                         n_points=400, title=""):
+                         n_points=50, title=""):
+                         #n_points=400, title=""):
     r"""
     Polar diagram of ultimate curvature as a function of bending
     direction.
