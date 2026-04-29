@@ -1,0 +1,90 @@
+# GenSec — custom polygon with hole (box-like section)
+
+materials:
+  concrete_direct:
+    type: concrete
+    fck: 50.0             # characteristic cylinder strength [MPa] (required)
+    gamma_c: 1.4          # partial safety factor (default 1.5)
+    alpha_cc: 0.85        # long-term coefficient (default 0.85)
+    n_parabola: 2.0       # parabolic exponent (default 2.0)
+    eps_c2: -0.002        # peak-stress strain (default -0.002)
+    eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+    Ec: 37239.259             # elastic modulus [MPa] for tension (default 0)
+
+  steel_1:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+    works_in_compression: true
+
+section:
+  shape: custom
+  params:
+    exterior:
+      - [0, 0]
+      - [190, 0]
+      - [600, 410]
+      - [600, 600]
+      - [190, 1010]
+      - [0, 1010]
+      - [-410, 600]
+      - [-410, 410]
+    
+   
+  bulk_material: concrete_direct
+  mesh_size: 16
+  mesh_method: grid
+  rebars:
+    - {x: -233.3, y: 691.8, As: 531, material: steel_1, diameter: 26}
+    - {x: 423.3, y: 691.8, As: 531, material: steel_1, diameter: 26}
+    - {x: -350.0, y: 575.1,  As: 706, material: steel_1, diameter: 30}
+    - {x: 540, y: 575.1, As: 706, material: steel_1, diameter: 30}
+    - {x: 165.1, y: 950, As: 706, material: steel_1, diameter: 30}
+    - {x: 24.9, y: 950,  As: 706, material: steel_1, diameter: 30}
+    - {x: 271.4, y: 836.2, As: 531, material: steel_1, diameter: 30}
+    - {x: -81.4, y: 836.2, As: 531, material: steel_1, diameter: 30}
+    - {x: -233.3, y: 318.2,  As: 531, material: steel_1, diameter: 26}
+    - {x: 423.3, y: 318.2, As: 531, material: steel_1, diameter: 26}
+    - {x: -81.4, y: 173.8, As: 531, material: steel_1, diameter: 26}
+    - {x: 271.4, y: 173.8, As: 531, material: steel_1, diameter: 26}
+    - {x: 24.9, y: 60, As: 706, material: steel_1, diameter: 30}
+    - {x: 165.1, y: 60,  As: 706, material: steel_1, diameter: 30}
+    - {x: -350, y: 434.9, As: 706, material: steel_1, diameter: 30}
+    - {x: 540.0, y: 434.9,  As: 706, material: steel_1, diameter: 30}
+    
+    
+
+demands:
+  - name: ULS_1
+    N_kN: -2771.69
+    Mx_kNm: 161.42
+    My_kNm: 110.48
+  - name: ULS_2
+    N_kN: -5376.20
+    Mx_kNm: 1181.85
+    My_kNm: 110.11
+
+output:
+
+  
+  # ── Utilization ratio flags ──
+  eta_3D: true             # default: true
+  eta_2D: true             # default: false
+  eta_path: false           # default: true
+  eta_path_2D: false        # default: false
+  delta_N_tol: 0.001        # default: 0.03 (3%)
+
+  # ── Domain generation ──
+  generate_mx_my: true     # Mx-My contour plots (default: false)
+  generate_3d_surface: true # 3D surface CSV/JSON/plot (default: false)
+  n_angles_mx_my: 360 #144      # angular resolution for Mx-My (default: 144)
+
+  # ── Moment-curvature and ductility ──
+  generate_moment_curvature: true     # M-χ diagrams per N level (default: true)
+  generate_polar_ductility: false      # polar ductility plot (default: true)
+  generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
+
+  # ── N-level strategy ──
+  n_levels_mode: demands
+  #n_levels_count: 10
+  # n_levels_values: [-3000, -1500, 0]
