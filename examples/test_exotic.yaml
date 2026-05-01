@@ -247,78 +247,12 @@ demands:
 
 output:
   # ── Utilization ratio flags ──
-  #
-  # GenSec computes up to seven utilization metrics, organised in
-  # two geometric families plus path-aware variants for staged
-  # loading.  Each metric answers a different geometric question:
-  # they are complementary, not redundant.  All share the
-  # convention η ≤ 1 safe / η > 1 unsafe; pass/fail (`verified`)
-  # is decided by the worst of the enabled metrics.
-  #
-  # 3-D family — operates in anisotropy-corrected normalised space
-  # (axial axis rescaled by u_x = ΔMx/ΔN, My axis by v_y = ΔMx/ΔMy,
-  # so the domain bbox has the same numeric extent on every axis).
-  #
-  #   eta_norm        Linear distance from the demand to the
-  #                   nearest boundary face, expressed as a
-  #                   fraction of the Chebyshev radius D_max:
-  #                     η = 1 - d_min / D_max  (interior)
-  #                     η = 1 + d_min / D_max  (exterior)
-  #                   A true geometric distance.  Reaches 0 at
-  #                   the Chebyshev centre, 1 on the boundary.
-  #                   The recommended principal 3-D metric.
-  #
-  #   eta_norm_beta   Composite ratio F_SU / (F_SU + d_min).
-  #                   Mixes the demand norm and the face-distance.
-  #                   Not a pure distance: depends on position
-  #                   relative to the coordinate origin.  Reads as
-  #                   "sensitivity to perturbation in proportion
-  #                   to the demand magnitude".  Useful for
-  #                   cross-software validation.
-  #
-  #   eta_norm_ray    Ray-cast from the origin in normalised
-  #                   space.  Answers "if I scale all three force
-  #                   components proportionally, when does the
-  #                   demand exit?"  Linear in demand magnitude
-  #                   along any fixed ray.
-  #
-  # 2-D family — operates in the (Mx, My) plane at the demand's N.
-  #
-  #   eta_2D          Ray-cast from the origin in the (Mx, My)
-  #                   plane.  Useful for fixed-N flexural
-  #                   verifications.  Requires a biaxial section.
-  #
-  # Path metrics — for staged combinations only.  Defined on the
-  # segment B->T from the previous-stage to the current-stage
-  # cumulative demand.
-  #
-  #   eta_path        3-D ray-cast in normalised space, B->T.
-  #                   In CSV/JSON output stored under the key
-  #                   ``eta_path_norm_ray``.
-  #
-  #   eta_path_norm_beta   Composite ratio L / (L + d_seg) along
-  #                   the stage segment, where L = |T-B| and d_seg
-  #                   is the minimum signed distance of the
-  #                   segment from the boundary.  Path analogue
-  #                   of eta_norm_beta.  Particularly informative
-  #                   in seismic verification with staged gravity.
-  #
-  #   eta_path_2D     2-D variant on the Mx-My contour at
-  #                   cumulative N, skipped if the axial-force
-  #                   change between stages exceeds delta_N_tol.
-  #
-  # If a staged combination is processed without any path-aware
-  # metric enabled, GenSec emits an informational warning (the
-  # report would only contain point metrics at each cumulative
-  # state and would not characterise the load history).
-  eta_norm: true               # default: true (recommended principal 3-D metric)
-  eta_norm_beta: true          # default: true (composite ratio, also useful for cross-software comparison)
-  eta_norm_ray: false          # default: false (opt-in, for proportional load amplification)
-  eta_2D: true                 # default: false (opt-in, slower; biaxial only)
-  eta_path: true               # default: false (opt-in, for staged loading)
-  eta_path_norm_beta: true     # default: false (opt-in, useful for seismic + staged gravity)
-  eta_path_2D: true            # default: false (opt-in)
-  delta_N_tol: 0.03            # default: 0.03 (3%)
+  eta_3D: false             # default: true
+  eta_2D: false             # default: false
+  eta_cv: true             # default: true  (informational, recommended for cross-software comparison)
+  eta_path: false           # default: true
+  eta_path_2D: false        # default: false
+  delta_N_tol: 0.03        # default: 0.03 (3%)
 
   # ── Domain generation ──
   generate_mx_my: false     # Mx-My contour plots (default: false)

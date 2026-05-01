@@ -61,7 +61,7 @@ The suite contains **106 tests** organized in four files:
 +-------------------------------+----------------------------------------------+
 | File                          | Coverage                                     |
 +===============================+==============================================+
-| ``test_materials.py``         | Constitutive laws: pointwise stress           |
+| ``test_materials.py``         | Constitutive laws: pointwise stress          |
 |                               | evaluation, strain limits, edge cases.       |
 +-------------------------------+----------------------------------------------+
 | ``test_infrastructure.py``    | YAML loading, section construction, export   |

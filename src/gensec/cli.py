@@ -41,7 +41,6 @@ from .output import (
     print_section_info, print_fiber_results,
     plot_nm_diagram, plot_stress_profile, plot_mx_my_diagram,
     plot_moment_curvature, plot_section, plot_section_state,
-    plot_section_properties,
     plot_demand_heatmap, plot_3d_surface,
     plot_moment_curvature_bundle, plot_polar_ductility,
     plot_moment_curvature_surface,
@@ -65,7 +64,7 @@ from .output import (
 def _eta_columns(results):
     """Detect which eta columns are present in results."""
     cols = []
-    for key in ("eta_3D", "eta_2D"):
+    for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D"):
         if any(key in r for r in results):
             cols.append(key)
     return cols
@@ -151,7 +150,7 @@ def _print_combination_table(title, combo_results):
         name = cr["name"]
         ctype = cr.get("type", "simple")
         res = cr.get("resultant", {})
-        eta_gov = cr.get("eta_governing", cr.get("eta_3D", "---"))
+        eta_gov = cr.get("eta_governing", cr.get("eta_norm", "---"))
         status = "OK" if cr.get("verified", False) else "FAIL"
 
         print(f"\n  -- {name} ({ctype}) --")
@@ -162,7 +161,9 @@ def _print_combination_table(title, combo_results):
         if "stages" in cr:
             # Detect which etas appear in stages.
             stage_etas = []
-            for k in ("eta_3D", "eta_2D", "eta_path", "eta_path_2D"):
+            for k in ("eta_norm", "eta_norm_beta", "eta_norm_ray",
+                      "eta_2D", "eta_path_norm_ray",
+                      "eta_path_norm_beta", "eta_path_2D"):
                 if any(k in s and s[k] is not None
                        for s in cr["stages"]):
                     stage_etas.append(k)
@@ -336,7 +337,12 @@ def _run(args):
 
     # --- Solver ---
     solver = FiberSolver(section)
-    is_biaxial = section.n_fibers_x > 1
+    # A section is biaxial only when both in-plane extents have
+    # actual mesh resolution.  Using ``n_fibers_x > 1`` alone
+    # misclassified narrow tall walls (1 fiber column, many rows) as
+    # biaxial — they have real extent in y but zero extent in x, and
+    # the resulting Mx-My contour was degenerate.
+    is_biaxial = section.n_fibers_x > 1 and section.n_fibers_y > 1
 
     # --- N-Mx diagram (always) ---
     print("\nGenerating N-Mx diagram...")
@@ -456,15 +462,8 @@ def _run(args):
     # ==============================================================
     demand_plot = []
     if demands:
-        # Geometry + homogenized properties drawing.
-        # Falls back to plain geometry if the section does not
-        # expose ideal_gross_properties (e.g. legacy RectSection).
-        if hasattr(section, 'ideal_gross_properties'):
-            fig_geom = plot_section_properties(
-                section, title="Section geometry")
-        else:
-            fig_geom = plot_section(
-                section, title="Section geometry")
+        # Geometry-only section drawing.
+        fig_geom = plot_section(section, title="Section geometry")
         p = os.path.join(outdir, "section_geometry.png")
         fig_geom.savefig(p, dpi=150)
         plt.close(fig_geom)

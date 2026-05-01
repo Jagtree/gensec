@@ -97,10 +97,13 @@ envelopes:
 # ── Output flags ──
 output:
   # Utilization flags
-  eta_3D: true
-  eta_2D: true
-  eta_path: true
-  eta_path_2D: true
+  eta_norm: true               # default: true (recommended principal 3-D metric)
+  eta_norm_beta: true          # default: true (composite ratio, also useful for cross-software comparison)
+  eta_norm_ray: true          # default: false (opt-in, for proportional load amplification)
+  eta_2D: true                 # default: false (opt-in, slower; biaxial only)
+  eta_path_norm_ray: true               # default: false (opt-in, for staged loading)
+  eta_path_norm_beta: true     # default: false (opt-in, useful for seismic + staged gravity)
+  eta_path_2D: true            # default: false (opt-in)
   delta_N_tol: 0.03
 
   # Domain generation

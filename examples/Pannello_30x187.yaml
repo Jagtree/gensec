@@ -2,19 +2,15 @@
 
 materials:
   concrete_direct:
-    type: concrete
-    fck: 50.0             # characteristic cylinder strength [MPa] (required)
-    gamma_c: 1.5          # partial safety factor (default 1.5)
-    alpha_cc: 0.85        # long-term coefficient (default 0.85)
-    n_parabola: 2.0       # parabolic exponent (default 2.0)
-    eps_c2: -0.002        # peak-stress strain (default -0.002)
-    eps_cu2: -0.0035      # ultimate strain (default -0.0035)
-    Ec: 37000.0           # Young's modulus [MPa] (required)
+    type: concrete_ec2_gen1
+    class: C50/60        # Young's modulus [MPa] (required)
 
   B450C:
     type: steel
     fyk: 450.0
     gamma_s: 1.15
+    k_hardening: 1.15       # ft/fy ratio; 1.0 = perfectly plastic (default 1.0)
+    eps_su: 0.075         # ultimate strain (default 0.01)
     works_in_compression: true
     Es: 200000.0          # Young's modulus [MPa] (required)
 
@@ -22,8 +18,8 @@ section:
   B: 300
   H: 1870
   bulk_material: concrete_direct
-  n_fibers_y: 40
-  n_fibers_x: 100
+  n_fibers_y: 60
+  n_fibers_x: 120
   rebars:
     - {x: 50, y: 50, material: B450C, n_bars: 1, diameter: 26}
     - {x: 50, y: 150, material: B450C, n_bars: 1, diameter: 26}
@@ -46,10 +42,13 @@ output:
 
   
   # ── Utilization ratio flags ──
-  eta_3D: true             # default: true
-  eta_2D: true             # default: false
-  eta_path: false           # default: true
-  eta_path_2D: false        # default: false
+  eta_norm: true               # default: true (recommended principal 3-D metric)
+  eta_norm_beta: true          # default: true (composite ratio, also useful for cross-software comparison)
+  eta_norm_ray: true          # default: false (opt-in, for proportional load amplification)
+  eta_2D: true                 # default: false (opt-in, slower; biaxial only)
+  eta_path: false               # default: false (opt-in, for staged loading)
+  eta_path_norm_beta: false     # default: false (opt-in, useful for seismic + staged gravity)
+  eta_path_2D: false            # default: false (opt-in)
   delta_N_tol: 0.001        # default: 0.03 (3%)
 
   # ── Domain generation ──

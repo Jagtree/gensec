@@ -487,9 +487,19 @@ class GenericSection:
     # ------------------------------------------------------------------
 
     def _setup_rebars(self):
-        """
-        Finalize rebar arrays. If a rebar has ``x=None``, default to
-        the section x-centroid.
+        r"""
+        Finalize rebar arrays.
+
+        - If a rebar has ``x=None``, default to the section
+          x-centroid.
+        - Compute ``mat_indices_rebar``: for each rebar, the index
+          of the bulk-material zone containing the rebar centroid
+          (``0`` for the primary ``bulk_material``, ``1..N`` for
+          named zones).  This is used by the integrator to subtract
+          the displaced bulk material from the correct zone,
+          restoring the correct stress balance for multi-material
+          sections (e.g. a confined core inside an unconfined
+          cover).
         """
         xc = self.x_centroid
         for r in self.rebars:
@@ -505,11 +515,20 @@ class GenericSection:
                                      dtype=float)
             self.embedded_rebars = np.array(
                 [r.embedded for r in self.rebars], dtype=bool)
+            # Zone lookup: which bulk-material zone is physically
+            # displaced by each rebar's volume.  Drives the
+            # embedded-rebar bulk-stress subtraction in the
+            # integrator.
+            self.mat_indices_rebar = np.array(
+                [self._material_index(r.x, r.y)
+                 for r in self.rebars],
+                dtype=int)
         else:
             self.x_rebars = np.empty(0, dtype=float)
             self.y_rebars = np.empty(0, dtype=float)
             self.A_rebars = np.empty(0, dtype=float)
             self.embedded_rebars = np.empty(0, dtype=bool)
+            self.mat_indices_rebar = np.empty(0, dtype=int)
 
     # ------------------------------------------------------------------
     #  Geometric properties
@@ -555,13 +574,7 @@ class GenericSection:
                 compute_section_properties, HomogenizedRebar,
             )
             homog = [
-                ### TODO: generalize Es to another flag which is more generic. Es is only for steel, but
-                ### how does it works with a generic rebar? Carbon? Fiberglass? 
-                ### Maybe we can add a method to the RebarLayer class to return the appropriate 
-                ### stiffness for homogenization, which by default returns Es but can be overridden 
-                ### for different materials.
-                ### At the moment, we stay on Es.
-                HomogenizedRebar(r.x, r.y, r.As, r.material.Es)
+                HomogenizedRebar(r.x, r.y, r.As, r.material.E)
                 for r in self.rebars
                 if r.embedded and r.x is not None
             ]
@@ -573,13 +586,10 @@ class GenericSection:
                     "multi-material bulk zones."
                 )
             else:
-                ### TODO: generalize Ec to another flag which is more generic. Ec is only for steel, but
-                ### how does it works with a generic bulk? Wood? Other? 
-                ### At the moment, we stay on Ec.
                 self._ideal_gross_props_cache = compute_section_properties(
                     self.polygon,
                     rebars=homog,
-                    E_bulk=self.bulk_material.Ec,
+                    E_bulk=self.bulk_material.E,
                 )
         return self._ideal_gross_props_cache
 

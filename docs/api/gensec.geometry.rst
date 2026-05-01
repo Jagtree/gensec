@@ -17,7 +17,7 @@ The *ideal_gross* geometric properties — area, centroid, centroidal and
 principal second-moments, central inertia ellipse, kern — are
 computed exactly on the polygon (independently of the fiber mesh)
 by the module :mod:`gensec.geometry.properties`.  See the
-dedicated page :doc:`ideal_gross_properties` for the mathematical
+dedicated page :ref:`ideal_gross_properties` for the mathematical
 formulation and usage.
 
 
@@ -49,11 +49,11 @@ for common section shapes.  Each polygon can be passed directly to
 
 
 ideal_gross geometric properties
----------------------------
+---------------------------------
 
 Exact polygon integrals (Green's theorem), centroidal and
 principal second-moments, central inertia ellipse, kern.
-Documented in detail in :doc:`ideal_gross_properties`.
+Documented in detail in :ref:`ideal_gross_properties`.
 
 .. automodule:: gensec.geometry.properties
    :members:

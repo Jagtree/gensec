@@ -48,4 +48,5 @@ Package-level exports
 
 .. automodule:: gensec.solver
    :members:
+   :noindex:
    :show-inheritance:

@@ -612,9 +612,12 @@ def _parse_output_flags(output_spec):
     flags = dict(output_spec)
 
     # Utilization flag defaults.
-    flags.setdefault("eta_3D", True)
-    flags.setdefault("eta_2D", False)
-    flags.setdefault("eta_path", True)
+    flags.setdefault("eta_norm", True)        # principal: linear distance to boundary (alpha)
+    flags.setdefault("eta_norm_beta", True)   # composite ratio (sensitivity to perturbation)
+    flags.setdefault("eta_norm_ray", False)   # ray-cast from origin in normalised space
+    flags.setdefault("eta_2D", False)         # ray-cast in (Mx,My) plane at fixed N
+    flags.setdefault("eta_path_norm_ray", False)       # ray-cast staged in normalised space
+    flags.setdefault("eta_path_norm_beta", False)  # composite ratio along stage segment
     flags.setdefault("eta_path_2D", False)
     flags.setdefault("delta_N_tol", 0.03)
 

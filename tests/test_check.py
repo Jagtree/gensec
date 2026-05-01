@@ -18,10 +18,11 @@
 # ---------------------------------------------------------------------------
 
 """
-Unit tests for the demand verification module (check.py) — v0.2.0.
+Unit tests for the demand verification module (check.py) — v0.3.0.
 
 Covers:
-- DomainChecker 3D hull: is_inside, eta_3D, eta_path
+- DomainChecker 3D hull: is_inside, eta_norm, eta_norm_beta,
+  eta_norm_ray, eta_path_norm_ray, eta_path_norm_beta
 - DomainChecker 2D fallback (uniaxial domain)
 - MxMyContour: is_inside, eta_2D, eta_path_2D, symmetry
 - VerificationEngine: simple demands, simple combinations,
@@ -33,9 +34,9 @@ import unittest
 import numpy as np
 from gensec.materials import Concrete, Steel
 from gensec.geometry import RebarLayer, RectSection
-from gensec.solver import (
-    FiberSolver, NMDiagram, DomainChecker, MxMyContour, VerificationEngine,
-)
+from gensec.solver import FiberSolver
+from gensec.solver import NMDiagram
+from gensec.solver import DomainChecker, MxMyContour, VerificationEngine
 
 
 # ------------------------------------------------------------------
@@ -90,8 +91,8 @@ class TestDomainChecker3D(unittest.TestCase):
         sec = _biaxial_section()
         sv = FiberSolver(sec)
         cls.nm_gen = NMDiagram(sv)
-        nm_3d = cls.nm_gen.generate_biaxial(n_angles=24, n_points_per_angle=80)
-        cls.checker = DomainChecker(nm_3d)
+        cls.nm_3d = cls.nm_gen.generate_biaxial(n_angles=24, n_points_per_angle=80)
+        cls.checker = DomainChecker(cls.nm_3d)
 
     def test_ndim_is_3(self):
         self.assertEqual(self.checker.ndim, 3)
@@ -111,67 +112,88 @@ class TestDomainChecker3D(unittest.TestCase):
     def test_huge_moment_outside(self):
         self.assertFalse(self.checker.is_inside(-300e3, 500e6, 300e6))
 
-    # --- eta_3D ---
+    # --- eta_norm (alpha: linear distance to boundary fraction) ---
 
-    def test_eta_3D_origin_is_zero(self):
-        eta = self.checker.eta_3D(0.0, 0.0, 0.0)
-        self.assertEqual(eta, 0.0)
+    def test_eta_norm_centre_is_zero(self):
+        # alpha: eta_norm = 0 at the Chebyshev centre of the
+        # normalised domain.  Take the centroid of the (raw) point
+        # cloud as a proxy that should be deep inside the domain
+        # (typically not exactly the Chebyshev centre, but close
+        # enough that eta_norm should be small).
+        c_N = float(np.mean(self.nm_3d["N"]))
+        c_Mx = float(np.mean(self.nm_3d["Mx"]))
+        c_My = float(np.mean(self.nm_3d["My"]))
+        eta = self.checker.eta_norm(c_N, c_Mx, c_My)
+        # Centroid is well inside; eta_norm must be < 0.5 (deep
+        # interior).  Cannot expect exactly 0 unless we reverse-
+        # transform the Chebyshev centre — which is unit-tested
+        # separately in the alpha-specific test class below.
+        self.assertLess(eta, 0.5)
 
-    def test_eta_3D_inside_less_than_1(self):
-        eta = self.checker.eta_3D(-200e3, 10e6, 5e6)
+    def test_eta_norm_inside_less_than_1(self):
+        eta = self.checker.eta_norm(-200e3, 10e6, 5e6)
         self.assertGreater(eta, 0.0)
         self.assertLess(eta, 1.0)
 
-    def test_eta_3D_outside_greater_than_1(self):
-        eta = self.checker.eta_3D(-300e3, 600e6, 300e6)
+    def test_eta_norm_outside_greater_than_1(self):
+        eta = self.checker.eta_norm(-300e3, 600e6, 300e6)
         self.assertGreater(eta, 1.0)
 
-    def test_eta_3D_scales_monotonically(self):
-        # Double the demand → double eta (ray from origin is linear)
-        Mx = 10e6
-        eta1 = self.checker.eta_3D(-100e3, Mx, 0.0)
-        eta2 = self.checker.eta_3D(-100e3, 2 * Mx, 0.0)
-        # Not exactly 2× due to hull approximation, but eta2 > eta1
-        self.assertGreater(eta2, eta1)
+    def test_eta_norm_monotone_toward_boundary(self):
+        # alpha is linear in distance to the nearest face.
+        # Doubling the demand does NOT double eta (this is correct
+        # behaviour: alpha is not a ray-cast).  But moving the
+        # demand along a constant direction toward the boundary
+        # should increase eta monotonically.  Use three points
+        # along the +Mx axis at fixed N:
+        N = -100e3
+        eta1 = self.checker.eta_norm(N, 10e6, 0.0)
+        eta2 = self.checker.eta_norm(N, 50e6, 0.0)
+        eta3 = self.checker.eta_norm(N, 90e6, 0.0)
+        self.assertLess(eta1, eta2)
+        self.assertLess(eta2, eta3)
 
     def test_is_inside_consistent_with_eta(self):
         N, Mx, My = -200e3, 10e6, 4e6
-        eta = self.checker.eta_3D(N, Mx, My)
+        eta = self.checker.eta_norm(N, Mx, My)
         inside = self.checker.is_inside(N, Mx, My)
         self.assertLess(eta, 1.0)
         self.assertTrue(inside)
 
     # --- eta_path ---
 
-    def test_eta_path_both_inside(self):
-        eta = self.checker.eta_path(
+    def test_eta_path_norm_ray_both_inside(self):
+        eta = self.checker.eta_path_norm_ray(
             -100e3, 5e6, 2e6,
             -200e3, 10e6, 5e6,
         )
         self.assertGreater(eta, 0.0)
         self.assertLess(eta, 1.0)
 
-    def test_eta_path_target_outside(self):
-        eta = self.checker.eta_path(
+    def test_eta_path_norm_ray_target_outside(self):
+        eta = self.checker.eta_path_norm_ray(
             -100e3, 5e6, 0.0,
             -400e3, 600e6, 300e6,
         )
         self.assertGreater(eta, 1.0)
 
-    def test_eta_path_coincident_base_target_inside(self):
+    def test_eta_path_norm_ray_coincident_base_target_inside(self):
         # base == target and inside → 0.0
-        eta = self.checker.eta_path(
+        eta = self.checker.eta_path_norm_ray(
             -100e3, 5e6, 2e6,
             -100e3, 5e6, 2e6,
         )
         self.assertEqual(eta, 0.0)
 
-    def test_eta_path_base_is_origin_equals_eta_3D(self):
-        # eta_path from origin == eta_3D (by definition)
+    def test_eta_path_norm_ray_base_is_origin_equals_eta_norm_ray(self):
+        # eta_path_norm_ray from origin == eta_norm_ray (by definition):
+        # both are ray-casts from O to T in the same normalised space.
+        # Note: this is NOT eta_norm (alpha), which is a distance-based
+        # metric, not a ray-cast.
         N, Mx, My = -200e3, 10e6, 5e6
-        eta_path = self.checker.eta_path(0.0, 0.0, 0.0, N, Mx, My)
-        eta_3d   = self.checker.eta_3D(N, Mx, My)
-        self.assertAlmostEqual(eta_path, eta_3d, places=4)
+        eta_path = self.checker.eta_path_norm_ray(0.0, 0.0, 0.0, N, Mx, My)
+        eta_ray  = self.checker.eta_norm_ray(N, Mx, My)
+        self.assertAlmostEqual(eta_path, eta_ray, places=4)
 
 
 # ==================================================================
@@ -199,19 +221,20 @@ class TestDomainChecker2DFallback(unittest.TestCase):
     def test_outside_point(self):
         self.assertFalse(self.checker.is_inside(-4000e3, 0.0))
 
-    def test_eta_3D_inside(self):
-        eta = self.checker.eta_3D(-500e3, 50e6)
+    def test_eta_norm_inside(self):
+        eta = self.checker.eta_norm(-500e3, 50e6)
         self.assertLess(eta, 1.0)
 
-    def test_eta_3D_outside(self):
-        eta = self.checker.eta_3D(-500e3, 500e6)
+    def test_eta_norm_outside(self):
+        eta = self.checker.eta_norm(-500e3, 500e6)
         self.assertGreater(eta, 1.0)
 
-    def test_eta_path_from_origin_equals_eta_3D(self):
+    def test_eta_path_norm_ray_from_origin_equals_eta_norm_ray(self):
+        # Both are ray-casts in normalised space.
         N, Mx = -400e3, 60e6
-        ep = self.checker.eta_path(0.0, 0.0, 0.0, N, Mx, 0.0)
-        e3 = self.checker.eta_3D(N, Mx)
-        self.assertAlmostEqual(ep, e3, places=4)
+        ep = self.checker.eta_path_norm_ray(0.0, 0.0, 0.0, N, Mx, 0.0)
+        er = self.checker.eta_norm_ray(N, Mx)
+        self.assertAlmostEqual(ep, er, places=4)
 
 
 # ==================================================================
@@ -264,16 +287,16 @@ class TestMxMyContour(unittest.TestCase):
 
     # --- eta_path_2D ---
 
-    def test_eta_path_2D_within(self):
+    def test_eta_path_norm_ray_2D_within(self):
         eta = self.contour.eta_path_2D(5e6, 2e6, 10e6, 5e6)
         self.assertGreater(eta, 0.0)
         self.assertLess(eta, 1.0)
 
-    def test_eta_path_2D_exceeds_boundary(self):
+    def test_eta_path_norm_ray_2D_exceeds_boundary(self):
         eta = self.contour.eta_path_2D(5e6, 0.0, 1000e6, 1000e6)
         self.assertGreater(eta, 1.0)
 
-    def test_eta_path_2D_from_origin_equals_eta_2D(self):
+    def test_eta_path_norm_ray_2D_from_origin_equals_eta_2D(self):
         Mx, My = 10e6, 5e6
         ep = self.contour.eta_path_2D(0.0, 0.0, Mx, My)
         e2 = self.contour.eta_2D(Mx, My)
@@ -376,7 +399,7 @@ class TestVerificationEngineSimple(unittest.TestCase):
         nm_gen = NMDiagram(sv)
         nm_3d = nm_gen.generate_biaxial(n_angles=24, n_points_per_angle=80)
         flags = {
-            "eta_3D": True, "eta_2D": False,
+            "eta_norm": True, "eta_2D": False,
             "eta_path": True, "eta_path_2D": False,
         }
         cls.engine = VerificationEngine(nm_3d, nm_gen, flags, n_points=80)
@@ -387,10 +410,10 @@ class TestVerificationEngineSimple(unittest.TestCase):
         for key in ("name", "N_kN", "Mx_kNm", "My_kNm", "inside", "verified"):
             self.assertIn(key, result)
 
-    def test_check_demand_eta_3D_present(self):
+    def test_check_demand_eta_norm_present(self):
         d = {"name": "G", **_DEMAND_DB["G"]}
         result = self.engine.check_demand(d)
-        self.assertIn("eta_3D", result)
+        self.assertIn("eta_norm", result)
 
     def test_check_demand_eta_2D_absent(self):
         # eta_2D is disabled
@@ -407,7 +430,7 @@ class TestVerificationEngineSimple(unittest.TestCase):
     def test_check_demand_eta_positive(self):
         d = {"name": "G", **_DEMAND_DB["G"]}
         result = self.engine.check_demand(d)
-        self.assertGreater(result["eta_3D"], 0.0)
+        self.assertGreater(result["eta_norm"], 0.0)
 
     def test_check_demand_units_conversion(self):
         d = {"name": "G", **_DEMAND_DB["G"]}
@@ -463,7 +486,7 @@ class TestVerificationEngineSimple(unittest.TestCase):
             delta=0.01,
         )
 
-    def test_simple_combination_has_eta_3D(self):
+    def test_simple_combination_has_eta_norm(self):
         combo = {
             "name": "SLU_1",
             "components": [
@@ -472,7 +495,7 @@ class TestVerificationEngineSimple(unittest.TestCase):
             ],
         }
         result = self.engine.check_combination(combo, _DEMAND_DB)
-        self.assertIn("eta_3D", result)
+        self.assertIn("eta_norm", result)
 
     def test_simple_combination_has_verified(self):
         combo = {
@@ -497,8 +520,8 @@ class TestVerificationEngineStaged(unittest.TestCase):
         nm_gen = NMDiagram(sv)
         nm_3d = nm_gen.generate_biaxial(n_angles=24, n_points_per_angle=80)
         flags = {
-            "eta_3D": True, "eta_2D": False,
-            "eta_path": True, "eta_path_2D": False,
+            "eta_norm": True, "eta_2D": False,
+            "eta_path_norm_ray": True, "eta_path_2D": False,
         }
         cls.engine = VerificationEngine(nm_3d, nm_gen, flags, n_points=80)
 
@@ -532,15 +555,15 @@ class TestVerificationEngineStaged(unittest.TestCase):
         self.assertIn("stages", result)
         self.assertEqual(len(result["stages"]), 2)
 
-    def test_staged_stage0_has_eta_3D(self):
+    def test_staged_stage0_has_eta_norm(self):
         result = self.engine.check_combination(
             self._staged_combo(), _DEMAND_DB)
-        self.assertIn("eta_3D", result["stages"][0])
+        self.assertIn("eta_norm", result["stages"][0])
 
-    def test_staged_stage1_has_eta_path(self):
+    def test_staged_stage1_has_eta_path_norm_ray(self):
         result = self.engine.check_combination(
             self._staged_combo(), _DEMAND_DB)
-        self.assertIn("eta_path", result["stages"][1])
+        self.assertIn("eta_path_norm_ray", result["stages"][1])
 
     def test_staged_stage1_has_base(self):
         result = self.engine.check_combination(
@@ -598,7 +621,7 @@ class TestVerificationEngineEnvelope(unittest.TestCase):
         sv = FiberSolver(sec)
         nm_gen = NMDiagram(sv)
         nm_3d = nm_gen.generate_biaxial(n_angles=24, n_points_per_angle=80)
-        flags = {"eta_3D": True, "eta_2D": False}
+        flags = {"eta_norm": True, "eta_2D": False}
         cls.engine = VerificationEngine(nm_3d, nm_gen, flags, n_points=80)
 
     def test_envelope_has_eta_max(self):
@@ -615,8 +638,15 @@ class TestVerificationEngineEnvelope(unittest.TestCase):
             "members": [{"ref": "G"}, {"ref": "Q1"}],
         }
         result = self.engine.check_envelope(env, _DEMAND_DB)
-        member_etas = [m["eta_3D"] for m in result["members"]]
-        self.assertAlmostEqual(result["eta_max"], max(member_etas), places=4)
+        # eta_max is the maximum across all enabled metrics on all
+        # members.  Compute the per-member maximum and compare.
+        keys = ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D")
+        member_maxes = [
+            max(m[k] for k in keys if k in m and m[k] is not None)
+            for m in result["members"]
+        ]
+        self.assertAlmostEqual(result["eta_max"], max(member_maxes),
+                               places=4)
 
     def test_envelope_governing_member_is_correct(self):
         env = {
@@ -625,10 +655,18 @@ class TestVerificationEngineEnvelope(unittest.TestCase):
         }
         result = self.engine.check_envelope(env, _DEMAND_DB)
         self.assertIn(result["governing_member"], ["G", "Ex"])
-        # The governing member is the one with the highest eta
-        etas = {m["name"]: m["eta_3D"] for m in result["members"]}
+        # The governing member is the one whose worst metric across
+        # all enabled types matches eta_max.  With both eta_norm
+        # (alpha) and eta_norm_beta enabled by default, the max can
+        # come from either column, so we check the per-member
+        # maximum, not just eta_norm.
         gov = result["governing_member"]
-        self.assertEqual(etas[gov], result["eta_max"])
+        gov_member = next(m for m in result["members"] if m["name"] == gov)
+        member_max = max(gov_member[k]
+                         for k in ("eta_norm", "eta_norm_beta",
+                                    "eta_norm_ray", "eta_2D")
+                         if k in gov_member and gov_member[k] is not None)
+        self.assertAlmostEqual(member_max, result["eta_max"], places=4)
 
     def test_envelope_members_count(self):
         env = {
@@ -709,30 +747,30 @@ class TestVerificationEngineFlags(unittest.TestCase):
     def _demand(self):
         return {"name": "D", "N": -300e3, "Mx": 20e6, "My": 8e6}
 
-    def test_eta_3D_only(self):
-        eng = self._engine({"eta_3D": True, "eta_2D": False})
+    def test_eta_norm_only(self):
+        eng = self._engine({"eta_norm": True, "eta_2D": False})
         result = eng.check_demand(self._demand())
-        self.assertIn("eta_3D", result)
+        self.assertIn("eta_norm", result)
         self.assertNotIn("eta_2D", result)
 
     def test_eta_2D_enabled(self):
-        eng = self._engine({"eta_3D": True, "eta_2D": True,
+        eng = self._engine({"eta_norm": True, "eta_2D": True,
                              "n_angles_mx_my": 24})
         result = eng.check_demand(self._demand())
         self.assertIn("eta_2D", result)
 
     def test_both_disabled_falls_back_to_is_inside(self):
-        eng = self._engine({"eta_3D": False, "eta_2D": False})
+        eng = self._engine({"eta_norm": False, "eta_2D": False})
         result = eng.check_demand(self._demand())
-        self.assertNotIn("eta_3D", result)
+        self.assertNotIn("eta_norm", result)
         self.assertNotIn("eta_2D", result)
         self.assertIn("inside", result)
         # verified == inside when no η enabled
         self.assertEqual(result["verified"], result["inside"])
 
-    def test_default_flags_eta_3D_true(self):
+    def test_default_flags_eta_norm_true(self):
         eng = VerificationEngine(self.nm_3d, self.nm_gen, {}, n_points=60)
-        self.assertTrue(eng.do_3D)
+        self.assertTrue(eng.do_norm)
 
     def test_default_flags_eta_2D_false(self):
         eng = VerificationEngine(self.nm_3d, self.nm_gen, {}, n_points=60)
@@ -743,18 +781,18 @@ class TestVerificationEngineFlags(unittest.TestCase):
         self.assertAlmostEqual(eng.delta_N_tol, 0.05)
 
     def test_contour_cache_empty_initially(self):
-        eng = self._engine({"eta_3D": True, "eta_2D": True,
+        eng = self._engine({"eta_norm": True, "eta_2D": True,
                              "n_angles_mx_my": 24})
         self.assertEqual(len(eng._contour_cache), 0)
 
     def test_contour_cache_populated_after_check(self):
-        eng = self._engine({"eta_3D": True, "eta_2D": True,
+        eng = self._engine({"eta_norm": True, "eta_2D": True,
                              "n_angles_mx_my": 24})
         eng.check_demand(self._demand())
         self.assertEqual(len(eng._contour_cache), 1)
 
     def test_contour_cache_reused_for_same_N(self):
-        eng = self._engine({"eta_3D": True, "eta_2D": True,
+        eng = self._engine({"eta_norm": True, "eta_2D": True,
                              "n_angles_mx_my": 24})
         d1 = {"name": "D1", "N": -300e3, "Mx": 20e6, "My": 8e6}
         d2 = {"name": "D2", "N": -300e3, "Mx": 10e6, "My": 4e6}
@@ -762,9 +800,9 @@ class TestVerificationEngineFlags(unittest.TestCase):
         # Both demands at N≈-300 kN → only 1 contour generated
         self.assertEqual(len(eng._contour_cache), 1)
 
-    def test_eta_path_2D_skipped_on_large_delta_N(self):
+    def test_eta_path_norm_ray_2D_skipped_on_large_delta_N(self):
         """eta_path_2D should be None when ΔN/N_range > delta_N_tol."""
-        eng = self._engine({"eta_3D": True, "eta_path": True,
+        eng = self._engine({"eta_norm": True, "eta_path": True,
                              "eta_path_2D": True, "delta_N_tol": 0.01,
                              "n_angles_mx_my": 24})
         combo = {

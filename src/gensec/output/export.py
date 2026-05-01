@@ -89,7 +89,7 @@ def export_demand_results_csv(results, filepath):
 
     # Determine which η columns are present.
     eta_keys = []
-    for key in ("eta_3D", "eta_2D"):
+    for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D"):
         if any(key in r for r in results):
             eta_keys.append(key)
 
@@ -132,7 +132,7 @@ def export_demand_results_json(results, filepath):
             "inside": bool(r["inside"]),
             "verified": bool(r["verified"]),
         }
-        for key in ("eta_3D", "eta_2D"):
+        for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D"):
             if key in r:
                 entry[key] = r[key]
         clean.append(entry)
@@ -167,7 +167,7 @@ def export_combination_results_json(results, filepath):
         if "stages" in r:
             entry["stages"] = _clean_stages(r["stages"])
 
-        for key in ("eta_3D", "eta_2D", "eta_governing"):
+        for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D", "eta_governing"):
             if key in r:
                 entry[key] = r[key]
 
@@ -197,8 +197,9 @@ def _clean_stages(stages):
         for key in ("increment", "cumulative", "base"):
             if key in s:
                 entry[key] = s[key]
-        for key in ("eta_3D", "eta_2D", "eta_path", "eta_path_2D",
-                     "warning"):
+        for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray",
+                     "eta_2D", "eta_path_norm_ray",
+                     "eta_path_norm_beta", "eta_path_2D", "warning"):
             if key in s:
                 entry[key] = s[key]
         out.append(entry)
@@ -256,7 +257,7 @@ def export_verification_json(demand_results, combination_results,
             }
             if "stages" in r:
                 entry["stages"] = _clean_stages(r["stages"])
-            for key in ("eta_3D", "eta_2D", "eta_governing",
+            for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D", "eta_governing",
                         "inside", "verified"):
                 if key in r:
                     entry[key] = r[key]
@@ -424,13 +425,6 @@ def export_moment_curvature_json(mc_data, filepath):
                 data[f"{chi_key}_km"] = round(chi_val * 1e6, 6)
             if M_val is not None:
                 data[f"{M_key}_kNm"] = round(M_val / 1e6, 6)
-
-    # Ductility ratios: μ = χ_ultimate / χ_yield.
-    for suffix in ("_pos", "_neg"):
-        mu = mc_data.get(f"ductility{suffix}")
-        if mu is not None:
-            data[f"ductility{suffix}"] = round(mu, 4)
-
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
 

@@ -104,14 +104,51 @@ class FiberSolver:
         self._is_multi_material = len(self._bulk_groups) > 1
 
     def _build_rebar_groups(self):
-        """Group rebar layers by material identity."""
+        r"""
+        Group rebar layers by the pair
+        ``(rebar material, bulk-zone material)``.
+
+        For multi-material sections (a confined core inside an
+        unconfined cover, for example), an embedded rebar must
+        subtract the bulk stress evaluated with the constitutive
+        law of the **zone the rebar physically occupies**, not the
+        primary ``bulk_material``.  Splitting the rebar groups by
+        this pair lets the integrator vectorise the lookup with no
+        per-rebar branching at evaluation time.
+
+        For single-material sections (no zones, or every rebar in
+        zone ``0``) this collapses to the legacy "group by rebar
+        material" behaviour, with the primary ``bulk_material``
+        attached to every group.
+
+        Returns
+        -------
+        list of tuple
+            Each tuple is
+            ``(rebar_material, bulk_zone_material,
+            ndarray_of_rebar_indices)``.
+        """
+        sec = self.sec
+        # Index-aligned list of candidate bulk-zone materials.
+        all_bulk_mats = (sec.get_all_bulk_materials()
+                         if hasattr(sec, 'get_all_bulk_materials')
+                         else [sec.bulk_material])
+        # Per-rebar zone index.  Sections without
+        # ``mat_indices_rebar`` (legacy ``RectSection``) place every
+        # rebar in zone 0.
+        mat_idx_r = getattr(sec, 'mat_indices_rebar', None)
+        if mat_idx_r is None:
+            mat_idx_r = np.zeros(len(sec.rebars), dtype=int)
+
         groups = {}
-        for i, r in enumerate(self.sec.rebars):
-            mid = id(r.material)
-            if mid not in groups:
-                groups[mid] = (r.material, [])
-            groups[mid][1].append(i)
-        return [(m, np.array(ix)) for m, ix in groups.values()]
+        for i, r in enumerate(sec.rebars):
+            key = (id(r.material), int(mat_idx_r[i]))
+            if key not in groups:
+                bulk_mat = all_bulk_mats[mat_idx_r[i]]
+                groups[key] = (r.material, bulk_mat, [])
+            groups[key][2].append(i)
+        return [(rm, bm, np.array(ix))
+                for rm, bm, ix in groups.values()]
 
     def _build_bulk_groups(self):
         r"""
@@ -228,21 +265,22 @@ class FiberSolver:
         My = -float(np.sum(fA * self._lx_bulk))
 
         # ---- Rebar contribution ----
-        # Bulk stress at rebar locations (for embedded subtraction).
-        # Use the primary bulk_material — for multi-material, ideally
-        # we should look up which zone each rebar falls in. For now
-        # this is acceptable since rebars are typically embedded in
-        # the primary bulk material.
-        sb_at_rebars = self.sec.bulk_material.stress_array(er)
+        # For each (rebar material, bulk-zone material) group, subtract
+        # the bulk stress evaluated with the **zone's** constitutive
+        # law from the rebar stress for embedded rebars, then accumulate
+        # forces and moments.  Splitting by (rebar mat, zone mat) is
+        # what makes this correct for multi-material sections.
         embedded = self.sec.embedded_rebars
 
-        for mat, idx in self._rebar_groups:
-            s_rebar = mat.stress_array(er[idx])
+        for mat, bulk_mat, idx in self._rebar_groups:
+            er_g = er[idx]
+            s_rebar = mat.stress_array(er_g)
+            sb_at_rebars = bulk_mat.stress_array(er_g)
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
 
             s_net = s_rebar.copy()
-            s_net[emb] -= sb_at_rebars[idx][emb]
+            s_net[emb] -= sb_at_rebars[emb]
 
             fa = s_net * a
             N += float(np.sum(fa))
@@ -332,23 +370,26 @@ class FiberSolver:
         K[2, 2] = float(np.sum(EtA * lx * lx))
 
         # ---- Rebar contribution ----
-        sb_at_rebars = self.sec.bulk_material.stress_array(er)
-        Et_bulk_r = self.sec.bulk_material.tangent_array(er)
+        # See ``integrate``: each (rebar mat, zone mat) group subtracts
+        # the displaced bulk stress and tangent using the zone's law.
         embedded = self.sec.embedded_rebars
 
-        for mat, idx in self._rebar_groups:
-            s_rebar = mat.stress_array(er[idx])
-            Et_rebar = mat.tangent_array(er[idx])
+        for mat, bulk_mat, idx in self._rebar_groups:
+            er_g = er[idx]
+            s_rebar = mat.stress_array(er_g)
+            Et_rebar = mat.tangent_array(er_g)
+            sb_at_rebars = bulk_mat.stress_array(er_g)
+            Et_bulk_r = bulk_mat.tangent_array(er_g)
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
             ly_r = self._ly_rebar[idx]
             lx_r = self._lx_rebar[idx]
 
             s_net = s_rebar.copy()
-            s_net[emb] -= sb_at_rebars[idx][emb]
+            s_net[emb] -= sb_at_rebars[emb]
 
             Et_net = Et_rebar.copy()
-            Et_net[emb] -= Et_bulk_r[idx][emb]
+            Et_net[emb] -= Et_bulk_r[emb]
 
             fa = s_net * a
             N += float(np.sum(fa))
@@ -433,18 +474,19 @@ class FiberSolver:
               + chi_x[:, None] * self._ly_rebar[None, :]
               - chi_y[:, None] * self._lx_rebar[None, :])
 
-        sb_at_rebars = self.sec.bulk_material.stress_array(er)
         embedded = self.sec.embedded_rebars
 
-        for mat, idx in self._rebar_groups:
-            s_rebar = mat.stress_array(er[:, idx])
+        for mat, bulk_mat, idx in self._rebar_groups:
+            er_g = er[:, idx]
+            s_rebar = mat.stress_array(er_g)
+            sb_at_rebars = bulk_mat.stress_array(er_g)
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
             ly_r = self._ly_rebar[idx]
             lx_r = self._lx_rebar[idx]
 
             s_net = s_rebar.copy()
-            s_net[:, emb] -= sb_at_rebars[:, idx][:, emb]
+            s_net[:, emb] -= sb_at_rebars[:, emb]
 
             fa = s_net * a[None, :]                  # (n, len(idx))
             N += fa.sum(axis=1)
@@ -487,23 +529,60 @@ class FiberSolver:
             J[:, j] = (f1 - f0) / deps
         return J
 
-    def _is_uniaxial(self):
+    def _is_uniaxial(self, axis=None):
         r"""
         Detect if the section is effectively uniaxial.
 
-        Returns ``True`` when all fibers share the same x-coordinate
-        (meaning :math:`\chi_y` has no effect and the Jacobian would
-        be singular in 3D).
+        A section is uniaxial when one of its in-plane extents is
+        degenerate, so the corresponding curvature has no
+        integration support and the matching Jacobian column is
+        singular.
+
+        Two degenerate cases are recognised:
+
+        - **vertical-degenerate**: every fiber shares the same
+          :math:`x` coordinate.  :math:`\chi_y` has no effect, so
+          bending is meaningful only about the :math:`x` axis.
+        - **horizontal-degenerate**: every fiber shares the same
+          :math:`y` coordinate.  :math:`\chi_x` has no effect, so
+          bending is meaningful only about the :math:`y` axis.
+
+        Parameters
+        ----------
+        axis : ``'x'``, ``'y'`` or ``None``, optional
+            If specified, the test is restricted to the matching
+            degeneracy: ``'x'`` returns ``True`` only for the
+            vertical-degenerate case (chi_y singular), ``'y'`` only
+            for the horizontal-degenerate case.  Without ``axis``,
+            the test returns ``True`` for either degeneracy —
+            preserving the legacy single-argument semantics.
 
         Returns
         -------
         bool
         """
-        lx_range = (np.max(np.abs(self._lx_bulk))
-                    + np.max(np.abs(self._lx_rebar))
-                    if len(self._lx_rebar) > 0
-                    else np.max(np.abs(self._lx_bulk)))
-        return lx_range < 1e-6
+        # Range of lever arms along x (sensitivity to chi_y).
+        if len(self._lx_rebar) > 0:
+            lx_range = (np.max(np.abs(self._lx_bulk))
+                        + np.max(np.abs(self._lx_rebar)))
+        else:
+            lx_range = np.max(np.abs(self._lx_bulk))
+
+        # Range of lever arms along y (sensitivity to chi_x).
+        if len(self._ly_rebar) > 0:
+            ly_range = (np.max(np.abs(self._ly_bulk))
+                        + np.max(np.abs(self._ly_rebar)))
+        else:
+            ly_range = np.max(np.abs(self._ly_bulk))
+
+        vertical_deg = lx_range < 1e-6     # bending about x
+        horizontal_deg = ly_range < 1e-6   # bending about y
+
+        if axis == 'x':
+            return vertical_deg
+        if axis == 'y':
+            return horizontal_deg
+        return vertical_deg or horizontal_deg
 
     # ==================================================================
     #  Main solver entry point
@@ -568,17 +647,38 @@ class FiberSolver:
         # ----------------------------------------------------------
         #  Uniaxial or near-uniaxial
         # ----------------------------------------------------------
-        if self._is_uniaxial():
+        # Vertically-degenerate section: only chi_x is meaningful,
+        # solve about the x-axis.
+        if self._is_uniaxial(axis='x'):
             return self._solve_uniaxial(
                 N_target, Mx_target, eps0_init, chi_x_init,
                 tol, max_iter)
 
-        ### TODO: why only on My and not Mx? It makes no sense.
+        # Horizontally-degenerate section: only chi_y is meaningful,
+        # solve about the y-axis.
+        if self._is_uniaxial(axis='y'):
+            return self._solve_uniaxial_y(
+                N_target, My_target, eps0_init, chi_y_init,
+                tol, max_iter)
+
+        # Near-uniaxial fast paths.  When one of the target moments
+        # is negligible, try the corresponding 2-unknown solve in
+        # the dominant plane and accept it only if the spurious
+        # moment stays inside tolerance.  Both branches are present
+        # for symmetry — previously only the My-near-zero branch
+        # existed, penalising demands dominated by My.
         if abs(My_target) < M_tol:
             sol = self._solve_uniaxial(
                 N_target, Mx_target, eps0_init, chi_x_init,
                 tol, max_iter)
             if sol["converged"] and abs(sol["My"]) < M_tol:
+                return sol
+
+        if abs(Mx_target) < M_tol:
+            sol = self._solve_uniaxial_y(
+                N_target, My_target, eps0_init, chi_y_init,
+                tol, max_iter)
+            if sol["converged"] and abs(sol["Mx"]) < M_tol:
                 return sol
 
         return self._solve_biaxial(
@@ -641,7 +741,7 @@ class FiberSolver:
         eps_hi *= 1.01
 
         # --- Batch scan ---
-        n_scan = 20 #120
+        n_scan = 120
         eps_vals = np.linspace(eps_lo, eps_hi, n_scan)
         chi_zero = np.zeros(n_scan)
         N_vals, _, _ = self.integrate_batch(eps_vals, chi_zero, chi_zero)
@@ -722,14 +822,23 @@ class FiberSolver:
             return float(x0[0]), float(x0[1]), float(x0[2])
         except np.linalg.LinAlgError:
             sec = self.sec
-            A_ideal_gross = getattr(sec, 'ideal_gross_area', sec.B * sec.H)
-            I_approx = A_ideal_gross * sec.H**2 / 12
+            A_ideal_gross = getattr(sec, 'ideal_gross_area',
+                                    sec.B * sec.H)
+            # Independent moments of inertia for each bending axis.
+            I_x_approx = (A_ideal_gross * sec.H ** 2 / 12
+                          if sec.H > 0 else 0.0)
+            I_y_approx = (A_ideal_gross * sec.B ** 2 / 12
+                          if sec.B > 0 else 0.0)
             ### TODO: substitute 30000 with real bulk base modulus of the section
-            eps0_est = N_target / (A_ideal_gross * 30000)
-            ### TODO: substitute 30000 with real bulk base modulus of the section
-            chi_x_est = (Mx_target / (30000 * I_approx)
-                         if I_approx > 0 else 1e-6)
-            return float(eps0_est), float(chi_x_est), 0.0
+            E_eff = 30000.0
+            eps0_est = N_target / (A_ideal_gross * E_eff)
+            chi_x_est = (Mx_target / (E_eff * I_x_approx)
+                         if I_x_approx > 0 else 1e-6)
+            chi_y_est = (My_target / (E_eff * I_y_approx)
+                         if I_y_approx > 0 else 0.0)
+            return (float(eps0_est),
+                    float(chi_x_est),
+                    float(chi_y_est))
 
     # ------------------------------------------------------------------
     #  Uniaxial solver (analytical Jacobian)
@@ -867,6 +976,149 @@ class FiberSolver:
         }
 
     # ------------------------------------------------------------------
+    #  Uniaxial solver about the y-axis  (mirror of _solve_uniaxial)
+    # ------------------------------------------------------------------
+
+    def _solve_uniaxial_y(self, N_target, My_target,
+                          eps0_init, chi_y_init, tol, max_iter):
+        r"""
+        2-unknown solver with :math:`\chi_x` fixed at 0.
+
+        Mirror image of :meth:`_solve_uniaxial`, applicable when
+        the bending is dominant about the :math:`y` axis (target
+        :math:`M_x \approx 0`) or when the section is degenerate
+        horizontally (:meth:`_is_uniaxial(axis='y')`).
+
+        Strategy is identical to the x-axis variant: elastic guess
+        → Newton, axial warm-start with sign-aware curvature, and
+        a multi-start grid as last resort.
+
+        Parameters
+        ----------
+        N_target, My_target : float
+        eps0_init, chi_y_init : float
+        tol : float
+        max_iter : int
+
+        Returns
+        -------
+        dict
+            ``eps0``, ``chi_x`` (always 0), ``chi_y``, ``N``, ``Mx``,
+            ``My``, ``converged``, ``iterations``.
+        """
+        # --- Attempt 1: user-supplied or elastic guess ---
+        if eps0_init == 0.0 and chi_y_init == 0.0:
+            e0, _, c0 = self._elastic_initial_guess(
+                N_target, 0.0, My_target)
+            if c0 == 0.0:
+                # Elastic-fallback path may return chi_y = 0; nudge.
+                c0 = 1e-6 if My_target >= 0 else -1e-6
+        else:
+            e0, c0 = eps0_init, chi_y_init
+
+        sol = self._nr_uniaxial_y(N_target, My_target, e0, c0,
+                                  tol, max_iter)
+        if sol["converged"]:
+            return sol
+
+        # --- Attempt 2: warm-start from pure-axial bisection ---
+        sol_axial = self._solve_pure_axial(N_target, tol, max_iter)
+        if sol_axial["converged"]:
+            e0_ax = sol_axial["eps0"]
+            chi_sign = 1.0 if My_target >= 0 else -1.0
+            for chi_mag in [1e-6, 5e-6, 1e-5, 3e-5, 5e-5]:
+                sol2 = self._nr_uniaxial_y(
+                    N_target, My_target,
+                    e0_ax, chi_sign * chi_mag,
+                    tol, max_iter)
+                if sol2["converged"]:
+                    return sol2
+
+        # --- Attempt 3: multi-start grid ---
+        emb = self.sec.bulk_material.eps_min
+        for chi_sign in [1.0, -1.0]:
+            for chi_mag in [1e-5, 5e-6, 2e-5, 3e-5, 5e-5]:
+                chi_try = chi_sign * chi_mag
+                try:
+                    N0, _, _ = self.integrate(0.0, 0.0, chi_try)
+                    N1, _, _ = self.integrate(1e-6, 0.0, chi_try)
+                    dNde = (N1 - N0) / 1e-6
+                    if abs(dNde) > 1:
+                        eps0_try = (N_target - N0) / dNde
+                        eps0_try = np.clip(eps0_try, emb, -emb)
+                    else:
+                        eps0_try = emb / 2
+                except Exception:
+                    eps0_try = emb / 2
+
+                sol = self._nr_uniaxial_y(N_target, My_target,
+                                          eps0_try, chi_try,
+                                          tol, max_iter // 2)
+                if sol["converged"]:
+                    return sol
+
+        return self._nr_uniaxial_y(N_target, My_target, e0, c0,
+                                   tol, max_iter)
+
+    def _nr_uniaxial_y(self, N_target, My_target, eps0, chi_y,
+                       tol, max_iter):
+        r"""
+        Core Newton-Raphson for uniaxial bending about the y-axis.
+
+        Uses the **analytical** 2×2 sub-block of the tangent
+        stiffness matrix corresponding to
+        :math:`(\varepsilon_0, \chi_y)`, i.e. rows/cols 0 and 2 of
+        the full 3×3 tangent.  Mirror image of :meth:`_nr_uniaxial`.
+        """
+        for i in range(max_iter):
+            N, Mx, My, K = self.integrate_with_tangent(eps0, 0.0, chi_y)
+            r = np.array([N - N_target, My - My_target])
+
+            if abs(r[0]) < tol and abs(r[1]) < tol * 1000:
+                return {
+                    "eps0": eps0, "chi_x": 0.0, "chi_y": chi_y,
+                    "N": N, "Mx": Mx, "My": My,
+                    "converged": True, "iterations": i + 1,
+                }
+
+            # Extract 2×2 sub-block [dN/de, dN/dcy; dMy/de, dMy/dcy]
+            J = np.array([[K[0, 0], K[0, 2]],
+                          [K[2, 0], K[2, 2]]])
+            det = abs(J[0, 0] * J[1, 1] - J[0, 1] * J[1, 0])
+            if det < 1e-20:
+                eps0 += 1e-5
+                chi_y += 1e-7
+                continue
+
+            try:
+                d = np.linalg.solve(J, -r)
+            except np.linalg.LinAlgError:
+                eps0 += 1e-5
+                chi_y += 1e-7
+                continue
+
+            # Backtracking line search
+            alpha = 1.0
+            r_norm = np.linalg.norm(r)
+            for _ in range(15):
+                e_new = eps0 + alpha * d[0]
+                c_new = chi_y + alpha * d[1]
+                Nn, _, Myn = self.integrate(e_new, 0.0, c_new)
+                rn = np.array([Nn - N_target, Myn - My_target])
+                if np.linalg.norm(rn) < r_norm:
+                    break
+                alpha *= 0.5
+            eps0 += alpha * d[0]
+            chi_y += alpha * d[1]
+
+        N, Mx, My = self.integrate(eps0, 0.0, chi_y)
+        return {
+            "eps0": eps0, "chi_x": 0.0, "chi_y": chi_y,
+            "N": N, "Mx": Mx, "My": My,
+            "converged": False, "iterations": max_iter,
+        }
+
+    # ------------------------------------------------------------------
     #  Biaxial solver (analytical Jacobian)
     # ------------------------------------------------------------------
 
@@ -993,13 +1245,15 @@ class FiberSolver:
             for mat, idx in self._bulk_groups:
                 sb[idx] = mat.stress_array(eb[idx])
 
-        # Rebar stresses
+        # Rebar stresses (zone-aware grouping).
         sr_ideal_gross = np.zeros_like(er)
-        for mat, idx in self._rebar_groups:
-            sr_ideal_gross[idx] = mat.stress_array(er[idx])
+        sb_at_rebars = np.zeros_like(er)
+        for mat, bulk_mat, idx in self._rebar_groups:
+            er_g = er[idx]
+            sr_ideal_gross[idx] = mat.stress_array(er_g)
+            sb_at_rebars[idx] = bulk_mat.stress_array(er_g)
 
-        # Net rebar stress (subtract bulk at rebar location)
-        sb_at_rebars = self.sec.bulk_material.stress_array(er)
+        # Net rebar stress (subtract zone-correct bulk at rebar location)
         sr_net = sr_ideal_gross.copy()
         emb = self.sec.embedded_rebars
         sr_net[emb] -= sb_at_rebars[emb]

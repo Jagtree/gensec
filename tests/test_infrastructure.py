@@ -21,7 +21,7 @@
 Unit tests for YAML loader, export functions, and domain checker.
 
 Updated for v0.2.0: uses DomainChecker (replaces legacy DemandChecker),
-v2.1 demand result format (Mx_kNm/My_kNm/eta_3D), and new YAML structure
+v0.3 demand result format (Mx_kNm/My_kNm/eta_norm), and new YAML structure
 (combinations with components/stages, envelopes with members).
 """
 
@@ -35,7 +35,9 @@ from pathlib import Path
 
 from gensec.materials import Concrete, Steel
 from gensec.geometry import RebarLayer, RectSection
-from gensec.solver import FiberSolver, NMDiagram, DomainChecker
+from gensec.solver import FiberSolver
+from gensec.solver import NMDiagram
+from gensec.solver import DomainChecker
 from gensec.io_yaml import load_yaml
 from gensec.output import (
     export_nm_domain_csv, export_nm_domain_json,
@@ -111,8 +113,8 @@ class TestYAMLLoader(unittest.TestCase):
     def test_output_options_defaults(self):
         data = load_yaml(_EXAMPLE_YAML)
         opts = data["output_options"]
-        # example_input.yaml sets eta_3D: true
-        self.assertTrue(opts["eta_3D"])
+        # example_input.yaml sets eta_norm: true
+        self.assertTrue(opts["eta_norm"])
 
 
 # ==================================================================
@@ -187,9 +189,9 @@ class TestYAMLCombinationsV21(unittest.TestCase):
 
     def test_output_flags_all_types(self):
         opts = self.data["output_options"]
-        self.assertTrue(opts["eta_3D"])
+        self.assertTrue(opts["eta_norm"])
         self.assertTrue(opts["eta_2D"])
-        self.assertTrue(opts["eta_path"])
+        self.assertTrue(opts["eta_path_norm_ray"])
         self.assertTrue(opts["eta_path_2D"])
 
     def test_delta_N_tol_parsed(self):
@@ -271,10 +273,10 @@ class TestExport(unittest.TestCase):
         self.assertGreater(os.path.getsize(p), 100)
 
     def test_demand_csv_row_count(self):
-        # v2.1 result format: Mx_kNm, My_kNm, eta_3D
+        # v0.3 result format: Mx_kNm, My_kNm, eta_norm
         results = [
             {"name": "A", "N_kN": -1500.0, "Mx_kNm": 200.0, "My_kNm": 0.0,
-             "eta_3D": 0.7, "inside": True, "verified": True},
+             "eta_norm": 0.7, "inside": True, "verified": True},
         ]
         p = os.path.join(self.td, "dem.csv")
         export_demand_results_csv(results, p)
@@ -287,20 +289,20 @@ class TestExport(unittest.TestCase):
     def test_demand_csv_header_contains_eta(self):
         results = [
             {"name": "A", "N_kN": -1500.0, "Mx_kNm": 200.0, "My_kNm": 0.0,
-             "eta_3D": 0.7, "inside": True, "verified": True},
+             "eta_norm": 0.7, "inside": True, "verified": True},
         ]
         p = os.path.join(self.td, "dem.csv")
         export_demand_results_csv(results, p)
         with open(p) as f:
             reader = csv.reader(f)
             header = next(reader)
-        self.assertIn("eta_3D", header)
+        self.assertIn("eta_norm", header)
         self.assertIn("Mx_kNm", header)
 
     def test_demand_json_demands_array(self):
         results = [
             {"name": "A", "N_kN": -1500.0, "Mx_kNm": 200.0, "My_kNm": 0.0,
-             "eta_3D": 0.7, "inside": True, "verified": True},
+             "eta_norm": 0.7, "inside": True, "verified": True},
         ]
         p = os.path.join(self.td, "dem.json")
         export_demand_results_json(results, p)
@@ -312,7 +314,7 @@ class TestExport(unittest.TestCase):
     def test_demand_json_keys_v21(self):
         results = [
             {"name": "B", "N_kN": -800.0, "Mx_kNm": 100.0, "My_kNm": 30.0,
-             "eta_3D": 0.55, "inside": True, "verified": True},
+             "eta_norm": 0.55, "inside": True, "verified": True},
         ]
         p = os.path.join(self.td, "dem2.json")
         export_demand_results_json(results, p)
@@ -360,23 +362,29 @@ class TestDomainChecker2D(unittest.TestCase):
     def test_outside_moment(self):
         self.assertFalse(self.checker.is_inside(-1500e3, 500e6))
 
-    def test_eta_3D_inside_less_than_1(self):
-        eta = self.checker.eta_3D(-1500e3, 200e6)
+    def test_eta_norm_inside_less_than_1(self):
+        eta = self.checker.eta_norm(-1500e3, 200e6)
         self.assertGreater(eta, 0.0)
         self.assertLess(eta, 1.0)
 
-    def test_eta_3D_outside_greater_than_1(self):
-        eta = self.checker.eta_3D(-1500e3, 500e6)
+    def test_eta_norm_outside_greater_than_1(self):
+        eta = self.checker.eta_norm(-1500e3, 500e6)
         self.assertGreater(eta, 1.0)
 
-    def test_eta_3D_origin_is_zero(self):
-        eta = self.checker.eta_3D(0.0, 0.0)
-        self.assertEqual(eta, 0.0)
+    def test_eta_norm_origin_is_inside(self):
+        # alpha: eta_norm(origin) is < 1 because the origin is
+        # inside the domain.  It is not 0 because the origin
+        # generally does not coincide with the Chebyshev centre
+        # (the dominio for an asymmetric section is not centred
+        # on (0, 0)).  Just verify it is well-defined and < 1.
+        eta = self.checker.eta_norm(0.0, 0.0)
+        self.assertLess(eta, 1.0)
+        self.assertGreaterEqual(eta, 0.0)
 
     def test_is_inside_and_eta_consistent(self):
         # If eta < 1 → is_inside should be True
         N, Mx = -500e3, 50e6
-        eta = self.checker.eta_3D(N, Mx)
+        eta = self.checker.eta_norm(N, Mx)
         inside = self.checker.is_inside(N, Mx)
         self.assertLess(eta, 1.0)
         self.assertTrue(inside)

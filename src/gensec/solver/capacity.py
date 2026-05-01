@@ -81,10 +81,9 @@ class NMDiagram:
         near :math:`N \approx 0`.
 
         Per EC2 §6.1 these configurations are valid ULS states.
-        However, many commercial tools (e.g. AS by Gaddi Software)
-        only consider **Pivot B** configurations
-        (:math:`\varepsilon_c = \varepsilon_{cu2}`), giving a
-        smaller domain.
+        However, many commercial tools only consider **Pivot B**
+        configurations (:math:`\varepsilon_c = \varepsilon_{cu2}`),
+        giving a smaller domain.
 
         Default ``False`` (Pivot B only, matches most commercial
         tools).  Set to ``True`` for the full EC2 domain.
@@ -247,20 +246,52 @@ class NMDiagram:
         emb = self._emb
         sec = self.solver.sec
 
+        # Bbox edges along the bending direction (``sec.bbox`` returns
+        # ``(minx, miny, maxx, maxy)``).  We need the *physical* lever
+        # arm from the bottom edge of the section to the integrator's
+        # reference point (``y_ref`` for direction='x', ``x_ref`` for
+        # direction='y'); using ``y_ref`` directly is correct only when
+        # ``y_min == 0``, which holds for every standard primitive but
+        # not for custom polygons defined on a centred frame.
+        minx, miny, maxx, maxy = sec.bbox
         if direction == 'x':
             depth = sec.H
-            ref = self.solver.y_ref
+            lever = self.solver.y_ref - miny
         else:
             depth = sec.B
-            ref = self.solver.x_ref
+            lever = self.solver.x_ref - minx
 
         eps0_list = []
         chi_list = []
 
         def _append(ei, es):
-            """Convert edge strains to (eps0, chi) and append."""
+            r"""
+            Convert (bot, top) edge strains to (eps0, chi) and append.
+
+            Strain field along the bending direction:
+
+            .. math::
+
+                \varepsilon(\xi)
+                = \varepsilon_i + \chi\,(\xi - \xi_{\min})
+
+            with :math:`\chi = (\varepsilon_s - \varepsilon_i) / H`.
+            Evaluating at :math:`\xi = \xi_{\text{ref}}` gives:
+
+            .. math::
+
+                \varepsilon_0
+                = \varepsilon_i + \chi\,(\xi_{\text{ref}} - \xi_{\min}).
+
+            The lever arm is the *physical* distance from the bottom
+            edge of the section to the reference point, which makes
+            the conversion invariant under translations of the
+            coordinate frame.  This is what guarantees a
+            mirror-symmetric N-M cloud for a doubly symmetric section
+            defined on a centred frame.
+            """
             chi = (es - ei) / depth if depth > 0 else 0.0
-            eps0 = ei + chi * ref
+            eps0 = ei + chi * lever
             eps0_list.append(eps0)
             chi_list.append(chi)
 
