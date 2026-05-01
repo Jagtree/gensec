@@ -24,10 +24,10 @@ Solver-related plots (M-:math:`\chi` curves, interaction diagrams,
 
 
 ideal_gross-section plot and geometric report
-----------------------------------------
+----------------------------------------------
 
 Dedicated plotting and textual reporting for the ideal_gross geometric
-properties (see :doc:`ideal_gross_properties`).  Produces the figure with
+properties (see :ref:`ideal_gross_properties`).  Produces the figure with
 centroid, principal axes :math:`\xi, \eta`, central inertia
 ellipse, and kern, plus the matching text report.
 
