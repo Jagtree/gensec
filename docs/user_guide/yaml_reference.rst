@@ -78,11 +78,11 @@ field controls which value is used:
 +---------------+-----------------------------------------------------------+
 | ``tension_fct``| Tensile strength used                                    |
 +===============+===========================================================+
-| ``fctd``      | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c`|
+| ``fctd``      | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c` |
 +---------------+-----------------------------------------------------------+
 | ``fctm``      | :math:`f_{ctm}` (mean tensile strength)                   |
 +---------------+-----------------------------------------------------------+
-| ``fctk``      | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)      |
+| ``fctk``      | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)       |
 +---------------+-----------------------------------------------------------+
 
 .. note::
@@ -282,13 +282,13 @@ Each rebar entry supports:
 | ``y``               | —       | Vertical coordinate [mm] (required)      |
 +---------------------+---------+------------------------------------------+
 | ``As``              | —       | Cross-sectional area [mm²].  If omitted, |
-|                     |         | computed from ``diameter`` and            |
-|                     |         | ``n_bars``.  If both ``As`` and           |
-|                     |         | ``diameter`` are given, ``As`` prevails.  |
+|                     |         | computed from ``diameter`` and           |
+|                     |         | ``n_bars``.  If both ``As`` and          |
+|                     |         | ``diameter`` are given, ``As`` prevails. |
 +---------------------+---------+------------------------------------------+
-| ``diameter``        | —       | Bar diameter [mm].  When ``As`` is        |
-|                     |         | omitted, used to compute                  |
-|                     |         | :math:`A_s = n_b \cdot \pi d^2/4`.      |
+| ``diameter``        | —       | Bar diameter [mm].  When ``As`` is       |
+|                     |         | omitted, used to compute                 |
+|                     |         | :math:`A_s = n_b \cdot \pi d^2/4`.       |
 +---------------------+---------+------------------------------------------+
 | ``material``        | —       | Material identifier (required)           |
 +---------------------+---------+------------------------------------------+

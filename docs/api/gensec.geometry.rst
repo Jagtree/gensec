@@ -49,7 +49,7 @@ for common section shapes.  Each polygon can be passed directly to
 
 
 ideal_gross geometric properties
----------------------------
+---------------------------------
 
 Exact polygon integrals (Green's theorem), centroidal and
 principal second-moments, central inertia ellipse, kern.

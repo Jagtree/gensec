@@ -85,4 +85,5 @@ Package-level exports
 
 .. automodule:: gensec.materials
    :members:
+   :noindex:
    :show-inheritance:
