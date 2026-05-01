@@ -360,16 +360,22 @@ default to the values shown below.
 
    output:
      # ── Utilization ratio flags ──
-     eta_3D: true               # 3D ray on N-Mx-My hull (default: true)
-     eta_2D: false              # 2D ray on Mx-My contour at fixed N (default: false)
-     eta_path: true             # 3D ray for staged combinations (default: true)
-     eta_path_2D: false         # 2D ray for staged combinations (default: false)
-     delta_N_tol: 0.03          # ΔN tolerance for eta_path_2D (default: 0.03)
+     # 3-D family (operate in anisotropy-corrected normalised space)
+     eta_norm: true              # alpha: linear distance to boundary (default: true)
+     eta_norm_beta: true         # composite ratio F_SU/(F_SU+d_min) (default: true)
+     eta_norm_ray: false         # ray-cast from origin (default: false)
+     # 2-D family (operate in (Mx,My) plane at fixed N)
+     eta_2D: false               # ray in plane at demand's N (default: false)
+     # Path metrics (staged combinations)
+     eta_path_norm_ray: false    # 3-D ray-cast staged (default: false)
+     eta_path_norm_beta: false   # composite ratio along stage segment (default: false)
+     eta_path_2D: false          # 2-D ray staged (default: false)
+     delta_N_tol: 0.03           # ΔN tolerance for eta_path_2D (default: 0.03)
 
      # ── Domain generation ──
-     generate_mx_my: false      # produce Mx-My contour diagrams (default: false)
-     generate_3d_surface: false # produce 3-D resistance surface (default: false)
-     n_angles_mx_my: 144        # angular resolution for Mx-My (default: 144)
+     generate_mx_my: false       # produce Mx-My contour diagrams (default: false)
+     generate_3d_surface: false  # produce 3-D resistance surface (default: false)
+     n_angles_mx_my: 144         # angular resolution for Mx-My (default: 144)
 
      # ── Moment-curvature and ductility ──
      generate_moment_curvature: true      # M-χ diagrams per N level (default: true)
@@ -380,6 +386,90 @@ default to the values shown below.
      n_levels_mode: demands     # "demands", "auto", or "explicit" (default: "demands")
      # n_levels_count: 10       # for "auto" mode
      # n_levels_values: [-3000, -1500, 0]  # for "explicit" mode [kN]
+
+Utilization metrics
+~~~~~~~~~~~~~~~~~~~
+
+GenSec computes up to seven utilization metrics, organised in two
+geometric families plus path-aware variants for staged loading.
+Each metric answers a *different* geometric question: they are
+complementary, not redundant, and no strict ordering between them
+holds in general.  All metrics share the convention
+:math:`\eta \le 1` safe / :math:`\eta > 1` unsafe; ``verified`` is
+decided by the worst of the enabled metrics.
+
+**3-D family** — operates in *anisotropy-corrected normalised
+space*: the axial axis is rescaled by
+:math:`u_x = \Delta M_x / \Delta N` and the :math:`M_y` axis by
+:math:`v_y = \Delta M_x / \Delta M_y`, so that the bounding box of
+the resistance domain has the same numeric extent on every axis.
+Euclidean distances in this space are physically meaningful even
+for strongly anisotropic sections (walls, slabs, T-beams).
+
+* ``eta_norm`` (alpha) — Linear distance from the demand to the
+  nearest boundary face, expressed as a fraction of the Chebyshev
+  radius :math:`D_{\max}` of the normalised domain:
+  :math:`\eta = 1 - d_{\min}/D_{\max}` (interior) or
+  :math:`\eta = 1 + d_{\min}/D_{\max}` (exterior).  A true
+  geometric distance: monotone in proximity to the boundary,
+  reaches 0 at the Chebyshev centre, 1 on the boundary.  The
+  recommended principal 3-D metric.
+
+* ``eta_norm_beta`` — Composite ratio
+  :math:`F_{SU} / (F_{SU} + d_{\min})`, mixing the demand norm
+  :math:`F_{SU}` and the face-distance :math:`d_{\min}`.  Not a
+  pure distance: a ratio that grows both with proximity to the
+  boundary and with the demand magnitude.  The semantic reading
+  is "sensitivity to perturbation in proportion to the demand
+  magnitude".  Useful for cross-software validation, since
+  equivalent formulations are reported by some commercial RC
+  software.
+
+* ``eta_norm_ray`` — Ray-cast from the origin to the demand in
+  normalised space:
+  :math:`\eta = |\mathbf{S}_u| / |\mathbf{R}_u|`.  Answers
+  "if I scale all three force components proportionally, when does
+  the demand exit the domain?".  Linear in demand magnitude along
+  any fixed ray.
+
+**2-D family** — operates in the :math:`(M_x, M_y)` plane at the
+demand's :math:`N`.  Both axes share physical units, no
+normalisation needed.
+
+* ``eta_2D`` — Ray-cast from the origin in the :math:`(M_x, M_y)`
+  plane to the contour at the demand's :math:`N`.  Useful for
+  flexural verifications at fixed axial force.  Requires a
+  biaxial section.
+
+**Path metrics** (staged combinations only):
+
+* ``eta_path_norm_ray`` — 3-D ray-cast in normalised space, from the
+  previous stage's cumulative demand to the current one.  
+  Path-direction-aware analogue of ``eta_norm_ray``.
+
+* ``eta_path_norm_beta`` — Composite ratio along the stage
+  segment :math:`B \to T`:
+  :math:`L / (L + d_{\text{seg}})`, with :math:`L = |T - B|` and
+  :math:`d_{\text{seg}}` the minimum signed distance of the
+  segment from the boundary.  Path-direction-aware analogue of
+  ``eta_norm_beta``.  Particularly informative in seismic
+  verification: when gravity is applied as a first stage and
+  seismic action as a second stage, this metric flags the
+  "structure already at the limit before the seismic increment"
+  case distinctly from ``eta_path_norm_ray``.
+
+* ``eta_path_2D`` — 2-D variant on the Mx-My contour at
+  cumulative :math:`N`.  Skipped when the axial-force change
+  between stages exceeds ``delta_N_tol``.
+
+The default flags reflect the recommendation that ``eta_norm`` and
+``eta_norm_beta`` are the principal metrics for routine
+verification, while the others are opt-in for specific analyses.
+Path-aware metrics are off by default; if you process a staged
+combination without enabling at least one ``eta_path_*`` flag,
+GenSec issues an informational warning, since the resulting
+report would only contain point metrics at each cumulative state
+and would not characterise the load history.
 
 The ``generate_moment_curvature``, ``generate_polar_ductility``, and
 ``generate_3d_moment_curvature`` flags control whether the
