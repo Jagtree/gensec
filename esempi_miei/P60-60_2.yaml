@@ -1,0 +1,78 @@
+# GenSec — VCASLU validation case
+
+materials:
+  concrete_direct:
+    type: concrete
+    fck: 50.0             # characteristic cylinder strength [MPa] (required)
+    gamma_c: 1.5          # partial safety factor (default 1.5)
+    alpha_cc: 0.85        # long-term coefficient (default 0.85)
+    n_parabola: 2.0       # parabolic exponent (default 2.0)
+    eps_c2: -0.002        # peak-stress strain (default -0.002)
+    eps_cu2: -0.0035      # ultimate strain (default -0.0035)
+
+  B450C:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+    works_in_compression: true
+
+section:
+  B: 600
+  H: 600
+  bulk_material: concrete_direct
+  n_fibers_y: 40
+  n_fibers_x: 40
+  rebars:
+    - {x: 60, y: 60,   As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 60, y: 200,  As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 60, y: 400,  As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 60, y: 540,  As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 200, y: 60, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 200, y: 540, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 400, y: 60, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 400, y: 540, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 540, y: 60,   As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 540, y: 200,  As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 540, y: 400,  As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 540, y: 540,  As: 531, material: B450C, n_bars: 1, diameter: 26}
+
+demands:
+  - name: 1
+    N_kN: -233.13
+    Mx_kNm: 286.0
+    My_kNm: 174.26
+  - name: 2
+    N_kN: -233.13
+    Mx_kNm: 167.22
+    My_kNm: 361.35
+  - name: 3
+    N_kN: -381.92
+    Mx_kNm: 295.66
+    My_kNm: 113.89
+  - name: 4
+    N_kN: -381.92
+    Mx_kNm: 145.54
+    My_kNm: 328.28
+  - name: 5
+    N_kN: -365.76
+    Mx_kNm: 305.21
+    My_kNm: 106.25
+  - name: 6
+    N_kN: -365.76
+    Mx_kNm: 127.64
+    My_kNm: 302.86
+  - name: 7
+    N_kN: -550.16
+    Mx_kNm: 204.75
+    My_kNm: 89.72
+  - name: 8
+    N_kN: -550.16
+    Mx_kNm: 127.85
+    My_kNm: 205.02
+
+output:
+  eta_3D: true
+  eta_2D: true
+  generate_mx_my: true
+  generate_3d_surface: true
+  n_angles_mx_my: 144
