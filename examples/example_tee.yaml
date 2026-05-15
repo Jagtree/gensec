@@ -1,4 +1,11 @@
-# GenSec — T-section example (generic format)
+# ================================================================
+#  GenSec v0.3.0 — T-section example (generic format)
+# ================================================================
+#
+#  Parametric T-shape via the ``tee`` primitive.  Origin at the
+#  bottom-left of the bounding box; bf = top flange width,
+#  bw = web width.
+# ================================================================
 
 materials:
   concrete_1:
@@ -25,8 +32,8 @@ section:
   mesh_size: 15
   mesh_method: grid
   rebars:
-    - {y: 40, x: 310, As: 314.16, material: steel_1, n_bars: 2, diameter: 20}
-    - {y: 40, x: 490, As: 314.16, material: steel_1, n_bars: 2, diameter: 20}
+    - {y: 40,  x: 310, As: 314.16, material: steel_1, n_bars: 2, diameter: 20}
+    - {y: 40,  x: 490, As: 314.16, material: steel_1, n_bars: 2, diameter: 20}
     - {y: 560, x: 250, As: 628.32, material: steel_1, n_bars: 4, diameter: 20}
     - {y: 560, x: 550, As: 628.32, material: steel_1, n_bars: 4, diameter: 20}
 
@@ -41,7 +48,9 @@ demands:
     My_kNm: 0
 
 output:
-  eta_3D: true
+  # v0.3.0 utilization flags (the two 3-D defaults).
+  eta_norm: true
+  eta_norm_beta: true
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144

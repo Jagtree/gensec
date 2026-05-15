@@ -1,3 +1,12 @@
+# ================================================================
+#  GenSec v0.3.0 — basic rectangular RC section with envelopes
+# ================================================================
+#
+#  Legacy rectangular section (B + H + n_fibers_y) with two named
+#  load envelopes.  Each envelope reports eta_max across its inline
+#  member list.
+# ================================================================
+
 materials:
   concrete_1:
     type: concrete_ec2_gen1_custom
@@ -17,21 +26,9 @@ section:
   bulk_material: concrete_1
   n_fibers_y: 50
   rebars:
-    - y: 40
-      As: 942.5
-      material: steel_1
-      n_bars: 3
-      diameter: 20
-    - y: 300
-      As: 402.1
-      material: steel_1
-      n_bars: 2
-      diameter: 16
-    - y: 560
-      As: 942.5
-      material: steel_1
-      n_bars: 3
-      diameter: 20
+    - {y: 40,  As: 942.5, material: steel_1, n_bars: 3, diameter: 20}
+    - {y: 300, As: 402.1, material: steel_1, n_bars: 2, diameter: 16}
+    - {y: 560, As: 942.5, material: steel_1, n_bars: 3, diameter: 20}
 
 demands:
   - name: Gravity
@@ -58,8 +55,10 @@ envelopes:
       - {N_kN: -1100, Mx_kNm: 120, My_kNm: 180}
 
 output:
-  eta_3D: true
-  eta_2D: true
+  # v0.3.0 utilization flags.
+  eta_norm: true               # principal 3-D linear-distance metric
+  eta_norm_beta: true          # composite ratio (cross-software comparison)
+  eta_2D: true                 # Mx-My ray-cast at fixed N (biaxial only)
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144

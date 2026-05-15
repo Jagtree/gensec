@@ -1,4 +1,13 @@
-# GenSec — biaxial column with auto N-levels
+# ================================================================
+#  GenSec v0.3.0 — biaxial column with auto N-levels
+# ================================================================
+#
+#  Demonstrates the ``n_levels_mode: auto`` strategy: the
+#  ``n_levels_count`` axial values are sampled by linspace between
+#  N_Rd,min and N_Rd,max of the resistance domain.  Use this when
+#  the demands span only a narrow N range but a full sweep of
+#  Mx-My contours and M-χ diagrams is desired.
+# ================================================================
 
 materials:
   concrete_1:
@@ -21,11 +30,11 @@ section:
   n_fibers_y: 40
   n_fibers_x: 30
   rebars:
-    - {y: 40, x: 50,   As: 490.87, material: steel_1, diameter: 25}
-    - {y: 40, x: 350,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40,  x: 50,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40,  x: 350, As: 490.87, material: steel_1, diameter: 25}
     - {y: 560, x: 50,  As: 490.87, material: steel_1, diameter: 25}
     - {y: 560, x: 350, As: 490.87, material: steel_1, diameter: 25}
-    - {y: 40, x: 200,  As: 314.16, material: steel_1, diameter: 20}
+    - {y: 40,  x: 200, As: 314.16, material: steel_1, diameter: 20}
     - {y: 560, x: 200, As: 314.16, material: steel_1, diameter: 20}
     - {y: 300, x: 50,  As: 314.16, material: steel_1, diameter: 20}
     - {y: 300, x: 350, As: 314.16, material: steel_1, diameter: 20}
@@ -45,11 +54,13 @@ demands:
     My_kNm: 100
 
 output:
-  eta_3D: true
-  eta_2D: true
+  # v0.3.0 utilization flags.
+  eta_norm: true               # principal 3-D linear-distance metric
+  eta_norm_beta: true          # composite ratio (cross-software comparison)
+  eta_2D: true                 # Mx-My ray at fixed N (biaxial only)
   generate_mx_my: true
   generate_3d_surface: true
-  n_levels_mode: auto
+  n_levels_mode: auto          # linspace between N_Rd,min and N_Rd,max
   n_levels_count: 5
   n_angles_mx_my: 144
   generate_moment_curvature: true

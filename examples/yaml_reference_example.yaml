@@ -1,5 +1,5 @@
 # ================================================================
-#  GenSec v0.2.0 — YAML Reference Input File
+#  GenSec v0.3.0 — YAML Reference Input File
 # ================================================================
 #
 #  This file documents every supported key with inline comments.
@@ -23,8 +23,8 @@
 materials:
 
   # --- Concrete: direct parameters ---
-  # Use when you want full control over constitutive parameters.
-  # Type: concrete_ec2_gen1_custom  (legacy alias: concrete)
+  # Use when full control over the constitutive parameters is needed.
+  # Type: ``concrete_ec2_gen1_custom``  (legacy alias: ``concrete``)
   concrete_direct:
     type: concrete_ec2_gen1_custom
     fck: 49.8             # characteristic cylinder strength [MPa] (required)
@@ -36,6 +36,20 @@ materials:
     # fct: 0.0            # tensile strength [MPa] (default 0 = no tension)
     # Ec: 0.0             # elastic modulus [MPa] for tension (default 0)
 
+  # --- Concrete: EC2/NTC class-based ---
+  # Alternative, EC2-bridged form (``type: concrete_ec2_gen1`` with
+  # a strength ``class``).  All time-dependent and code-prescribed
+  # parameters (fck, fcm, fctm, Ecm, etc.) are derived from EC2
+  # Table 3.1.  Sample:
+  #
+  #   C25:
+  #     type: concrete_ec2_gen1
+  #     class: C25/30
+  #     ls: F            # long/short loading regime
+  #     loadtype: slow   # slow/fast loading
+  #     TypeConc: R      # cement class (R/N/S)
+  #     NA: French       # National Annex
+  #     time: 28         # concrete age [days]
 
   # --- Reinforcing steel ---
   B450C:
@@ -48,7 +62,7 @@ materials:
     works_in_compression: true  # set false for FRP or tension-only materials
 
   # --- Tabulated material (any sigma-epsilon curve) ---
-  # Piecewise-linear.  Strain outside range => sigma = 0.
+  # Piecewise-linear.  Strain outside the range => sigma = 0.
   # cfrp_sheet:
   #   type: tabulated
   #   name: CFRP_200GPa
@@ -59,18 +73,20 @@ materials:
 # ================================================================
 #  SECTION
 # ================================================================
-#  Two formats: legacy rectangular (B + H) or generic (shape + params).
+#  Two formats supported: legacy rectangular (``B`` + ``H``) or
+#  generic (``shape`` + ``params``).
 #
 #  Legacy rectangular:
-#    n_fibers_y controls the mesh resolution.  When n_fibers_x is
-#    omitted or set to 1, an isotropic grid is used (same cell size
-#    in both directions).  Set n_fibers_x > 1 for explicit control.
+#    ``n_fibers_y`` controls the mesh resolution along H.  When
+#    ``n_fibers_x`` is omitted or set to 1, an isotropic grid is
+#    used (same cell size in both directions).  Set
+#    ``n_fibers_x > 1`` for explicit control.
 
 section:
 
-  # --- Generic format (uncomment to use instead) ---
-  shape: custom             # rect, circle, annulus, tee, inv_tee, h, box,
-                         # single_tee, double_tee, custom
+  # --- Generic format ---
+  shape: custom            # rect, circle, annulus, tee, inv_tee, h,
+                           # box, single_tee, double_tee, custom
   params:
     exterior:
       - [95, 505]
@@ -82,33 +98,31 @@ section:
       - [505, -95]
       - [505, 95]
   bulk_material: concrete_direct
-  mesh_size: 15          # target fiber edge length [mm]
-  mesh_method: grid      # 'grid' (default) or 'triangle'
+  mesh_size: 15            # target fiber edge length [mm]
+  mesh_method: grid        # 'grid' (default) or 'triangle'
 
   rebars:
     # Each rebar needs: y, material, and EITHER As OR diameter.
     # If both As and diameter are given, As takes precedence.
-    # If only diameter is given, As = n_bars * pi/4 * d^2.
+    # If only diameter is given, As = n_bars * pi/4 * d^2
+    # (n_bars defaults to 1).
     # x is required for biaxial sections.
-
-   # Example with diameter only (As computed automatically):
-    - {y: 445, x: 70.1,  diameter: 30, material: B450C}
-    - {y: 70.1, x: 445, diameter: 30, material: B450C}
-    - {y: 331.2, x: 176.4, diameter: 26, material: B450C}
-    - {y: 186.8, x: 328.3, diameter: 26, material: B450C}
-    - {y: 186.8, x: -328.3, diameter: 26, material: B450C}
-    - {y: 331.2, x: -176.4, diameter: 26, material: B450C}
-    - {y: 70.1, x: -445, diameter: 30, material: B450C}
-    - {y: 445, x: -70.1,  diameter: 30, material: B450C}
-    - {y: -445, x: -70.1,  diameter: 30, material: B450C}
-    - {y: -70.1, x: -445,  diameter: 30, material: B450C}
-    - {y: -331.2, x: -176.4,  diameter: 26, material: B450C}
-    - {y: -186.8, x: -328.3,  diameter: 26, material: B450C}
+    - {y: 445,    x: 70.1,   diameter: 30, material: B450C}
+    - {y: 70.1,   x: 445,    diameter: 30, material: B450C}
+    - {y: 331.2,  x: 176.4,  diameter: 26, material: B450C}
+    - {y: 186.8,  x: 328.3,  diameter: 26, material: B450C}
+    - {y: 186.8,  x: -328.3, diameter: 26, material: B450C}
+    - {y: 331.2,  x: -176.4, diameter: 26, material: B450C}
+    - {y: 70.1,   x: -445,   diameter: 30, material: B450C}
+    - {y: 445,    x: -70.1,  diameter: 30, material: B450C}
+    - {y: -445,   x: -70.1,  diameter: 30, material: B450C}
+    - {y: -70.1,  x: -445,   diameter: 30, material: B450C}
+    - {y: -331.2, x: -176.4, diameter: 26, material: B450C}
+    - {y: -186.8, x: -328.3, diameter: 26, material: B450C}
     - {y: -186.8, x: 328.3,  diameter: 26, material: B450C}
     - {y: -331.2, x: 176.4,  diameter: 26, material: B450C}
-    - {y: -70.1, x: 445,  diameter: 30, material: B450C}
-    - {y: -445, x: 70.1,  diameter: 30, material: B450C}
-    
+    - {y: -70.1,  x: 445,    diameter: 30, material: B450C}
+    - {y: -445,   x: 70.1,   diameter: 30, material: B450C}
 
 
 # ================================================================
@@ -117,213 +131,143 @@ section:
 #  Units: N_kN [kN], Mx_kNm [kN·m], My_kNm [kN·m].
 #  Sign convention: N > 0 = tension; M per right-hand rule.
 
-demands: 
-  - name: 1
-    N_kN: -2771.69
-    Mx_kNm: 110.48
-    My_kNm: 161.42
-  - name: 2
-    N_kN: -2771.69
-    Mx_kNm: 78.02
-    My_kNm: 144.64
-  - name: 3
-    N_kN: -7103.53
-    Mx_kNm: 134.22
-    My_kNm: 179.04
-  - name: 4
-    N_kN: -7103.53
-    Mx_kNm: 95.32
-    My_kNm: 163.08
-  - name: 5
-    N_kN: -2928.74
-    Mx_kNm: 68.19
-    My_kNm: 265.9
-  - name: 6
-    N_kN: -2928.74
-    Mx_kNm: 35.72
-    My_kNm: 221.63
-  - name: 7
-    N_kN: -7522.76
-    Mx_kNm: 91.92
-    My_kNm: 299.98
-  - name: 8
-    N_kN: -7522.76
-    Mx_kNm: 53.03
-    My_kNm: 253.48
-  - name: 9
-    N_kN: -1639.33
-    Mx_kNm: 147.02
-    My_kNm: 306.14
-  - name: 10
-    N_kN: -1639.33
-    Mx_kNm: 114.55
-    My_kNm: 234.5
-  - name: 11
-    N_kN: -3973.69
-    Mx_kNm: 170.75
-    My_kNm: 356.59
-  - name: 12
-    N_kN: -3973.69
-    Mx_kNm: 131.86
-    My_kNm: 279.7
-  - name: 13
-    N_kN: -2562.84
-    Mx_kNm: 79.68
-    My_kNm: 593.07
-  - name: 14
-    N_kN: -2562.84
-    Mx_kNm: 92.9
-    My_kNm: 617.28
-  - name: 15
-    N_kN: -5376.2
-    Mx_kNm: 98.86
-    My_kNm: 1156.02
-  - name: 16
-    N_kN: -5376.2
-    Mx_kNm: 110.11
-    My_kNm: 1181.85
-  - name: 17
-    N_kN: -381.87
-    Mx_kNm: 183.66
-    My_kNm: 164.78
-  - name: 18
-    N_kN: -381.87
-    Mx_kNm: 196.03
-    My_kNm: 188.25
-  - name: 19
-    N_kN: -558.7
-    Mx_kNm: 205.25
-    My_kNm: 175.08
-  - name: 20
-    N_kN: -558.7
-    Mx_kNm: 216.05
-    My_kNm: 201.03
-  - name: 21
-    N_kN: -3069.64
-    Mx_kNm: 235.46
-    My_kNm: 387.81
-  - name: 22
-    N_kN: -3069.64
-    Mx_kNm: 223.14
-    My_kNm: 405.14
-  - name: 23
-    N_kN: -7781.98
-    Mx_kNm: 258.42
-    My_kNm: 401.31
-  - name: 24
-    N_kN: -7781.98
-    Mx_kNm: 240.84
-    My_kNm: 420.94
-  - name: 25
-    N_kN: -1733.74
-    Mx_kNm: 104.73
-    My_kNm: 431.86
-  - name: 26
-    N_kN: -1733.74
-    Mx_kNm: 92.42
-    My_kNm: 447.24
-  - name: 27
-    N_kN: -4262.26
-    Mx_kNm: 127.68
-    My_kNm: 442.27
-  - name: 28
-    N_kN: -4262.26
-    Mx_kNm: 110.12
-    My_kNm: 460.1
-  - name: 29
-    N_kN: -3347.91
-    Mx_kNm: 70.01
-    My_kNm: 351.67
-  - name: 30
-    N_kN: -3347.91
-    Mx_kNm: 71.72
-    My_kNm: 383.27
-  
+demands:
+  - {name: 1,  N_kN: -2771.69, Mx_kNm: 110.48, My_kNm: 161.42}
+  - {name: 2,  N_kN: -2771.69, Mx_kNm:  78.02, My_kNm: 144.64}
+  - {name: 3,  N_kN: -7103.53, Mx_kNm: 134.22, My_kNm: 179.04}
+  - {name: 4,  N_kN: -7103.53, Mx_kNm:  95.32, My_kNm: 163.08}
+  - {name: 5,  N_kN: -2928.74, Mx_kNm:  68.19, My_kNm: 265.90}
+  - {name: 6,  N_kN: -2928.74, Mx_kNm:  35.72, My_kNm: 221.63}
+  - {name: 7,  N_kN: -7522.76, Mx_kNm:  91.92, My_kNm: 299.98}
+  - {name: 8,  N_kN: -7522.76, Mx_kNm:  53.03, My_kNm: 253.48}
+  - {name: 9,  N_kN: -1639.33, Mx_kNm: 147.02, My_kNm: 306.14}
+  - {name: 10, N_kN: -1639.33, Mx_kNm: 114.55, My_kNm: 234.50}
+  - {name: 11, N_kN: -3973.69, Mx_kNm: 170.75, My_kNm: 356.59}
+  - {name: 12, N_kN: -3973.69, Mx_kNm: 131.86, My_kNm: 279.70}
+  - {name: 13, N_kN: -2562.84, Mx_kNm:  79.68, My_kNm: 593.07}
+  - {name: 14, N_kN: -2562.84, Mx_kNm:  92.90, My_kNm: 617.28}
+  - {name: 15, N_kN: -5376.20, Mx_kNm:  98.86, My_kNm: 1156.02}
+  - {name: 16, N_kN: -5376.20, Mx_kNm: 110.11, My_kNm: 1181.85}
+  - {name: 17, N_kN:  -381.87, Mx_kNm: 183.66, My_kNm: 164.78}
+  - {name: 18, N_kN:  -381.87, Mx_kNm: 196.03, My_kNm: 188.25}
+  - {name: 19, N_kN:  -558.70, Mx_kNm: 205.25, My_kNm: 175.08}
+  - {name: 20, N_kN:  -558.70, Mx_kNm: 216.05, My_kNm: 201.03}
+  - {name: 21, N_kN: -3069.64, Mx_kNm: 235.46, My_kNm: 387.81}
+  - {name: 22, N_kN: -3069.64, Mx_kNm: 223.14, My_kNm: 405.14}
+  - {name: 23, N_kN: -7781.98, Mx_kNm: 258.42, My_kNm: 401.31}
+  - {name: 24, N_kN: -7781.98, Mx_kNm: 240.84, My_kNm: 420.94}
+  - {name: 25, N_kN: -1733.74, Mx_kNm: 104.73, My_kNm: 431.86}
+  - {name: 26, N_kN: -1733.74, Mx_kNm:  92.42, My_kNm: 447.24}
+  - {name: 27, N_kN: -4262.26, Mx_kNm: 127.68, My_kNm: 442.27}
+  - {name: 28, N_kN: -4262.26, Mx_kNm: 110.12, My_kNm: 460.10}
+  - {name: 29, N_kN: -3347.91, Mx_kNm:  70.01, My_kNm: 351.67}
+  - {name: 30, N_kN: -3347.91, Mx_kNm:  71.72, My_kNm: 383.27}
 
 
 # ================================================================
-#  OUTPUT — flags and options
+#  OUTPUT — flags and options (v0.3.0)
 # ================================================================
 
 output:
   # ── Utilization ratio flags ──
   #
-  # GenSec computes up to seven utilization metrics, organised in
-  # two geometric families plus path-aware variants for staged
-  # loading.  Each metric answers a different geometric question:
-  # they are complementary, not redundant.  All share the
-  # convention η ≤ 1 safe / η > 1 unsafe; pass/fail (`verified`)
-  # is decided by the worst of the enabled metrics.
+  # v0.3.0 redesigns the metric architecture.  GenSec computes up
+  # to seven utilization metrics, organised in two geometric
+  # families plus path-aware variants for staged loading.  Each
+  # metric answers a different geometric question: they are
+  # complementary, not redundant.  All share the convention
+  # η ≤ 1 safe / η > 1 unsafe; pass/fail (``verified``) is decided
+  # by the worst of the enabled metrics.
   #
-  # 3-D family — operates in anisotropy-corrected normalised space
-  # (axial axis rescaled by u_x = ΔMx/ΔN, My axis by v_y = ΔMx/ΔMy,
-  # so the domain bbox has the same numeric extent on every axis).
+  # The legacy ``eta_3D`` and ``eta_cv`` flags are no longer
+  # recognised and are silently ignored.
+  #
+  # ── 3-D family ──
+  #
+  # Operates in anisotropy-corrected normalised space (axial axis
+  # rescaled by u_x = ΔMx/ΔN, My axis by v_y = ΔMx/ΔMy, so the
+  # domain bounding box has the same numeric extent on every axis).
+  # Euclidean distances are physically meaningful even for strongly
+  # anisotropic sections (walls, slabs, T-beams).
   #
   #   eta_norm        Linear distance from the demand to the
   #                   nearest boundary face, expressed as a
   #                   fraction of the Chebyshev radius D_max:
   #                     η = 1 - d_min / D_max  (interior)
   #                     η = 1 + d_min / D_max  (exterior)
-  #                   A true geometric distance.  Reaches 0 at
-  #                   the Chebyshev centre, 1 on the boundary.
-  #                   The recommended principal 3-D metric.
+  #                   A true geometric distance.  Reaches 0 at the
+  #                   Chebyshev centre, 1 on the boundary.
+  #                   *Recommended principal 3-D metric.*
   #
-  #   eta_norm_beta   Composite ratio F_SU / (F_SU + d_min).
+  #   eta_norm_beta   Composite ratio  F_SU / (F_SU + d_min).
   #                   Mixes the demand norm and the face-distance.
   #                   Not a pure distance: depends on position
   #                   relative to the coordinate origin.  Reads as
-  #                   "sensitivity to perturbation in proportion
-  #                   to the demand magnitude".  Useful for
-  #                   cross-software validation.
+  #                   "sensitivity to perturbation in proportion to
+  #                   the demand magnitude".  Useful for
+  #                   cross-software validation since equivalent
+  #                   formulations are reported by some commercial
+  #                   RC software.
   #
-  #   eta_norm_ray    Ray-cast from the origin in normalised
-  #                   space.  Answers "if I scale all three force
+  #   eta_norm_ray    Ray-cast from the origin in normalised space:
+  #                     η = |S_u| / |R_u|.
+  #                   Answers "if I scale all three force
   #                   components proportionally, when does the
-  #                   demand exit?"  Linear in demand magnitude
-  #                   along any fixed ray.
+  #                   demand exit the domain?".  Linear in demand
+  #                   magnitude along any fixed ray.
   #
-  # 2-D family — operates in the (Mx, My) plane at the demand's N.
+  # ── 2-D family ──
+  #
+  # Operates in the (Mx, My) plane at the demand's N.  Both axes
+  # share physical units, no normalisation needed.
   #
   #   eta_2D          Ray-cast from the origin in the (Mx, My)
-  #                   plane.  Useful for fixed-N flexural
-  #                   verifications.  Requires a biaxial section.
+  #                   plane to the contour at the demand's N.
+  #                   Useful for fixed-N flexural verifications.
+  #                   Requires a biaxial section.
   #
-  # Path metrics — for staged combinations only.  Defined on the
-  # segment B->T from the previous-stage to the current-stage
-  # cumulative demand.
+  # ── Path metrics ──
   #
-  #   eta_path        3-D ray-cast in normalised space, B->T.
-  #                   In CSV/JSON output stored under the key
-  #                   ``eta_path_norm_ray``.
+  # For staged combinations only.  Defined on the segment B→T from
+  # the previous-stage cumulative demand B to the current-stage
+  # cumulative demand T.  When a multi-stage combination is
+  # processed without ANY path metric enabled, GenSec emits an
+  # informational warning (the report would only contain point
+  # metrics at each cumulative state, without characterising the
+  # load history).
   #
-  #   eta_path_norm_beta   Composite ratio L / (L + d_seg) along
-  #                   the stage segment, where L = |T-B| and d_seg
-  #                   is the minimum signed distance of the
-  #                   segment from the boundary.  Path analogue
-  #                   of eta_norm_beta.  Particularly informative
-  #                   in seismic verification with staged gravity.
+  #   eta_path_norm_ray   3-D ray-cast in normalised space, B→T.
+  #                       Path-direction-aware analogue of
+  #                       eta_norm_ray.  Stored under the same key
+  #                       in the CSV/JSON output.
   #
-  #   eta_path_2D     2-D variant on the Mx-My contour at
-  #                   cumulative N, skipped if the axial-force
-  #                   change between stages exceeds delta_N_tol.
+  #   eta_path_norm_beta  Composite ratio L / (L + d_seg) along
+  #                       the stage segment, with L = |T - B| and
+  #                       d_seg the minimum signed distance of the
+  #                       segment from the boundary.  Path analogue
+  #                       of eta_norm_beta.  Particularly
+  #                       informative in seismic verification with
+  #                       staged gravity: flags "structure already
+  #                       at the limit before the increment"
+  #                       distinctly from eta_path_norm_ray.
   #
-  # If a staged combination is processed without any path-aware
-  # metric enabled, GenSec emits an informational warning (the
-  # report would only contain point metrics at each cumulative
-  # state and would not characterise the load history).
-  eta_norm: true               # default: true (recommended principal 3-D metric)
-  eta_norm_beta: true          # default: true (composite ratio, also useful for cross-software comparison)
-  eta_norm_ray: false          # default: false (opt-in, for proportional load amplification)
-  eta_2D: true                 # default: false (opt-in, slower; biaxial only)
-  eta_path: true               # default: false (opt-in, for staged loading)
-  eta_path_norm_beta: true     # default: false (opt-in, useful for seismic + staged gravity)
-  eta_path_2D: true            # default: false (opt-in)
-  delta_N_tol: 0.03            # default: 0.03 (3%)
+  #   eta_path_2D         2-D variant on the Mx-My contour at
+  #                       cumulative N.  Skipped if the axial-force
+  #                       change between stages exceeds
+  #                       ``delta_N_tol``.
+  eta_norm: true               # default: true  — principal 3-D linear distance
+  eta_norm_beta: true          # default: true  — composite ratio (cross-software comparison)
+  eta_norm_ray: false          # default: false — proportional load amplification
+  eta_2D: false                # default: false — Mx-My ray-cast (biaxial only)
+  eta_path_norm_ray: false     # default: false — staged 3-D ray
+  eta_path_norm_beta: false    # default: false — staged composite ratio (informative under seismic + gravity)
+  eta_path_2D: false           # default: false — staged Mx-My ray
+  delta_N_tol: 0.03            # tolerance on ΔN/N_range for eta_path_2D
 
   # ── Domain generation ──
-  generate_mx_my: false     # Mx-My contour plots (default: false)
-  generate_3d_surface: false # 3D surface CSV/JSON/plot (default: false)
-  n_angles_mx_my: 144      # angular resolution for Mx-My (default: 144)
+  generate_mx_my: false        # Mx-My contour plots (default: false)
+  generate_3d_surface: false   # 3D surface CSV/JSON/plot (default: false)
+  n_angles_mx_my: 144          # angular resolution for Mx-My (default: 144)
 
   # ── Moment-curvature and ductility ──
   generate_moment_curvature: false     # M-χ diagrams per N level (default: true)
@@ -331,6 +275,10 @@ output:
   generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
 
   # ── N-level strategy ──
+  # "demands" → use the N-values appearing in the ``demands`` block.
+  # "auto"    → linspace between N_min and N_max of the resistance
+  #             domain, ``n_levels_count`` levels.
+  # "explicit"→ user-supplied list ``n_levels_values``.
   n_levels_mode: demands
   # n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]

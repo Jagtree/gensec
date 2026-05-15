@@ -1,18 +1,27 @@
-# GenSec — VCASLU validation case
+# ================================================================
+#  GenSec v0.3.0 — Wall panel 300x1870 (tall, x-oriented)
+# ================================================================
+#
+#  Slender wall section: H >> B.  The biaxial mesh is intentionally
+#  asymmetric (n_fibers_x = 120 along the long side, n_fibers_y = 60
+#  along the short one) to keep the cells approximately square.
+#  ``delta_N_tol`` is tightened to 0.001 because the demand is at
+#  pure flexure (N = 0).
+# ================================================================
 
 materials:
   concrete_direct:
     type: concrete_ec2_gen1
-    class: C50/60        # Young's modulus [MPa] (required)
+    class: C50/60
 
   B450C:
     type: steel
     fyk: 450.0
     gamma_s: 1.15
-    k_hardening: 1.15       # ft/fy ratio; 1.0 = perfectly plastic (default 1.0)
+    k_hardening: 1.15     # ft/fy ratio; 1.0 = perfectly plastic (default 1.0)
     eps_su: 0.075         # ultimate strain (default 0.01)
     works_in_compression: true
-    Es: 200000.0          # Young's modulus [MPa] (required)
+    Es: 200000.0          # Young's modulus [MPa] (default 200000)
 
 section:
   B: 300
@@ -21,47 +30,47 @@ section:
   n_fibers_y: 60
   n_fibers_x: 120
   rebars:
-    - {x: 50, y: 50, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 50, y: 150, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 50, y: 1160, material: B450C, n_bars: 1, diameter: 20}
-    - {x: 50, y: 1720, material: B450C, n_bars: 1, diameter: 20}
-    - {x: 50, y: 1820, material: B450C, n_bars: 1, diameter: 20}
-    - {x: 150, y: 50, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 250, y: 50, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 250, y: 150, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 50,  y: 50,   material: B450C, n_bars: 1, diameter: 26}
+    - {x: 50,  y: 150,  material: B450C, n_bars: 1, diameter: 26}
+    - {x: 50,  y: 1160, material: B450C, n_bars: 1, diameter: 20}
+    - {x: 50,  y: 1720, material: B450C, n_bars: 1, diameter: 20}
+    - {x: 50,  y: 1820, material: B450C, n_bars: 1, diameter: 20}
+    - {x: 150, y: 50,   material: B450C, n_bars: 1, diameter: 26}
+    - {x: 250, y: 50,   material: B450C, n_bars: 1, diameter: 26}
+    - {x: 250, y: 150,  material: B450C, n_bars: 1, diameter: 26}
     - {x: 250, y: 1160, material: B450C, n_bars: 1, diameter: 20}
     - {x: 250, y: 1720, material: B450C, n_bars: 1, diameter: 20}
     - {x: 250, y: 1820, material: B450C, n_bars: 1, diameter: 20}
+
 demands:
   - name: 1
     N_kN: 0
     Mx_kNm: 240.79
     My_kNm: 207.93
- 
+
 output:
 
-  
-  # ── Utilization ratio flags ──
-  eta_norm: true               # default: true (recommended principal 3-D metric)
-  eta_norm_beta: true          # default: true (composite ratio, also useful for cross-software comparison)
-  eta_norm_ray: true          # default: false (opt-in, for proportional load amplification)
-  eta_2D: true                 # default: false (opt-in, slower; biaxial only)
-  eta_path: false               # default: false (opt-in, for staged loading)
-  eta_path_norm_beta: false     # default: false (opt-in, useful for seismic + staged gravity)
-  eta_path_2D: false            # default: false (opt-in)
-  delta_N_tol: 0.001        # default: 0.03 (3%)
+  # ── Utilization ratio flags (v0.3.0) ──
+  eta_norm: true               # default: true  — principal 3-D linear-distance metric
+  eta_norm_beta: true          # default: true  — composite ratio (cross-software comparison)
+  eta_norm_ray: true           # default: false — proportional load amplification
+  eta_2D: true                 # default: false — Mx-My ray at fixed N (biaxial only)
+  eta_path_norm_ray: false     # default: false — staged 3-D ray
+  eta_path_norm_beta: false    # default: false — staged composite ratio
+  eta_path_2D: false           # default: false — staged Mx-My ray
+  delta_N_tol: 0.001           # tightened tolerance: demand at N = 0 (pure flexure)
 
   # ── Domain generation ──
-  generate_mx_my: true     # Mx-My contour plots (default: false)
-  generate_3d_surface: true # 3D surface CSV/JSON/plot (default: false)
-  n_angles_mx_my: 360 #144      # angular resolution for Mx-My (default: 144)
+  generate_mx_my: true         # Mx-My contour plots
+  generate_3d_surface: true    # 3D surface CSV/JSON/plot
+  n_angles_mx_my: 360          # angular resolution for Mx-My (default: 144)
 
   # ── Moment-curvature and ductility ──
-  generate_moment_curvature: true     # M-χ diagrams per N level (default: true)
-  generate_polar_ductility: false      # polar ductility plot (default: true)
-  generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
+  generate_moment_curvature: true
+  generate_polar_ductility: false
+  generate_3d_moment_curvature: false
 
   # ── N-level strategy ──
   n_levels_mode: demands
-  #n_levels_count: 10
+  # n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]

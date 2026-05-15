@@ -1,4 +1,12 @@
-# GenSec — annular (hollow circular) pile section
+# ================================================================
+#  GenSec v0.3.0 — annular (hollow circular) pile section
+# ================================================================
+#
+#  D_ext = 1200 mm, D_int = 800 mm, with 12 rebars evenly spaced
+#  along the inner perimeter of the steel cage.  Default mesh
+#  method is ``grid``; switch to ``triangle`` for finer adherence
+#  to the curved boundary if needed.
+# ================================================================
 
 materials:
   concrete_1:
@@ -48,8 +56,10 @@ demands:
     My_kNm: 600
 
 output:
-  eta_3D: true
-  eta_2D: true
+  # v0.3.0 utilization flags.
+  eta_norm: true               # principal 3-D linear-distance metric
+  eta_norm_beta: true          # composite ratio (cross-software comparison)
+  eta_2D: true                 # Mx-My ray at fixed N (biaxial only)
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144

@@ -1,4 +1,10 @@
-# GenSec — VCASLU validation case
+# ================================================================
+#  GenSec v0.3.0 — VCASLU validation case (300x500 rect)
+# ================================================================
+#
+#  Single demand at low compression with significant biaxial moment.
+#  Used for cross-software comparison against VCASLU.
+# ================================================================
 
 materials:
   C25:
@@ -21,9 +27,9 @@ section:
   n_fibers_y: 40
   n_fibers_x: 20
   rebars:
-    - {x: 30, y: 30,   As: 201.06, material: B450C, n_bars: 1, diameter: 8}
-    - {x: 30, y: 250,  As: 201.06, material: B450C, n_bars: 1, diameter: 8}
-    - {x: 30, y: 470,  As: 201.06, material: B450C, n_bars: 1, diameter: 8}
+    - {x: 30,  y: 30,  As: 201.06, material: B450C, n_bars: 1, diameter: 8}
+    - {x: 30,  y: 250, As: 201.06, material: B450C, n_bars: 1, diameter: 8}
+    - {x: 30,  y: 470, As: 201.06, material: B450C, n_bars: 1, diameter: 8}
     - {x: 270, y: 30,  As: 201.06, material: B450C, n_bars: 1, diameter: 8}
     - {x: 270, y: 250, As: 201.06, material: B450C, n_bars: 1, diameter: 8}
     - {x: 270, y: 470, As: 201.06, material: B450C, n_bars: 1, diameter: 8}
@@ -35,8 +41,10 @@ demands:
     My_kNm: 30
 
 output:
-  eta_3D: true
-  eta_2D: true
+  # v0.3.0 utilization flags.
+  eta_norm: true               # principal 3-D linear-distance metric
+  eta_norm_beta: true          # composite ratio (cross-software comparison)
+  eta_2D: true                 # Mx-My ray at fixed N (biaxial only)
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144

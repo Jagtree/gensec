@@ -1,4 +1,12 @@
-# GenSec — custom polygon with hole (box-like section)
+# ================================================================
+#  GenSec v0.3.0 — custom polygon with hole (box-like section)
+# ================================================================
+#
+#  Demonstrates ``shape: custom`` with an explicit exterior ring
+#  and a single rectangular hole.  Useful as a template for box
+#  girders, hollow piers, and any section whose outline cannot be
+#  expressed via the parametric primitives.
+# ================================================================
 
 materials:
   concrete_1:
@@ -30,9 +38,9 @@ section:
   mesh_size: 12
   mesh_method: grid
   rebars:
-    - {y: 40, x: 40,  As: 490.87, material: steel_1, diameter: 25}
-    - {y: 40, x: 200, As: 490.87, material: steel_1, diameter: 25}
-    - {y: 40, x: 360, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40,  x: 40,  As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40,  x: 200, As: 490.87, material: steel_1, diameter: 25}
+    - {y: 40,  x: 360, As: 490.87, material: steel_1, diameter: 25}
     - {y: 660, x: 40,  As: 490.87, material: steel_1, diameter: 25}
     - {y: 660, x: 200, As: 490.87, material: steel_1, diameter: 25}
     - {y: 660, x: 360, As: 490.87, material: steel_1, diameter: 25}
@@ -48,7 +56,9 @@ demands:
     My_kNm: 150
 
 output:
-  eta_3D: true
+  # v0.3.0 utilization flags (the two 3-D defaults).
+  eta_norm: true               # principal linear-distance metric
+  eta_norm_beta: true          # composite ratio (cross-software comparison)
   generate_mx_my: true
   generate_3d_surface: true
   n_angles_mx_my: 144

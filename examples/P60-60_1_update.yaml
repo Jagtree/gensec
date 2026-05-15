@@ -1,8 +1,16 @@
-# GenSec — VCASLU validation case
+# ================================================================
+#  GenSec v0.3.0 — VCASLU validation case (P60-60)
+# ================================================================
+#
+#  600x600 square RC section, 12 rebars on the perimeter, fed with
+#  two demands taken from the VCASLU reference run.  Used to close
+#  the cross-software validation loop on eta_norm and the M-χ
+#  diagrams.
+# ================================================================
 
 materials:
   concrete_direct:
-    type: concrete
+    type: concrete_ec2_gen1_custom
     fck: 50.0             # characteristic cylinder strength [MPa] (required)
     gamma_c: 1.5          # partial safety factor (default 1.5)
     alpha_cc: 0.85        # long-term coefficient (default 0.85)
@@ -23,18 +31,18 @@ section:
   n_fibers_y: 40
   n_fibers_x: 40
   rebars:
-    - {x: 60, y: 60,   As: 531, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 60, y: 200,  As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 60, y: 400,  As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 60, y: 540,  As: 531, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 200, y: 60, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 60,  y: 60,  As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 60,  y: 200, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 60,  y: 400, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 60,  y: 540, As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 200, y: 60,  As: 380, material: B450C, n_bars: 1, diameter: 22}
     - {x: 200, y: 540, As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 400, y: 60, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 400, y: 60,  As: 380, material: B450C, n_bars: 1, diameter: 22}
     - {x: 400, y: 540, As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 540, y: 60,   As: 531, material: B450C, n_bars: 1, diameter: 26}
-    - {x: 540, y: 200,  As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 540, y: 400,  As: 380, material: B450C, n_bars: 1, diameter: 22}
-    - {x: 540, y: 540,  As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 540, y: 60,  As: 531, material: B450C, n_bars: 1, diameter: 26}
+    - {x: 540, y: 200, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 540, y: 400, As: 380, material: B450C, n_bars: 1, diameter: 22}
+    - {x: 540, y: 540, As: 531, material: B450C, n_bars: 1, diameter: 26}
 
 demands:
   - name: 1
@@ -45,28 +53,30 @@ demands:
     N_kN: -598.83
     Mx_kNm: 584.27
     My_kNm: 308.37
-  
 
 output:
-  
-  # ── Utilization ratio flags ──
-  eta_3D: true             # default: true
-  eta_2D: true             # default: false
-  eta_path: false           # default: true
-  eta_path_2D: false        # default: false
-  delta_N_tol: 0.03        # default: 0.03 (3%)
+
+  # ── Utilization ratio flags (v0.3.0) ──
+  eta_norm: true               # default: true  — principal 3-D linear-distance metric
+  eta_norm_beta: true          # default: true  — composite ratio (cross-software comparison)
+  eta_norm_ray: false          # default: false — proportional load amplification
+  eta_2D: true                 # default: false — Mx-My ray at fixed N (biaxial only)
+  eta_path_norm_ray: false     # default: false — staged 3-D ray
+  eta_path_norm_beta: false    # default: false — staged composite ratio
+  eta_path_2D: false           # default: false — staged Mx-My ray
+  delta_N_tol: 0.03            # tolerance on ΔN/N_range for eta_path_2D
 
   # ── Domain generation ──
-  generate_mx_my: false     # Mx-My contour plots (default: false)
-  generate_3d_surface: false # 3D surface CSV/JSON/plot (default: false)
-  n_angles_mx_my: 288 #144      # angular resolution for Mx-My (default: 144)
+  generate_mx_my: false        # Mx-My contour plots (default: false)
+  generate_3d_surface: false   # 3D surface CSV/JSON/plot (default: false)
+  n_angles_mx_my: 288          # angular resolution for Mx-My (default: 144)
 
   # ── Moment-curvature and ductility ──
-  generate_moment_curvature: true     # M-χ diagrams per N level (default: true)
-  generate_polar_ductility: false      # polar ductility plot (default: true)
-  generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
+  generate_moment_curvature: true      # M-χ diagrams per N level
+  generate_polar_ductility: false      # polar ductility plot
+  generate_3d_moment_curvature: false  # 3D M-χ-N surface
 
   # ── N-level strategy ──
-  n_levels_mode: demands
+  n_levels_mode: demands               # use the N-values from the demands
   # n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]
