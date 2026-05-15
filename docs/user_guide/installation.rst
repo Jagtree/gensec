@@ -18,7 +18,7 @@ Core dependencies (installed automatically):
 - ``shapely >= 2.0``
 - ``triangle`` — constrained Delaunay triangulation for non-rectangular meshes.
 
-Optional performance dependencies:
+Optional performance dependencies (at the moment, their impact is limited):
 
 - ``numba >= 0.58`` — JIT compilation of material stress/tangent kernels.
   Provides a ~2–3× speed-up on large fiber arrays.  Install with
@@ -26,10 +26,20 @@ Optional performance dependencies:
 
 Optional dependencies for building the documentation:
 
-- ``sphinx``
-- ``furo`` (HTML theme)
+- ``sphinx>=7.0,<9.0``
+- ``furo`` (HTML theme),
+- ``sphinx-autodoc-typehints``
+- ``myst-parser``
 - ``sphinx-multiversion``
-- ``sphinxcontrib-mermaid``
+- ``sphinxcontrib-mermaid>=1``
+
+Optional dependencies for :ref:`developer` mode:
+
+- ``pytest>=7.0``
+- ``pytest-cov>=5.0``
+- ``coverage[toml]>=7.0``
+- ``pytest-timeout>=2.3``  
+- ``httpx>=0.27``
 
 
 Install with uv (recommended)
@@ -86,7 +96,7 @@ Verify the installation
    # Run the test suite
    uv run python -m pytest tests/ -v
 
-All 106 tests should pass.
+All 367 tests should pass.
 
 
 Building the documentation

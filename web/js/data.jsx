@@ -1,30 +1,22 @@
 /* ==========================================================
  * GenSec GUI — data store
  *
- * Backend-backed replacement of the former mock.  Exposes the
- * same window.GS_DATA shape the rest of the UI already uses
- * (SECTION, MATERIALS, DEMANDS, COMBINATIONS, ENVELOPES,
- *  VERIFICATION, makeMxMyContour, makeNM, makeMchi,
- *  makeSurfaceSlices), so no change is needed in plots.jsx /
- * panels.jsx / app.jsx.
+ * Two stages:
  *
- * Two modes:
- *   - EMPTY (no YAML loaded yet): tables are empty, plots show
- *     a "Load a YAML to begin" placeholder, the Run button in
- *     the drawer becomes the primary CTA.
- *   - LOADED: GS_DATA is populated from the AnalysisResult
- *     returned by /api/analyze, and the curve generators pull
- *     from the numeric domain payload the backend shipped.
+ * 1) setFromYamlText(text):
+ *    Parses the YAML with js-yaml in the BROWSER, populates
+ *    SECTION / MATERIALS / DEMANDS / COMBINATIONS / ENVELOPES
+ *    from the raw fields, and sets VERIFICATION to an empty
+ *    array.  No HTTP call.  Used the moment the user loads a
+ *    file or pastes text.
  *
- * The store is plain-window (no React context): plots.jsx reads
- * from window.GS_DATA synchronously.  App.jsx calls GS_STORE.set()
- * after a successful analyze(), which swaps GS_DATA and forces a
- * React re-render by bumping a generation counter.
+ * 2) setFromAnalysis(ar):
+ *    Replaces the store with the AnalysisResult payload
+ *    returned by /api/analyze (eta values, full domain).
  * ========================================================== */
 (function () {
   "use strict";
 
-  // ---- Empty defaults (used before first successful analyze) ----
   const EMPTY = {
     SECTION: { B: 0, H: 0, bulk_material: "—",
                n_fibers_x: 0, n_fibers_y: 0, rebars: [] },
@@ -33,107 +25,148 @@
     COMBINATIONS: [],
     ENVELOPES: [],
     VERIFICATION: [],
-    // Curve generators return empty arrays in the empty state.
+    PROPERTIES: null,
     makeMxMyContour: () => [],
     makeNM: () => [],
     makeMchi: () => [],
     makeSurfaceSlices: () => [],
-    // Extra payload used by the plot tab captions.
     _loaded: false,
+    _yamlOnly: false,
   };
 
-  // ---- Conversion helpers ----
+  const g = (o, k, dflt) =>
+    (o && o[k] !== undefined && o[k] !== null) ? o[k] : dflt;
 
-  // Safely read a field on a Pydantic-like nested object.
-  const g = (o, k, dflt) => (o && o[k] !== undefined && o[k] !== null) ? o[k] : dflt;
+  // ---------- Browser-side YAML parse ----------
 
-  /** Build Mx-My contour generator from the backend domain payload. */
-  function makeContourFactory(domain) {
-    // Backend may ship either (a) a single "nm_mx_my" list keyed by N,
-    // or (b) nothing -- in which case we fall back to linear scaling
-    // of the resistance-only NM diagram (rough but non-empty).
-    const slices = g(domain, "mx_my_slices", null);  // [{N_kN, points:[[Mx,My],...]}]
-    if (slices && slices.length) {
-      // Return nearest-N slice; perfect for a slider.
-      const sorted = [...slices].sort((a, b) => a.N_kN - b.N_kN);
-      return function (N_kN /*, n */) {
-        let best = sorted[0], bd = Math.abs(N_kN - best.N_kN);
-        for (const s of sorted) {
-          const d = Math.abs(N_kN - s.N_kN);
-          if (d < bd) { best = s; bd = d; }
-        }
-        return best.points && best.points.length
-          ? best.points.concat([best.points[0]])
-          : [];
-      };
+  /** Parse YAML text into the GS_DATA shape, ZERO HTTP calls. */
+  function fromYamlText(text) {
+    let doc;
+    try {
+      doc = window.jsyaml ? window.jsyaml.load(text) : null;
+    } catch (_) {
+      doc = null;
     }
-    // Fallback: scale the uniaxial rectangle envelope.
-    const nm = g(domain, "nm_points", null);
-    if (nm && nm.length) {
-      return function (N_kN) {
-        // Find the N closest to N_kN and use its M as the Mx bound,
-        // then draw an ellipse Mx/My with My capped at 0.6*Mx.
-        let Mx = 0;
-        let bd = Infinity;
-        for (const [N, M] of nm) {
-          const d = Math.abs(N - N_kN);
-          if (d < bd) { bd = d; Mx = Math.abs(M); }
-        }
-        const My = Mx * 0.6;
-        const pts = [];
-        const n = 144;
-        for (let i = 0; i < n; i++) {
-          const t = (i / n) * Math.PI * 2;
-          pts.push([Mx * Math.cos(t), My * Math.sin(t)]);
-        }
-        pts.push(pts[0]);
-        return pts;
-      };
+    if (!doc || typeof doc !== "object") {
+      return Object.assign({}, EMPTY, { _loaded: true, _yamlOnly: true });
     }
-    return () => [];
-  }
 
-  /** Uniaxial N–M closed contour from the nm_points list (upper branch only). */
-  function makeNMFactory(domain) {
-    const nm = g(domain, "nm_points", null);
-    if (!nm || !nm.length) return () => [];
-    return function () {
-      const upper = nm.map(([N, M]) => [N, M]);
-      const lower = [...upper].reverse().map(([N, M]) => [N, -M]);
-      return upper.concat(lower).concat([upper[0]]);
+    // ---- Section ----
+    const sec = doc.section || {};
+    let B = Number(sec.B || 0);
+    let H = Number(sec.H || 0);
+
+    // Custom polygon: compute bbox so the section preview renders.
+    let polygon = null;
+    if (sec.shape === "custom" && sec.params && sec.params.exterior) {
+      polygon = sec.params.exterior;
+      if (Array.isArray(polygon) && polygon.length) {
+        const xs = polygon.map(p => Number(p[0]));
+        const ys = polygon.map(p => Number(p[1]));
+        const xmin = Math.min.apply(null, xs);
+        const xmax = Math.max.apply(null, xs);
+        const ymin = Math.min.apply(null, ys);
+        const ymax = Math.max.apply(null, ys);
+        B = B || (xmax - xmin);
+        H = H || (ymax - ymin);
+      }
+    }
+
+    const SECTION = {
+      B, H,
+      bulk_material: sec.bulk_material || "—",
+      n_fibers_x: Number(sec.n_fibers_x || 0) || 1,
+      n_fibers_y: Number(sec.n_fibers_y || 0) ||
+                  Math.max(1, Math.round(H / Number(sec.mesh_size || 20))),
+      polygon: polygon,
+      shape: sec.shape || (sec.B && sec.H ? "rect" : null),
+      rebars: (sec.rebars || []).map(r => ({
+        x: Number(r.x !== undefined ? r.x : (B/2 || 0)),
+        y: Number(r.y || 0),
+        diameter: Number(r.diameter || 0) || null,
+        material: r.material || "—",
+        As: Number(r.As || (r.diameter
+              ? Math.PI/4 * r.diameter * r.diameter : 0)),
+      })),
+    };
+
+    // ---- Materials ----
+    const matsRaw = doc.materials || {};
+    const MATERIALS = Object.entries(matsRaw).map(([id, m]) => ({
+      id, kind: (m && m.type) || "—",
+      cls: m && (m.class || m.cls) ? (m.class || m.cls) : id,
+      fcd: m && m.fck ? Number(m.fck).toFixed(1) + " MPa" : undefined,
+      fyd: m && m.fyk ? Number(m.fyk).toFixed(1) + " MPa" : undefined,
+      Es:  m && m.Es  ? Number(m.Es).toLocaleString() + " MPa" : undefined,
+      eps_su: m && m.eps_su !== undefined ? String(m.eps_su) : undefined,
+    }));
+
+    // ---- Demands ----
+    const DEMANDS = (doc.demands || []).map(d => ({
+      name: String(g(d, "name", "?")),
+      N:  Number(g(d, "N_kN",  0)),
+      Mx: Number(g(d, "Mx_kNm", g(d, "M_kNm", 0))),
+      My: Number(g(d, "My_kNm", 0)),
+    }));
+
+    // ---- Combinations (linear resolve of components only) ----
+    const demandIdx = Object.fromEntries(DEMANDS.map(d => [d.name, d]));
+    const COMBINATIONS = (doc.combinations || []).map(c => {
+      const staged = !!c.stages;
+      let N = 0, Mx = 0, My = 0;
+      let stages = null;
+      if (staged) {
+        stages = [];
+        for (const s of (c.stages || [])) {
+          let sN = 0, sMx = 0, sMy = 0;
+          for (const comp of (s.components || [])) {
+            const d = demandIdx[comp.ref];
+            const f = Number(g(comp, "factor", 1.0));
+            if (d) { sN += f*d.N; sMx += f*d.Mx; sMy += f*d.My; }
+          }
+          N += sN; Mx += sMx; My += sMy;
+          stages.push({ name: String(s.name||""),
+                        cumulative: { N_kN: N, Mx_kNm: Mx, My_kNm: My } });
+        }
+      } else {
+        for (const comp of (c.components || [])) {
+          const d = demandIdx[comp.ref];
+          const f = Number(g(comp, "factor", 1.0));
+          if (d) { N += f*d.N; Mx += f*d.Mx; My += f*d.My; }
+        }
+      }
+      return {
+        name: String(c.name),
+        staged, stages,
+        resolved: { N, Mx, My },
+      };
+    });
+
+    // ---- Envelopes ----
+    const ENVELOPES = (doc.envelopes || []).map(e => ({
+      name: String(e.name),
+      members: e.members || [],
+      eta_max: null,
+    }));
+
+    return {
+      SECTION, MATERIALS, DEMANDS, COMBINATIONS, ENVELOPES,
+      VERIFICATION: [],
+      PROPERTIES: null,
+      makeMxMyContour: () => [],
+      makeNM:          () => [],
+      makeMchi:        () => [],
+      makeSurfaceSlices: () => [],
+      _loaded: true,
+      _yamlOnly: true,
     };
   }
 
-  /** M-χ curves per N level (backend ships as array of {N, points}). */
-  function makeMchiFactory(domain) {
-    const series = g(domain, "mchi", null);
-    if (!series || !series.length) return () => [];
-    return function () {
-      return series.map(s => ({
-        N: s.N_kN,
-        pts: (s.points || []).map(p => [p[0], p[1]]),
-      }));
-    };
-  }
-
-  /** 3D surface as stacked contours.  Lazy: may be null until the user opens the tab. */
-  function makeSurfaceFactory(domain) {
-    const slices = g(domain, "surface_slices", null);
-    if (!slices || !slices.length) return () => [];
-    return function () {
-      return slices.map(s => ({
-        N: s.N_kN,
-        contour: (s.points || []).concat((s.points && s.points.length) ? [s.points[0]] : []),
-      }));
-    };
-  }
-
-  // ---- Project AnalysisResult -> GS_DATA shape ----
+  // ---------- AnalysisResult -> GS_DATA (after Run) ----------
 
   function fromAnalysisResult(ar) {
     const section = ar.section || {};
     const domain = ar.domain || {};
-    const verif = ar.verification || {};
 
     const SECTION = {
       B: g(section, "B_mm", 0),
@@ -142,26 +175,21 @@
       n_fibers_x: g(section, "n_fibers_x", 0),
       n_fibers_y: g(section, "n_fibers_y", 0),
       rebars: (section.rebars || []).map(r => ({
-        x: r.x_mm, y: r.y_mm,
-        diameter: r.diameter_mm, material: r.material,
-        As: r.area_mm2,
+        x: r.x, y: r.y,
+        diameter: r.diameter, material: r.material,
+        As: r.As_mm2,
       })),
     };
 
-    const MATERIALS = (ar.materials || []).map(m => {
-      const props = m.properties || {};
-      return {
-        id: m.id,
-        kind: m.kind,
-        cls: g(props, "class", m.id),
-        fcd: props.fcd_MPa ? props.fcd_MPa.toFixed(2) + " MPa" : undefined,
-        fctm: props.fctm_MPa ? props.fctm_MPa.toFixed(2) + " MPa" : undefined,
-        Ecm: props.Ecm_MPa ? props.Ecm_MPa.toLocaleString() + " MPa" : undefined,
-        fyd: props.fyd_MPa ? props.fyd_MPa.toFixed(1) + " MPa" : undefined,
-        Es:  props.Es_MPa  ? props.Es_MPa.toLocaleString() + " MPa" : undefined,
-        eps_su: props.eps_su ? props.eps_su.toString() : undefined,
-      };
-    });
+    const MATERIALS = (ar.materials || []).map(m => ({
+      id: m.id, kind: m.kind, cls: m.cls || m.id,
+      fcd: m.design_strength_MPa
+        ? m.design_strength_MPa.toFixed(2) + " MPa" : undefined,
+      Es:  m.modulus_MPa
+        ? m.modulus_MPa.toLocaleString() + " MPa" : undefined,
+      eps_su: m.eps_ultimate !== null && m.eps_ultimate !== undefined
+        ? String(m.eps_ultimate) : undefined,
+    }));
 
     const DEMANDS = (ar.demands || []).map(d => ({
       name: d.name, N: d.N_kN, Mx: d.Mx_kNm, My: d.My_kNm,
@@ -170,8 +198,7 @@
     const COMBINATIONS = (ar.combinations || []).map(c => ({
       name: c.name,
       staged: !!c.staged,
-      components: c.components || [],
-      stages: c.stages || [],
+      stages: c.stages || null,
       resolved: {
         N: g(c.resolved, "N_kN", 0),
         Mx: g(c.resolved, "Mx_kNm", 0),
@@ -180,44 +207,52 @@
     }));
 
     const ENVELOPES = (ar.envelopes || []).map(e => ({
-      name: e.name,
-      members: e.members || [],
-      eta_max: e.eta_max,
+      name: e.name, members: e.members || [], eta_max: e.eta_max,
     }));
 
-    // Verification rows: backend already emits flat rows mixing
-    // demand/combination/envelope.  Ensure display fields are set.
-    const VERIFICATION = (verif.rows || []).map(r => {
-      const N = (r.N_kN !== null && r.N_kN !== undefined) ? r.N_kN : "—";
-      const Mx = (r.Mx_kNm !== null && r.Mx_kNm !== undefined) ? r.Mx_kNm : "—";
-      const My = (r.My_kNm !== null && r.My_kNm !== undefined) ? r.My_kNm : "—";
-      return {
-        kind: r.kind, name: r.name,
-        N, Mx, My,
-        eta3D: r.eta_3D, eta2D: r.eta_2D,
-        etaPath: r.eta_path, etaPath2D: r.eta_path_2D,
-        status: r.status || "ok",
-        staged: !!r.staged,
-      };
-    });
+    const VERIFICATION = (ar.verification || []).map(r => ({
+      kind: r.kind === "combination" ? "combo" : r.kind,
+      name: r.name,
+      N:  (r.N_kN  !== null && r.N_kN  !== undefined) ? r.N_kN  : "—",
+      Mx: (r.Mx_kNm!== null && r.Mx_kNm!== undefined) ? r.Mx_kNm: "—",
+      My: (r.My_kNm!== null && r.My_kNm!== undefined) ? r.My_kNm: "—",
+      eta3D: r.eta_norm,                     // legacy alias for the table
+      eta2D: r.eta_2D,
+      etaPath: r.eta_path_norm_ray,
+      etaPath2D: r.eta_path_2D,
+      eta_norm: r.eta_norm,
+      eta_norm_beta: r.eta_norm_beta,
+      eta_norm_ray: r.eta_norm_ray,
+      eta_governing: r.eta_governing,
+      status: r.status || "ok",
+      staged: !!r.staged,
+    }));
 
     return {
       SECTION, MATERIALS, DEMANDS, COMBINATIONS, ENVELOPES, VERIFICATION,
-      makeMxMyContour: makeContourFactory(domain),
-      makeNM:          makeNMFactory(domain),
-      makeMchi:        makeMchiFactory(domain),
-      makeSurfaceSlices: makeSurfaceFactory(domain),
+      PROPERTIES: ar.properties || null,
+      makeMxMyContour: () => [],
+      makeNM:          () => [],
+      makeMchi:        () => [],
+      makeSurfaceSlices: () => [],
       _loaded: true,
+      _yamlOnly: false,
       _meta: ar.meta || {},
     };
   }
 
-  // ---- Public store ----
+  // ---------- Store ----------
 
   const listeners = new Set();
-
   const GS_STORE = {
     isLoaded() { return !!(window.GS_DATA && window.GS_DATA._loaded); },
+    isYamlOnly() {
+      return !!(window.GS_DATA && window.GS_DATA._yamlOnly);
+    },
+    setFromYamlText(text) {
+      window.GS_DATA = fromYamlText(text);
+      listeners.forEach(fn => { try { fn(); } catch (_) {} });
+    },
     setFromAnalysis(ar) {
       window.GS_DATA = fromAnalysisResult(ar);
       listeners.forEach(fn => { try { fn(); } catch (_) {} });

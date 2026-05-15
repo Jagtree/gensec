@@ -1,23 +1,4 @@
 # ---------------------------------------------------------------------------
-# GenSec — Copyright (c) 2026 Andrea Albero
-#
-# This file is part of GenSec.
-#
-# GenSec is free software: you can redistribute it and/or modify it under
-# the terms of the GNU Affero General Public License as published by the
-# Free Software Foundation, either version 3 of the License, or (at your
-# option) any later version.
-#
-# GenSec is distributed in the hope that it will be useful, but WITHOUT
-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
-# License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with GenSec. If not, see <https://www.gnu.org/licenses/>.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # GenSec -- Copyright (c) 2026 Andrea Albero
 # AGPL-3.0-or-later. See LICENSE file.
 # ---------------------------------------------------------------------------
@@ -78,6 +59,14 @@ log = logging.getLogger("gensec.server")
 class AnalyzeRequest(BaseModel):
     """Body for ``POST /api/analyze``."""
     yaml_text: str = Field(..., description="Full YAML input as a string.")
+
+
+class InspectRequest(BaseModel):
+    """Body for ``POST /api/inspect``."""
+    yaml_text: str = Field(..., description="Full YAML input as a string.")
+    compute_plastic: bool = Field(
+        True, description="Compute plastic section moduli Z_*.",
+    )
 
 
 class ContourRequest(BaseModel):
@@ -176,6 +165,25 @@ def create_app(enable_cors: bool = False) -> FastAPI:
                 "misses": cache.misses,
             },
         }
+
+    @app.post("/api/inspect",
+              response_model=api.InspectResult, tags=["analysis"])
+    def inspect_endpoint(req: InspectRequest) -> api.InspectResult:
+        """Parse YAML and compute section properties only.
+
+        No solver / no verification.  Cost: typically < 200 ms.
+        See :func:`gensec.api.inspect` for the response shape.
+        """
+        try:
+            return api.inspect(
+                yaml_text=req.yaml_text,
+                compute_plastic=req.compute_plastic,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            log.exception("inspect failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/analyze",
               response_model=api.AnalysisResult, tags=["analysis"])

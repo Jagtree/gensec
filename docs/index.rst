@@ -4,7 +4,6 @@
 GenSec — Generic Section Calculator
 =====================================
 
-**Version**: |version|
 
 GenSec is a modular Python package for **fiber-based cross-section analysis**
 of composite structural members under combined axial force and biaxial bending.

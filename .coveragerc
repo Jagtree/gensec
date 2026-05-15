@@ -2,10 +2,13 @@
 omit =
     src\gensec\__init__.py 
     src\gensec\_version.py  
+    src\gensec\_about.py
+    src\gensec\__main__.py
     src\gensec\cli.py
     src\gensec\geometry\__init__.py
     src\gensec\materials\__init__.py
-    src\gensec\materials\__init__.py
+    src\gensec\solver\__init__.py
     src\gensec\output\__init__.py
     src\gensec\output\plots.py 
+    src\gensec\output\geometry_plot.py 
     src\gensec\output\report.py

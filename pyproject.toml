@@ -62,10 +62,6 @@ exclude_lines = [
     "\\.\\.\\.",
 ]
 
-#[tool.uv]
-#dev-dependencies = [
-#    "pytest>=7.0",
-#]
 
 [dependency-groups]
 dev = [

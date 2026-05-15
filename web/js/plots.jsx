@@ -1,310 +1,408 @@
 /* ==========================================================
- * GenSec GUI — SVG plots
- * All plots are static-friendly but accept {active} highlighting.
+ * GenSec GUI — Plotly-backed plot components
+ *
+ * Each plot is a thin React wrapper around Plotly.newPlot.
+ * The wrapper handles:
+ *   - mount  → Plotly.newPlot
+ *   - update → Plotly.react (in-place, preserves user camera/zoom)
+ *   - resize → Plotly.Plots.resize
+ *   - unmount → Plotly.purge
+ *
+ * SectionPreview stays as SVG (technical drawing) but gains
+ * mouse/wheel pan+zoom via PannableSVG.
+ *
+ * Public components (kept on window for app.jsx):
+ *   MxMyPlot, NMPlot, Surface3D, MchiPlot, SectionPreview, PolarDuctility
+ *   plus exportCurrentPlot(plotKind, format) for the toolbar buttons.
  * ========================================================== */
 
-// ----- utilities -----
-function axisTicks(min, max, count = 6) {
-  const step = (max - min) / (count - 1);
-  const ticks = [];
-  for (let i = 0; i < count; i++) ticks.push(min + i * step);
-  return ticks;
-}
-function fmt(n, d = 0) {
-  if (n === null || n === undefined || isNaN(n)) return "—";
-  if (Math.abs(n) >= 1000) return n.toFixed(d).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return n.toFixed(d);
+const { useEffect, useRef, useState, useCallback, useMemo } = React;
+
+// Track the currently mounted Plotly DOM nodes so the topbar
+// PNG/CSV/JSON buttons can grab them without prop-drilling.
+const PLOT_REGISTRY = {};
+function registerPlot(kind, node) { PLOT_REGISTRY[kind] = node; }
+function unregisterPlot(kind, node) { if (PLOT_REGISTRY[kind] === node) delete PLOT_REGISTRY[kind]; }
+function getPlotNode(kind) { return PLOT_REGISTRY[kind] || null; }
+
+// ---- Generic Plotly wrapper ----------------------------------
+function PlotlyChart({ kind, width, height, build, deps = [], filename, useReact = true }) {
+  const ref = useRef(null);
+  const builtRef = useRef(false);
+
+  useEffect(() => {
+    if (!ref.current || !window.Plotly) return;
+    window.GS_PLOTLY.refreshTheme();
+    const { traces, layout } = build();
+    const config = window.GS_PLOTLY.commonConfig({ filename });
+    if (!builtRef.current) {
+      window.Plotly.newPlot(ref.current, traces, layout, config).then(() => {
+        builtRef.current = true;
+        registerPlot(kind, ref.current);
+      });
+    } else if (useReact) {
+      window.Plotly.react(ref.current, traces, layout, config);
+    } else {
+      window.Plotly.newPlot(ref.current, traces, layout, config);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  useEffect(() => {
+    if (ref.current && builtRef.current && window.Plotly) {
+      window.Plotly.Plots.resize(ref.current);
+    }
+  }, [width, height]);
+
+  useEffect(() => {
+    const el = ref.current;
+    return () => {
+      unregisterPlot(kind, el);
+      if (el && window.Plotly) {
+        try { window.Plotly.purge(el); } catch (_) {}
+      }
+    };
+  }, [kind]);
+
+  return <div ref={ref} style={{ width, height }} />;
 }
 
-function PlotFrame({ width, height, pad, xDom, yDom, xLabel, yLabel, children, grid=true }) {
-  const [x0, x1] = xDom, [y0, y1] = yDom;
-  const sx = (v) => pad.l + ((v - x0) / (x1 - x0)) * (width - pad.l - pad.r);
-  const sy = (v) => (height - pad.b) - ((v - y0) / (y1 - y0)) * (height - pad.t - pad.b);
-  const xTicks = axisTicks(x0, x1, 7);
-  const yTicks = axisTicks(y0, y1, 6);
+// ---- Plot toolbar (custom buttons sitting over the plot) -----
+function PlotToolbar({ children }) {
   return (
-    <svg width={width} height={height} style={{ display: "block" }}>
-      {/* grid */}
-      {grid && xTicks.map((t, i) => (
-        <line key={"gx"+i} x1={sx(t)} x2={sx(t)} y1={pad.t} y2={height - pad.b} stroke="var(--rule)" strokeDasharray="1 3" />
-      ))}
-      {grid && yTicks.map((t, i) => (
-        <line key={"gy"+i} x1={pad.l} x2={width - pad.r} y1={sy(t)} y2={sy(t)} stroke="var(--rule)" strokeDasharray="1 3" />
-      ))}
-      {/* axes */}
-      <line x1={pad.l} x2={width - pad.r} y1={height - pad.b} y2={height - pad.b} stroke="var(--rule-2)" />
-      <line x1={pad.l} x2={pad.l} y1={pad.t} y2={height - pad.b} stroke="var(--rule-2)" />
-      {/* origin */}
-      {x0 < 0 && x1 > 0 && (
-        <line x1={sx(0)} x2={sx(0)} y1={pad.t} y2={height - pad.b} stroke="var(--ink-3)" strokeWidth="0.6" />
-      )}
-      {y0 < 0 && y1 > 0 && (
-        <line x1={pad.l} x2={width - pad.r} y1={sy(0)} y2={sy(0)} stroke="var(--ink-3)" strokeWidth="0.6" />
-      )}
-      {/* tick labels */}
-      {xTicks.map((t, i) => (
-        <text key={"tx"+i} x={sx(t)} y={height - pad.b + 14} textAnchor="middle"
-              fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">{fmt(t)}</text>
-      ))}
-      {yTicks.map((t, i) => (
-        <text key={"ty"+i} x={pad.l - 8} y={sy(t) + 3} textAnchor="end"
-              fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">{fmt(t)}</text>
-      ))}
-      {/* axis labels */}
-      <text x={width - pad.r} y={height - 6} textAnchor="end"
-            fontFamily="var(--ff-serif)" fontStyle="italic" fontSize="11" fill="var(--ink-2)">{xLabel}</text>
-      <text x={pad.l - 4} y={pad.t - 6} textAnchor="start"
-            fontFamily="var(--ff-serif)" fontStyle="italic" fontSize="11" fill="var(--ink-2)">{yLabel}</text>
-      {children(sx, sy)}
-    </svg>
+    <div style={{
+      position: 'absolute', top: 6, right: 10, zIndex: 5,
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'color-mix(in oklab, var(--paper) 88%, transparent)',
+      backdropFilter: 'blur(4px)',
+      border: '1px solid var(--rule)',
+      borderRadius: 'var(--r-2)',
+      padding: '3px 4px',
+      pointerEvents: 'auto',
+    }}>{children}</div>
+  );
+}
+function ToolBtn({ onClick, title, active, children }) {
+  return (
+    <button className="btn ghost sm" title={title} onClick={onClick}
+      style={{
+        height: 22, padding: '0 8px', fontSize: 10.5,
+        color: active ? 'var(--accent-ink)' : 'var(--ink-2)',
+        background: active ? 'var(--accent-soft)' : 'transparent',
+      }}>
+      {children}
+    </button>
   );
 }
 
-/* ========== Mx-My contour plot at fixed N ========== */
+// ---- Mx-My ---------------------------------------------------
 function MxMyPlot({ width, height, N_kN, demands, activeName }) {
-  const contour = window.GS_DATA.makeMxMyContour(N_kN, 144);
-  const pad = { l: 52, r: 20, t: 38, b: 32 };
-
-  // auto-extents with padding
-  const xs = contour.map(p => p[0]); const ys = contour.map(p => p[1]);
-  const xmax = Math.max(420, Math.max(...xs.map(Math.abs)) * 1.15);
-  const ymax = Math.max(280, Math.max(...ys.map(Math.abs)) * 1.15);
-
+  const build = () => window.GS_PLOTLY.buildMxMy({ N_kN, demands, activeName });
+  const ref = useRef(null);
+  const reset = () => {
+    const node = getPlotNode('mxmy');
+    if (node && window.Plotly) window.Plotly.relayout(node, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+  };
   return (
-    <PlotFrame width={width} height={height} pad={pad}
-               xDom={[-xmax, xmax]} yDom={[-ymax, ymax]}
-               xLabel="Mx  [kN·m]" yLabel="My  [kN·m]">
-      {(sx, sy) => (
-        <>
-          {/* filled contour */}
-          <path d={"M " + contour.map(p => sx(p[0]) + " " + sy(p[1])).join(" L ") + " Z"}
-                fill="var(--accent-soft)" fillOpacity="0.35"
-                stroke="var(--accent)" strokeWidth="1.6" />
-          {/* demand points */}
-          {demands.map((d, i) => {
-            const active = d.name === activeName;
-            const cx = sx(d.Mx), cy = sy(d.My);
-            // ray from origin to contour through demand direction, drawn if active
-            return (
-              <g key={i}>
-                {active && (
-                  <line x1={sx(0)} y1={sy(0)} x2={cx} y2={cy}
-                        stroke="var(--fail)" strokeWidth="1.4" strokeDasharray="3 2" />
-                )}
-                <circle cx={cx} cy={cy} r={active ? 5 : 3.2}
-                        fill={active ? "var(--fail)" : "var(--ink)"}
-                        stroke="var(--paper)" strokeWidth="1.5" />
-                <text x={cx + 7} y={cy - 6} fontFamily="var(--ff-mono)" fontSize="10"
-                      fill={active ? "var(--fail)" : "var(--ink-2)"} fontWeight={active ? 600 : 400}>
-                  {d.name}
-                </text>
-              </g>
-            );
-          })}
-        </>
-      )}
-    </PlotFrame>
+    <div ref={ref} style={{ position: 'relative', width, height }}>
+      <PlotlyChart kind="mxmy" width={width} height={height} build={build}
+        deps={[width, height, N_kN, activeName, demands && demands.length]}
+        filename={`gensec-mxmy-N${Math.round(N_kN)}`} />
+      <PlotToolbar>
+        <ToolBtn title="Reset zoom & pan" onClick={reset}>⟲ Reset</ToolBtn>
+      </PlotToolbar>
+    </div>
   );
 }
 
-/* ========== N-M (uniaxial) interaction ========== */
+// ---- N-M -----------------------------------------------------
 function NMPlot({ width, height, demands, activeName }) {
-  const pts = window.GS_DATA.makeNM();
-  const pad = { l: 60, r: 20, t: 38, b: 32 };
+  const build = () => window.GS_PLOTLY.buildNM({ demands, activeName });
+  const reset = () => {
+    const node = getPlotNode('nm');
+    if (node && window.Plotly) window.Plotly.relayout(node, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+  };
   return (
-    <PlotFrame width={width} height={height} pad={pad}
-               xDom={[-5000, 1500]} yDom={[-460, 460]}
-               xLabel="N  [kN]" yLabel="Mx  [kN·m]">
-      {(sx, sy) => (
-        <>
-          <path d={"M " + pts.map(p => sx(p[0]) + " " + sy(p[1])).join(" L ") + " Z"}
-                fill="var(--accent-soft)" fillOpacity="0.35"
-                stroke="var(--accent)" strokeWidth="1.6" />
-          {demands.map((d, i) => {
-            const active = d.name === activeName;
-            const cx = sx(d.N), cy = sy(d.Mx);
-            return (
-              <g key={i}>
-                <circle cx={cx} cy={cy} r={active ? 5 : 3.2}
-                        fill={active ? "var(--fail)" : "var(--ink)"}
-                        stroke="var(--paper)" strokeWidth="1.5" />
-                <text x={cx + 7} y={cy - 6} fontFamily="var(--ff-mono)" fontSize="10"
-                      fill={active ? "var(--fail)" : "var(--ink-2)"} fontWeight={active ? 600 : 400}>
-                  {d.name}
-                </text>
-              </g>
-            );
-          })}
-        </>
-      )}
-    </PlotFrame>
+    <div style={{ position: 'relative', width, height }}>
+      <PlotlyChart kind="nm" width={width} height={height} build={build}
+        deps={[width, height, activeName, demands && demands.length]}
+        filename="gensec-nm" />
+      <PlotToolbar>
+        <ToolBtn title="Reset zoom & pan" onClick={reset}>⟲ Reset</ToolBtn>
+      </PlotToolbar>
+    </div>
   );
 }
 
-/* ========== 3D Resistance Surface (isometric stack of slices) ========== */
-function Surface3D({ width, height }) {
-  const slices = window.GS_DATA.makeSurfaceSlices(11);
-  // map (Mx, My, N) → 2D via axonometric projection
-  const ang = 28 * Math.PI / 180;
-  const cx = width / 2;
-  const cy = height / 2 + 20;
-  const sMx = 0.35;        // Mx scale
-  const sMy = 0.35;        // My scale
-  const sN  = 0.055;       // N scale (vertical)
-  const proj = (Mx, My, N) => {
-    // classic isometric-ish: Mx along cos(30), -sin(30); My along cos(-30), -sin(-30)
-    const x = cx + Mx * sMx * Math.cos(ang) + My * sMy * Math.cos(Math.PI - ang);
-    const y = cy + Mx * sMx * Math.sin(ang) + My * sMy * Math.sin(Math.PI - ang) - N * sN;
-    return [x, y];
+// ---- 3D resistance surface -----------------------------------
+function Surface3D({ width, height, highlightN, demands, activeName, mode: modeProp }) {
+  const [internalMode, setInternalMode] = useState('slices');
+  const mode = modeProp || internalMode;             // 'slices' | 'mesh' | 'wireframe'
+  const setMode = setInternalMode;
+  const [proj, setProj] = useState('perspective');    // 'perspective' | 'orthographic'
+
+  const build = () => window.GS_PLOTLY.buildSurface3D({
+    mode, highlightN, demands, activeName,
+  });
+
+  const resetCam = () => {
+    const node = getPlotNode('surface');
+    if (node && window.Plotly) {
+      window.Plotly.relayout(node, {
+        'scene.camera': {
+          eye: { x: 1.6, y: 1.6, z: 0.9 },
+          up:  { x: 0, y: 0, z: 1 },
+          center: { x: 0, y: 0, z: 0 },
+        },
+      });
+    }
+  };
+  const setView = (eye) => {
+    const node = getPlotNode('surface');
+    if (node && window.Plotly) {
+      window.Plotly.relayout(node, { 'scene.camera.eye': eye, 'scene.camera.up': { x:0, y:0, z:1 } });
+    }
+  };
+  const toggleProj = () => {
+    const next = proj === 'perspective' ? 'orthographic' : 'perspective';
+    setProj(next);
+    const node = getPlotNode('surface');
+    if (node && window.Plotly) {
+      window.Plotly.relayout(node, { 'scene.camera.projection.type': next });
+    }
   };
 
-  // Build stacked contours as polygons, colored by N level
   return (
-    <svg width={width} height={height} style={{ display: "block" }}>
-      {/* vertical N axis guide */}
-      <line x1={cx} y1={cy - (-4500) * sN * -1} x2={cx} y2={cy - 1200 * sN * -1}
-            stroke="var(--rule-2)" strokeDasharray="2 3" />
-      {/* floor ellipses at a few N-levels as faint shadow */}
-      {slices.map((s, i) => {
-        const pts = s.contour.map(p => proj(p[0], p[1], s.N));
-        const d = "M " + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L ") + " Z";
-        const t = i / (slices.length - 1);
-        const hueL = 30 + t * 50;
-        return (
-          <path key={i} d={d}
-                fill={`oklch(${hueL}% 0.12 225 / 0.18)`}
-                stroke="var(--accent)" strokeWidth="1.1" strokeOpacity={0.55 + t * 0.3} />
-        );
-      })}
-      {/* axes labels */}
-      <g fontFamily="var(--ff-serif)" fontStyle="italic" fontSize="11" fill="var(--ink-2)">
-        {(() => {
-          const [ax, ay] = proj(420, 0, 0);
-          const [bx, by] = proj(0, 280, 0);
-          const [nx, ny] = proj(0, 0, 1500);
-          return (
-            <>
-              <line x1={proj(0,0,0)[0]} y1={proj(0,0,0)[1]} x2={ax} y2={ay} stroke="var(--ink-3)" markerEnd=""/>
-              <text x={ax + 6} y={ay + 4}>Mx</text>
-              <line x1={proj(0,0,0)[0]} y1={proj(0,0,0)[1]} x2={bx} y2={by} stroke="var(--ink-3)"/>
-              <text x={bx - 22} y={by + 4}>My</text>
-              <line x1={cx} y1={cy - (-4500) * -sN} x2={cx} y2={cy - 1500 * -sN} stroke="var(--ink-3)"/>
-              <text x={cx + 6} y={cy - 1500 * -sN - 6}>N</text>
-            </>
-          );
-        })()}
-      </g>
-      {/* N tick labels on central axis */}
-      {[-4000, -3000, -2000, -1000, 0, 1000].map((N, i) => {
-        const [x, y] = proj(0, 0, N);
-        return (
-          <g key={i}>
-            <line x1={x - 3} y1={y} x2={x + 3} y2={y} stroke="var(--ink-3)"/>
-            <text x={x - 6} y={y + 3} textAnchor="end"
-                  fontFamily="var(--ff-mono)" fontSize="9.5" fill="var(--ink-3)">{N}</text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ position: 'relative', width, height }}>
+      <PlotlyChart kind="surface" width={width} height={height} build={build}
+        deps={[width, height, mode, highlightN, activeName, demands && demands.length]}
+        filename="gensec-surface3d" />
+      <PlotToolbar>
+        <ToolBtn title="Stacked N-slice contours" active={mode==='slices'} onClick={()=>setMode('slices')}>Slices</ToolBtn>
+        <ToolBtn title="Continuous mesh surface"  active={mode==='mesh'}   onClick={()=>setMode('mesh')}>Mesh</ToolBtn>
+        <ToolBtn title="Wireframe rings only"     active={mode==='wireframe'} onClick={()=>setMode('wireframe')}>Wire</ToolBtn>
+        <span style={{ width: 1, height: 14, background: 'var(--rule)' }}/>
+        <ToolBtn title="View along +X (Mx axis)"  onClick={()=>setView({x:2.4,y:0,z:0})}>X</ToolBtn>
+        <ToolBtn title="View along +Y (My axis)"  onClick={()=>setView({x:0,y:2.4,z:0})}>Y</ToolBtn>
+        <ToolBtn title="Top-down (N axis)"         onClick={()=>setView({x:0,y:0,z:2.4})}>Z</ToolBtn>
+        <ToolBtn title="Isometric"                  onClick={()=>setView({x:1.6,y:1.6,z:0.9})}>Iso</ToolBtn>
+        <span style={{ width: 1, height: 14, background: 'var(--rule)' }}/>
+        <ToolBtn title="Toggle perspective / orthographic" active={proj==='orthographic'} onClick={toggleProj}>
+          {proj === 'orthographic' ? 'Ortho' : 'Persp'}
+        </ToolBtn>
+        <ToolBtn title="Reset camera" onClick={resetCam}>⟲</ToolBtn>
+      </PlotToolbar>
+    </div>
   );
 }
 
-/* ========== M-χ curves ========== */
+// ---- M-χ ------------------------------------------------------
 function MchiPlot({ width, height, activeN }) {
-  const series = window.GS_DATA.makeMchi();
-  const pad = { l: 56, r: 20, t: 38, b: 32 };
-  // scale curvature to 1e-6 /mm for readability
+  const build = () => window.GS_PLOTLY.buildMchi({ activeN });
+  const reset = () => {
+    const node = getPlotNode('mchi');
+    if (node && window.Plotly) window.Plotly.relayout(node, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+  };
   return (
-    <PlotFrame width={width} height={height} pad={pad}
-               xDom={[0, 145]} yDom={[0, 440]}
-               xLabel="χ  ×10⁻⁶  [1/mm]" yLabel="M  [kN·m]">
-      {(sx, sy) => (
-        <>
-          {series.map((s, i) => {
-            const active = activeN === s.N;
-            const color = ["var(--series-1)","var(--series-2)","var(--series-3)","var(--series-4)","var(--series-5)"][i % 5];
-            const d = s.pts.map((p, j) => (j === 0 ? "M " : "L ") + sx(p[0]*1e6) + " " + sy(p[1])).join(" ");
-            return <path key={i} d={d} fill="none" stroke={color}
-                         strokeWidth={active ? 2.2 : 1.3}
-                         strokeOpacity={active ? 1 : 0.7} />;
-          })}
-        </>
-      )}
-    </PlotFrame>
+    <div style={{ position: 'relative', width, height }}>
+      <PlotlyChart kind="mchi" width={width} height={height} build={build}
+        deps={[width, height, activeN]}
+        filename="gensec-mchi" />
+      <PlotToolbar>
+        <ToolBtn title="Reset zoom & pan" onClick={reset}>⟲ Reset</ToolBtn>
+      </PlotToolbar>
+    </div>
   );
 }
 
-/* ========== Section preview with fiber mesh + rebars ========== */
+// ---- Polar ductility -----------------------------------------
+function PolarDuctility({ width, height }) {
+  const build = () => window.GS_PLOTLY.buildPolar();
+  const reset = () => {
+    const node = getPlotNode('polar');
+    if (node && window.Plotly) window.Plotly.relayout(node, { 'polar.radialaxis.autorange': true });
+  };
+  return (
+    <div style={{ position: 'relative', width, height }}>
+      <PlotlyChart kind="polar" width={width} height={height} build={build}
+        deps={[width, height]}
+        filename="gensec-polar" />
+      <PlotToolbar>
+        <ToolBtn title="Reset zoom" onClick={reset}>⟲ Reset</ToolBtn>
+      </PlotToolbar>
+    </div>
+  );
+}
+
+// ---- Section preview (SVG with pan+zoom) ---------------------
 function SectionPreview({ width, height }) {
   const { B, H, rebars, n_fibers_x, n_fibers_y } = window.GS_DATA.SECTION;
+  const [view, setView] = useState({ k: 1, tx: 0, ty: 0 });
+  const dragRef = useRef(null);
+
+  const reset = () => setView({ k: 1, tx: 0, ty: 0 });
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    setView(v => {
+      const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+      const k2 = Math.max(0.25, Math.min(20, v.k * factor));
+      const tx2 = mx - (mx - v.tx) * (k2 / v.k);
+      const ty2 = my - (my - v.ty) * (k2 / v.k);
+      return { k: k2, tx: tx2, ty: ty2 };
+    });
+  };
+  const onMouseDown = (e) => {
+    dragRef.current = { x0: e.clientX, y0: e.clientY, tx0: view.tx, ty0: view.ty };
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current) return;
+    const d = dragRef.current;
+    setView(v => ({ ...v, tx: d.tx0 + (e.clientX - d.x0), ty: d.ty0 + (e.clientY - d.y0) }));
+  };
+  const onMouseUp = () => { dragRef.current = null; };
+
+  if (!B || !H) {
+    return <div style={{ width, height, display: 'grid', placeItems: 'center', color: 'var(--ink-3)' }}>—</div>;
+  }
+
   const pad = 32;
   const sc = Math.min((width - pad*2) / B, (height - pad*2) / H);
   const w = B * sc, h = H * sc;
   const x0 = (width - w) / 2, y0 = (height - h) / 2;
-
-  const dx = w / n_fibers_x, dy = h / n_fibers_y;
+  const dx = w / Math.max(1, n_fibers_x), dy = h / Math.max(1, n_fibers_y);
   const lines = [];
-  for (let i = 1; i < n_fibers_x; i++) lines.push(<line key={"vx"+i} x1={x0+i*dx} x2={x0+i*dx} y1={y0} y2={y0+h} stroke="var(--rule)" strokeWidth="0.5"/>);
-  for (let j = 1; j < n_fibers_y; j++) lines.push(<line key={"vy"+j} x1={x0} x2={x0+w} y1={y0+j*dy} y2={y0+j*dy} stroke="var(--rule)" strokeWidth="0.5"/>);
+  for (let i = 1; i < n_fibers_x; i++) lines.push(<line key={"vx"+i} x1={x0+i*dx} x2={x0+i*dx} y1={y0} y2={y0+h} stroke="var(--rule)" strokeWidth={0.5/view.k}/>);
+  for (let j = 1; j < n_fibers_y; j++) lines.push(<line key={"vy"+j} x1={x0} x2={x0+w} y1={y0+j*dy} y2={y0+j*dy} stroke="var(--rule)" strokeWidth={0.5/view.k}/>);
 
   return (
-    <svg width={width} height={height} style={{ display: "block" }}>
-      {/* outline */}
-      <rect x={x0} y={y0} width={w} height={h}
-            fill="oklch(88% 0.015 85 / 0.5)" stroke="var(--ink-2)" strokeWidth="1.2" />
-      {lines}
-      {/* rebars (y measured from bottom — invert to SVG) */}
-      {rebars.map((r, i) => {
-        const cx = x0 + (r.x / B) * w;
-        const cy = y0 + h - (r.y / H) * h;
-        const rad = (r.diameter / 2) * sc * 1.6;
-        return (
-          <g key={i}>
-            <circle cx={cx} cy={cy} r={rad} fill="var(--ink)" />
-            <circle cx={cx} cy={cy} r={rad*0.5} fill="var(--paper)" opacity="0.15" />
-          </g>
-        );
-      })}
-      {/* dims */}
-      <g fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">
-        <text x={x0 + w/2} y={y0 + h + 16} textAnchor="middle">B = {B} mm</text>
-        <text x={x0 - 10} y={y0 + h/2} textAnchor="end" transform={`rotate(-90 ${x0-10} ${y0+h/2})`}>H = {H} mm</text>
-      </g>
-      <g fontFamily="var(--ff-serif)" fontStyle="italic" fontSize="11" fill="var(--ink-2)">
-        <text x={width - 14} y={20} textAnchor="end">fiber mesh {n_fibers_x} × {n_fibers_y}</text>
-      </g>
-    </svg>
+    <div style={{ position: 'relative', width, height, overflow: 'hidden', cursor: dragRef.current ? 'grabbing' : 'grab' }}
+         onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove}
+         onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
+      <svg width={width} height={height} style={{ display: 'block' }}>
+        <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
+          <rect x={x0} y={y0} width={w} height={h}
+                fill="oklch(88% 0.015 85 / 0.5)" stroke="var(--ink-2)" strokeWidth={1.2/view.k} />
+          {lines}
+          {(rebars || []).map((r, i) => {
+            const cx = x0 + (r.x / B) * w;
+            const cy = y0 + h - (r.y / H) * h;
+            const rad = (r.diameter / 2) * sc * 1.6;
+            return (
+              <g key={i}>
+                <circle cx={cx} cy={cy} r={rad} fill="var(--ink)" />
+                <circle cx={cx} cy={cy} r={rad*0.5} fill="var(--paper)" opacity="0.15" />
+              </g>
+            );
+          })}
+        </g>
+        <g fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">
+          <text x={width/2} y={height - 10} textAnchor="middle">B = {B} mm   ·   H = {H} mm   ·   drag = pan, wheel = zoom</text>
+        </g>
+        <g fontFamily="var(--ff-serif)" fontStyle="italic" fontSize="11" fill="var(--ink-2)">
+          <text x={width - 14} y={20} textAnchor="end">fiber mesh {n_fibers_x} × {n_fibers_y}</text>
+        </g>
+      </svg>
+      <PlotToolbar>
+        <ToolBtn title="Zoom in"  onClick={()=>setView(v=>({...v, k: Math.min(20, v.k*1.2)}))}>＋</ToolBtn>
+        <ToolBtn title="Zoom out" onClick={()=>setView(v=>({...v, k: Math.max(0.25, v.k/1.2)}))}>－</ToolBtn>
+        <ToolBtn title="Reset" onClick={reset}>⟲</ToolBtn>
+      </PlotToolbar>
+    </div>
   );
 }
 
-/* ========== Polar ductility (simple rose) ========== */
-function PolarDuctility({ width, height }) {
-  const cx = width/2, cy = height/2 + 6;
-  const R = Math.min(width, height) / 2 - 40;
-  const n = 36;
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const t = (i/n) * Math.PI * 2;
-    const r = R * (0.55 + 0.32 * Math.sin(2*t + 0.3) + 0.08 * Math.cos(4*t));
-    pts.push([cx + Math.cos(t)*r, cy + Math.sin(t)*r]);
+// ---- Toolbar export helpers (PNG / CSV / JSON) ---------------
+async function exportCurrentPlot(kind, format) {
+  const node = getPlotNode(kind);
+  const D = window.GS_DATA;
+
+  if (format === 'png') {
+    if (!node || !window.Plotly) return;
+    await window.Plotly.downloadImage(node, {
+      format: 'png', scale: 2,
+      filename: `gensec-${kind}`,
+      width: Math.max(900, node.clientWidth),
+      height: Math.max(600, node.clientHeight),
+    });
+    return;
   }
-  return (
-    <svg width={width} height={height} style={{display:"block"}}>
-      {[0.25, 0.5, 0.75, 1].map((f, i) => (
-        <circle key={i} cx={cx} cy={cy} r={R*f} fill="none" stroke="var(--rule)" strokeDasharray="1 3" />
-      ))}
-      {[0, 45, 90, 135, 180, 225, 270, 315].map((a, i) => {
-        const rad = a * Math.PI/180;
-        return <line key={i} x1={cx} y1={cy} x2={cx+Math.cos(rad)*R} y2={cy+Math.sin(rad)*R}
-                     stroke="var(--rule)" strokeDasharray="1 3" />;
-      })}
-      <path d={"M " + pts.map(p => p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" L ") + " Z"}
-            fill="var(--accent-soft)" fillOpacity="0.5"
-            stroke="var(--accent)" strokeWidth="1.6"/>
-      <text x={cx + R + 6} y={cy + 4} fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">Mx</text>
-      <text x={cx - 4} y={cy - R - 6} fontFamily="var(--ff-mono)" fontSize="10" fill="var(--ink-3)">My</text>
-    </svg>
-  );
+
+  // ---- Build a plain payload for CSV/JSON from GS_DATA ----
+  let payload = null;
+  if (kind === 'mxmy') {
+    const N = window.__GS_LAST_N || 0;
+    const pts = D.makeMxMyContour ? D.makeMxMyContour(N) : [];
+    payload = { kind: 'Mx-My contour', N_kN: N, columns: ['Mx_kNm', 'My_kNm'], rows: pts };
+  } else if (kind === 'nm') {
+    const pts = D.makeNM ? D.makeNM() : [];
+    payload = { kind: 'N-M envelope', columns: ['N_kN', 'Mx_kNm'], rows: pts };
+  } else if (kind === 'surface') {
+    const slices = D.makeSurfaceSlices ? D.makeSurfaceSlices() : [];
+    payload = {
+      kind: '3D resistance surface',
+      slices: slices.map(s => ({ N_kN: s.N, points: s.contour })),
+    };
+  } else if (kind === 'mchi') {
+    const series = D.makeMchi ? D.makeMchi() : [];
+    payload = {
+      kind: 'M-chi curves',
+      series: series.map(s => ({ N_kN: s.N, columns: ['chi_per_mm', 'M_kNm'], rows: s.pts })),
+    };
+  } else if (kind === 'polar') {
+    payload = { kind: 'Polar ductility (synthetic)', note: 'Backend payload not yet wired.' };
+  } else if (kind === 'section') {
+    payload = { kind: 'Section', section: D.SECTION };
+  }
+
+  if (!payload) return;
+
+  if (format === 'json') {
+    download(`gensec-${kind}.json`, JSON.stringify(payload, null, 2), 'application/json');
+  } else if (format === 'csv') {
+    download(`gensec-${kind}.csv`, toCSV(payload), 'text/csv');
+  }
 }
 
-Object.assign(window, { MxMyPlot, NMPlot, Surface3D, MchiPlot, SectionPreview, PolarDuctility });
+function toCSV(p) {
+  const lines = [];
+  if (p.rows && p.columns) {
+    lines.push(p.columns.join(','));
+    for (const r of p.rows) lines.push(r.map(fmtCSV).join(','));
+    return lines.join('\n');
+  }
+  if (p.slices) {
+    lines.push('N_kN,Mx_kNm,My_kNm');
+    for (const s of p.slices) for (const pt of s.points) lines.push([s.N_kN, pt[0], pt[1]].map(fmtCSV).join(','));
+    return lines.join('\n');
+  }
+  if (p.series) {
+    lines.push('N_kN,chi_per_mm,M_kNm');
+    for (const s of p.series) for (const r of s.rows) lines.push([s.N_kN, r[0], r[1]].map(fmtCSV).join(','));
+    return lines.join('\n');
+  }
+  // Fallback: dump JSON inside a single CSV cell.
+  lines.push('payload');
+  lines.push('"' + JSON.stringify(p).replace(/"/g, '""') + '"');
+  return lines.join('\n');
+}
+function fmtCSV(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number') return Number.isFinite(v) ? v.toString() : '';
+  return String(v);
+}
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+}
+
+Object.assign(window, {
+  MxMyPlot, NMPlot, Surface3D, MchiPlot, SectionPreview, PolarDuctility,
+  exportCurrentPlot,
+});
