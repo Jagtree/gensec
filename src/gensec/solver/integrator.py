@@ -462,8 +462,11 @@ class FiberSolver:
 
         fA = sb * self.sec.A_fibers[None, :]        # (n, n_fibers)
         N = fA.sum(axis=1)                           # (n,)
-        Mx = (fA * self._ly_bulk[None, :]).sum(axis=1)
-        My = -(fA * self._lx_bulk[None, :]).sum(axis=1)
+        # einsum avoids allocating a full (n, n_fibers) temporary
+        # for each moment component — saves one ~400 MB matrix at
+        # peak when chunks are large.
+        Mx = np.einsum('ij,j->i', fA, self._ly_bulk)
+        My = -np.einsum('ij,j->i', fA, self._lx_bulk)
 
         # Rebar strains: (n, n_rebars)
         n_rebars = len(self.sec.y_rebars)

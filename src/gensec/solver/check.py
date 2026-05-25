@@ -976,7 +976,7 @@ class VerificationEngine:
         Other:
 
         - ``delta_N_tol`` (float, default ``0.03``)
-        - ``n_angles_mx_my`` (int, default ``144``)
+        - ``n_angles_mx_my`` (int, default ``72``)
 
         Each metric answers a distinct geometric question; no strict
         ordering between them holds in general.  All enabled metrics
@@ -1006,7 +1006,7 @@ class VerificationEngine:
             "eta_path_norm_beta", False)
         self.do_path_2D = output_flags.get("eta_path_2D", False)
         self.delta_N_tol = float(output_flags.get("delta_N_tol", 0.03))
-        self.n_angles = int(output_flags.get("n_angles_mx_my", 144))
+        self.n_angles = int(output_flags.get("n_angles_mx_my", 72))
 
         # Auto-disable 2-D contour operations when the resistance
         # domain is 2-D (uniaxial N-M only).  In that case every

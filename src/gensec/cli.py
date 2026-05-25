@@ -43,6 +43,7 @@ from .output import (
     plot_moment_curvature, plot_section, plot_section_state,
     plot_demand_heatmap, plot_3d_surface,
     plot_moment_curvature_bundle, plot_polar_ductility,
+    plot_polar_ductility_refactored,
     plot_moment_curvature_surface,
     plot_from_json,
     export_nm_domain_csv, export_nm_domain_json,
@@ -239,7 +240,7 @@ def main(argv=None):
     p_run = sub.add_parser(
         "run", help="Run analysis from YAML input file.")
     p_run.add_argument("input_file", help="YAML input file.")
-    p_run.add_argument("--n-points", type=int, default=400,
+    p_run.add_argument("--n-points", type=int, default=200,
                        help="N-M diagram resolution (default: 400).")
     p_run.add_argument("--output-dir", type=str, default=".",
                        help="Output directory (default: current dir).")
@@ -331,7 +332,7 @@ def _run(args):
     n_levels_mode = output_opts.get("n_levels_mode", "demands")
     n_levels_count = int(output_opts.get("n_levels_count", 10))
     n_levels_explicit = output_opts.get("n_levels_values", [])
-    n_angles_mx_my = int(output_opts.get("n_angles_mx_my", 144))
+    n_angles_mx_my = int(output_opts.get("n_angles_mx_my", 72))
 
     print_section_info(section)
 
@@ -376,7 +377,7 @@ def _run(args):
     if is_biaxial:
         print("\nGenerating 3D resistance surface (N-Mx-My)...")
         nm_3d = nm_gen.generate_biaxial(
-            n_angles=72, n_points_per_angle=args.n_points // 2)
+            n_angles=36, n_points_per_angle=args.n_points)
         print(f"  {len(nm_3d['N'])} points")
 
         if do_3d_surface:
@@ -392,7 +393,7 @@ def _run(args):
     domain_data = nm_3d if nm_3d is not None else nm_data
     engine = VerificationEngine(
         domain_data, nm_gen, output_opts,
-        n_points=args.n_points // 2)
+        n_points=args.n_points)
 
     # Build demand database for combination / envelope resolution.
     demand_db = {d["name"]: d for d in demands}
@@ -587,8 +588,7 @@ def _run(args):
             print(f"  Generating Mx-My at"
                   f" N={N_fixed/1e3:.0f} kN...")
             mx_my = nm_gen.generate_mx_my(
-                N_fixed, n_angles=n_angles_mx_my,
-                n_points_per_angle=args.n_points // 2)
+                N_fixed, n_angles=n_angles_mx_my)
             N_label = f"{N_fixed/1e3:.0f}".replace("-", "m")
             # Data export (always).
             p_json = os.path.join(outdir, f"mx_my_N{N_label}.json")
@@ -671,7 +671,7 @@ def _run(args):
             N_label = f"{N_fixed/1e3:.0f}".replace("-", "m")
             print(f"  Generating polar ductility at"
                   f" N={N_fixed/1e3:.0f} kN...")
-            fig = plot_polar_ductility(
+            fig = plot_polar_ductility_refactored(
                 nm_gen, N_fixed, n_angles=n_angles_mx_my,
                 n_points=args.n_points)
             p = os.path.join(

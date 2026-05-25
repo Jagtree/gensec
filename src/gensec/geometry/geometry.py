@@ -568,30 +568,66 @@ class GenericSection:
     ### If the section geometry or materials change, the cache should be invalidated.
     @property
     def ideal_gross_properties(self):
-        """Lazy-computed homogenized section properties."""
+        """Lazy, cached homogenized section properties (elastic only).
+
+        Computed with ``compute_plastic=False``.  For the plastic
+        section moduli use :meth:`compute_ideal_properties` with
+        ``compute_plastic=True`` (not cached).
+        """
         if getattr(self, '_ideal_gross_props_cache', None) is None:
-            from .properties import (
-                compute_section_properties, HomogenizedRebar,
+            self._ideal_gross_props_cache = self.compute_ideal_properties(
+                compute_plastic=False
             )
-            homog = [
-                HomogenizedRebar(r.x, r.y, r.As, r.material.E)
-                for r in self.rebars
-                if r.embedded and r.x is not None
-            ]
-            ### TODO: add support for multi-material bulk zones here (currently ignored in homogenization)
-            if len(self.bulk_materials) > 1:
-                self._ideal_gross_props_cache = None  # placeholder to avoid repeated warnings
-                raise NotImplementedError(
-                    "Warning: ideal_gross_properties currently ignores "
-                    "multi-material bulk zones."
-                )
-            else:
-                self._ideal_gross_props_cache = compute_section_properties(
-                    self.polygon,
-                    rebars=homog,
-                    E_bulk=self.bulk_material.E,
-                )
         return self._ideal_gross_props_cache
+
+    def compute_ideal_properties(self, compute_plastic: bool = False):
+        r"""Compute the homogenized (ideal) section properties.
+
+        Single source of truth for the homogenization convention: every
+        bulk area element contributes :math:`n_{\mathrm{bulk}}\,
+        \mathrm{d}A` and every embedded rebar contributes
+        :math:`(n_s - n_{\mathrm{bulk}})\,A_s`.  The cached
+        :attr:`ideal_gross_properties` delegates here with
+        ``compute_plastic=False``.
+
+        Parameters
+        ----------
+        compute_plastic : bool, optional
+            Also compute the plastic section moduli
+            :math:`Z_x, Z_y, Z_\xi, Z_\eta` via neutral-axis bisection.
+            Default ``False``.
+
+        Returns
+        -------
+        gensec.properties.SectionProperties
+
+        Raises
+        ------
+        NotImplementedError
+            If the section has more than one bulk material zone
+            (multi-material homogenization is not yet supported).
+        """
+        from .properties import (
+            compute_section_properties, HomogenizedRebar,
+        )
+        ### TODO: add support for multi-material bulk zones here
+        ### (currently ignored in homogenization)
+        if len(self.bulk_materials) > 1:
+            raise NotImplementedError(
+                "ideal_gross_properties currently ignores "
+                "multi-material bulk zones."
+            )
+        homog = [
+            HomogenizedRebar(r.x, r.y, r.As, r.material.E)
+            for r in self.rebars
+            if r.embedded and r.x is not None
+        ]
+        return compute_section_properties(
+            self.polygon,
+            rebars=homog,
+            E_bulk=self.bulk_material.E,
+            compute_plastic=compute_plastic,
+        )
 
     # ------------------------------------------------------------------
     #  Mesh quality diagnostics

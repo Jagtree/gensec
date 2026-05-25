@@ -1169,6 +1169,7 @@ def plot_moment_curvature_bundle(mc_list, direction='x', title=""):
 #  B) Polar ductility diagram — ultimate curvature vs direction
 # ==================================================================
 
+
 def plot_polar_ductility(nm_gen, N_fixed, n_angles=72,
                          n_points=400, title=""):
     r"""
@@ -1301,6 +1302,84 @@ def plot_polar_ductility(nm_gen, N_fixed, n_angles=72,
         pad=20)
     ax.set_rlabel_position(45)
 
+    fig.tight_layout()
+    return fig
+
+# ==================================================================
+#  Refactored plot_polar_ductility
+# ==================================================================
+
+def plot_polar_ductility_refactored(nm_gen, N_fixed, n_angles=72,
+                                    n_chi=100, title=""):
+    r"""
+    Polar diagram of ultimate curvature as a function of bending
+    direction.
+
+    Delegates the computation to
+    :meth:`NMDiagram.generate_polar_curvature` and handles only
+    rendering and outlier smoothing.
+
+    Parameters
+    ----------
+    nm_gen : NMDiagram
+        The diagram generator (wraps solver).
+    N_fixed : float
+        Axial force [N].
+    n_angles : int, optional
+        Angular resolution. Default 72.
+    n_chi : int, optional
+        Curvature steps per direction.  Default 100.
+    title : str, optional
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    import matplotlib.pyplot as plt
+
+    polar = nm_gen.generate_polar_curvature(
+        N_fixed, n_angles=n_angles, n_chi=n_chi)
+
+    thetas = polar["thetas"]
+    chi_km = polar["chi_u_km"].copy()
+
+    # --- Outlier rejection and smoothing ---
+    # (Same algorithm as the original plot_polar_ductility)
+    if n_angles >= 8:
+        from scipy.ndimage import median_filter, uniform_filter1d
+        # Circular median filter (window=5)
+        chi_extended = np.concatenate(
+            [chi_km[-3:], chi_km, chi_km[:3]])
+        med = median_filter(chi_extended, size=5)[3:-3]
+        for k in range(len(chi_km)):
+            if med[k] > 0 and abs(chi_km[k] - med[k]) / med[k] > 0.5:
+                chi_km[k] = med[k]
+        chi_ext2 = np.concatenate([chi_km[-2:], chi_km, chi_km[:2]])
+        chi_km = uniform_filter1d(chi_ext2, size=3)[2:-2]
+
+    # Close the polar loop
+    thetas_closed = np.append(thetas, thetas[0])
+    chi_closed = np.append(chi_km, chi_km[0])
+
+    fig, ax = plt.subplots(
+        1, 1, figsize=(9, 9),
+        subplot_kw=dict(projection='polar'))
+
+    ax.plot(thetas_closed, chi_closed, 'b-', lw=2)
+    ax.fill(thetas_closed, chi_closed, alpha=0.15, color='blue')
+
+    ax.set_thetagrids(
+        [0, 90, 180, 270],
+        labels=['\u03c7x+ (Mx+)', '\u03c7y+ (My+)',
+                '\u03c7x\u2212 (Mx\u2212)',
+                '\u03c7y\u2212 (My\u2212)'])
+
+    ax.set_title(
+        title or
+        f"Ultimate curvature \u03c7_u [1/km] at "
+        f"N={N_fixed/1e3:.0f} kN",
+        pad=20)
+    ax.set_rlabel_position(45)
     fig.tight_layout()
     return fig
 

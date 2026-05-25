@@ -93,7 +93,7 @@ def test_clear_cache_evicts(monkeypatch):
     not (EXAMPLES / "biaxial_column.yaml").exists(),
     reason="examples directory not present",
 )
-@pytest.mark.xfail(reason="_Session.build not yet implemented", strict=False)
+#@pytest.mark.xfail(reason="_Session.build not yet implemented", strict=False)
 def test_analyze_biaxial_column_returns_valid_model():
     res = api.analyze(yaml_path=EXAMPLES / "biaxial_column.yaml")
     assert res.section.B_mm == 400
