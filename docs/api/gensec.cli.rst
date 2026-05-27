@@ -6,18 +6,34 @@
 
 Command-line interface entry point.
 
-Usage::
+GenSec provides three subcommands:
 
-    uv run gensec input.yaml [--n-points 400] [--output-dir ./results]
+``gensec run``
+   Full analysis pipeline: domain generation, verification, plots.
 
-Or equivalently::
+   .. code-block:: bash
 
-    uv run python -m gensec input.yaml [--n-points 400] [--output-dir ./results]
+      uv run gensec run input.yaml [--n-points 200] [--output-dir ./results]
 
-The CLI reads a YAML input file (see :doc:`/user_guide/yaml_reference`),
-runs the full analysis pipeline (section construction, N-M diagram
-generation, demand verification, per-fiber post-processing), and writes
-all outputs (plots, CSV, JSON) to the specified directory.
+``gensec analyze``
+   Lightweight force decomposition without domain generation.
+
+   .. code-block:: bash
+
+      uv run gensec analyze input.yaml [--output-dir ./results] [--eta]
+
+   The ``--eta`` flag enables on-demand :math:`\eta` computation via
+   ray–bisection (see :ref:`architecture_solver`).
+
+``gensec plot``
+   Regenerate a plot from a previously exported JSON file.
+
+   .. code-block:: bash
+
+      uv run gensec plot data_file.json [--output plot.png] [--dpi 150]
+
+For backward compatibility, passing a YAML file without a subcommand
+is equivalent to ``gensec run``.
 
 .. automodule:: gensec.cli
    :members:

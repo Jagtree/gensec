@@ -1279,3 +1279,49 @@ class FiberSolver:
                 "embedded": self.sec.embedded_rebars.copy(),
             },
         }
+
+    def strains_within_limits(self, eps0, chi_x, chi_y=0.0):
+        r"""
+        Check whether all fiber strains are within material limits.
+
+        A strain field is *admissible* when every fiber's strain
+        lies within the range :math:`[\varepsilon_{\min},\,
+        \varepsilon_{\max}]` defined by the fiber's constitutive
+        law.
+
+        This is the criterion that distinguishes interior points
+        of the resistance domain from exterior points: the domain
+        boundary corresponds to configurations where at least one
+        fiber is *at* its limit.
+
+        Parameters
+        ----------
+        eps0 : float
+            Strain at the reference point.
+        chi_x : float
+            Curvature about the x-axis [1/mm].
+        chi_y : float, optional
+            Curvature about the y-axis [1/mm].
+
+        Returns
+        -------
+        bool
+            ``True`` if all fibers satisfy
+            :math:`\varepsilon_{\min} \le \varepsilon_i
+            \le \varepsilon_{\max}`.
+        """
+        eb, er = self.strain_field(eps0, chi_x, chi_y)
+
+        for mat, idx in self._bulk_groups:
+            e_group = eb[idx]
+            if np.any(e_group < mat.eps_min) or \
+               np.any(e_group > mat.eps_max):
+                return False
+
+        for mat, _bulk_mat, idx in self._rebar_groups:
+            e_group = er[idx]
+            if np.any(e_group < mat.eps_min) or \
+               np.any(e_group > mat.eps_max):
+                return False
+
+        return True

@@ -49,6 +49,7 @@ demands:
 
 output:
   # v0.3.0 utilization flags (the two 3-D defaults).
+  preset: standard
   eta_norm: true
   eta_norm_beta: true
   generate_mx_my: true

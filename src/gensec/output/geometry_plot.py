@@ -39,68 +39,14 @@ import io
 import contextlib
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import PathPatch, Circle
+from matplotlib.patches import Circle
 from matplotlib.path import Path
 
 from ..geometry.properties import (
     compute_inertia_ellipse,
     compute_kern_polygon,
 )
-
-
-# ==================================================================
-#  Robust polygon outline with explicit hole carve-out
-# ==================================================================
-
-
-def _signed_area_np(ring):
-    r"""Shoelace signed area; positive = CCW."""
-    pts = ring
-    if len(pts) >= 2 and np.allclose(pts[0], pts[-1]):
-        pts = pts[:-1]
-    x = pts[:, 0]
-    y = pts[:, 1]
-    return 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
-
-
-def _extend_path(verts, codes, ring):
-    r"""Append a ring to (verts, codes) using CLOSEPOLY."""
-    if len(ring) >= 2 and np.allclose(ring[0], ring[-1]):
-        ring = ring[:-1]
-    n = len(ring)
-    verts.extend(ring.tolist())
-    verts.append(ring[0].tolist())
-    codes.append(Path.MOVETO)
-    codes.extend([Path.LINETO] * (n - 1))
-    codes.append(Path.CLOSEPOLY)
-
-
-def _draw_polygon_with_holes(ax, polygon, *,
-                              facecolor='#EFEFEF',
-                              edgecolor='black',
-                              linewidth=1.8,
-                              zorder=1):
-    r"""
-    Render a Shapely polygon (with holes) on a Matplotlib axes,
-    using a compound :class:`~matplotlib.path.Path` with exterior
-    in CCW and every hole in CW orientation, so that the
-    non-zero winding rule carves holes reliably.
-    """
-    verts = []
-    codes = []
-    ext = np.asarray(polygon.exterior.coords)
-    if _signed_area_np(ext) < 0:
-        ext = ext[::-1]
-    _extend_path(verts, codes, ext)
-    for interior in polygon.interiors:
-        ring = np.asarray(interior.coords)
-        if _signed_area_np(ring) > 0:
-            ring = ring[::-1]
-        _extend_path(verts, codes, ring)
-    path = Path(verts, codes)
-    patch = PathPatch(path, facecolor=facecolor, edgecolor=edgecolor,
-                      linewidth=linewidth, zorder=zorder)
-    ax.add_patch(patch)
+from ._polydraw import draw_polygon
 
 
 # ==================================================================
@@ -355,11 +301,11 @@ def plot_section_properties(sec, props=None, *,
 
     fig, ax = plt.subplots(1, 1, figsize=(12.0, 10.0))
 
-    _draw_polygon_with_holes(ax, poly,
-                              facecolor='#EFEFEF',
-                              edgecolor='black',
-                              linewidth=1.8,
-                              zorder=1)
+    draw_polygon(ax, poly,
+                    facecolor='#EFEFEF',
+                    edgecolor='black',
+                    linewidth=1.8,
+                    zorder=1)
 
     if show_rebars:
         for i, rb in enumerate(sec.rebars):

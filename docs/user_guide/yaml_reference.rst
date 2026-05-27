@@ -8,6 +8,20 @@ A GenSec YAML file has four top-level blocks: ``materials``, ``section``,
 ``demands`` (optional), and ``combinations`` (optional).  An ``output``
 block controls which post-processing artefacts are generated.
 
+.. note::
+
+   The same YAML input file is used by both ``gensec run`` and
+   ``gensec analyze``.
+
+   - ``gensec run`` reads all six blocks and uses ``output`` flags to
+     control which post-processing artefacts are generated.
+   - ``gensec analyze`` reads ``materials``, ``section``, ``demands``
+     and ``combinations`` only.  The ``output`` block is **ignored**
+     entirely: no resistance domain, no diagrams, no η flags.
+
+   If your goal is only force decomposition (which material carries
+   how much force for each combination), ``gensec analyze`` is the
+   right command — you don't need to touch the ``output`` block.
 
 
 ``materials`` block
@@ -489,3 +503,88 @@ verification are needed.
    For sections where the 3-D domain is 2-D (no My data),
    ``eta_2D`` and ``eta_path_2D`` are automatically disabled with an
    informative message.
+
+
+Mandatory vs. optional generation (``gensec run``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When running ``gensec run``, some computations are **always**
+performed because the verification engine depends on them:
+
++----------------------------------+----------+------------------------------------------+
+| Computation                      | Skip?    | Why                                      |
++==================================+==========+==========================================+
+| N-Mx diagram                     | **No**   | Domain boundary, always needed           |
++----------------------------------+----------+------------------------------------------+
+| N-My diagram (biaxial only)      | **No**   | Biaxial domain boundary                  |
++----------------------------------+----------+------------------------------------------+
+| 3-D surface (biaxial only)       | **No**   | ConvexHull for VerificationEngine        |
++----------------------------------+----------+------------------------------------------+
+| Moment-curvature (M-χ)           | Yes      | ``generate_moment_curvature: false``     |
++----------------------------------+----------+------------------------------------------+
+| Polar ductility                  | Yes      | ``generate_polar_ductility: false``      |
++----------------------------------+----------+------------------------------------------+
+| 3-D M-χ-N surface                | Yes      | ``generate_3d_moment_curvature: false``  |
++----------------------------------+----------+------------------------------------------+
+| Mx-My contour diagrams           | Yes      | ``generate_mx_my: false`` (default off)  |
++----------------------------------+----------+------------------------------------------+
+| 3-D surface CSV/JSON export      | Yes      | ``generate_3d_surface: false`` (dflt off)|
++----------------------------------+----------+------------------------------------------+
+
+To skip domain generation entirely, use ``gensec analyze`` instead.
+
+
+Minimal fast verification
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For the fastest possible ``gensec run`` (domain + verification,
+no moment-curvature diagrams):
+
+.. code-block:: yaml
+
+   output:
+     # Only the two default η metrics — no optional ones.
+     eta_norm: true
+     eta_norm_beta: true
+
+     # Disable all expensive optional generators.
+     generate_moment_curvature: false
+     generate_polar_ductility: false
+     generate_3d_moment_curvature: false
+     generate_mx_my: false
+
+This produces:
+
+- N-Mx and N-My interaction diagrams (CSV + JSON + plot)
+- 3-D resistance surface (in memory, for verification)
+- Verification results with ``eta_norm`` and ``eta_norm_beta``
+- Per-fiber stress states at each demand
+
+Estimated speedup vs. full defaults: **3–10×** depending on
+section complexity and number of N levels.
+
+
+Force decomposition only (``gensec analyze``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For the lightest possible analysis — no domain, no diagrams, just
+per-material force breakdown:
+
+.. code-block:: bash
+
+   uv run gensec analyze input.yaml --output-dir results
+
+The ``output`` block in the YAML file is **ignored**.  Output:
+
+- ``analysis_results.json`` — per-demand and per-combination force
+  decomposition (bulk zones, rebar groups, per-bar detail)
+
+Add ``--eta`` to also compute on-demand :math:`\eta` via
+ray–bisection (~15–25 equilibrium solves per demand):
+
+.. code-block:: bash
+
+   uv run gensec analyze input.yaml --output-dir results --eta
+
+See :ref:`architecture_solver` for a comparison of the two
+pipelines.

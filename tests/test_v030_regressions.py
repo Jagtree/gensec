@@ -17,7 +17,52 @@ full YAML pipeline, to keep the failure modes localised.
 """
 import unittest
 import numpy as np
+from matplotlib.path import Path
+from shapely.geometry import Point
+from gensec.output._polydraw import polygon_to_path, _signed_area
 
+class TestOutlineHoleCarving(unittest.TestCase):
+    """
+    Section outline rendering must carve interior voids.
+
+    Regression for the solid-centre bug: ``Polygon.difference``
+    returned a clockwise exterior, and the legacy renderer assumed
+    counter-clockwise, so both rings ended up co-oriented and the
+    non-zero winding rule filled the hole.
+    """
+
+    @staticmethod
+    def _ring_signed_areas(path):
+        """Split a compound Path into rings; return their signed areas."""
+        from matplotlib.path import Path
+        from gensec.output._polydraw import _signed_area
+        areas, cur = [], []
+        for (x, y), code in zip(path.vertices, path.codes):
+            if code == Path.MOVETO:
+                if cur:
+                    areas.append(_signed_area(np.asarray(cur)))
+                cur = [(x, y)]
+            elif code == Path.LINETO:
+                cur.append((x, y))
+            elif code == Path.CLOSEPOLY:
+                if cur:
+                    areas.append(_signed_area(np.asarray(cur)))
+                    cur = []
+        if cur:
+            areas.append(_signed_area(np.asarray(cur)))
+        return areas
+
+    def test_annulus_hole_is_carved(self):
+        """Exterior must wind CCW and the hole CW."""
+        from shapely.geometry import Point
+        from gensec.output._polydraw import polygon_to_path
+        cx = cy = 600.0
+        annulus = (Point(cx, cy).buffer(600.0, resolution=64)
+                   .difference(Point(cx, cy).buffer(400.0, resolution=64)))
+        areas = self._ring_signed_areas(polygon_to_path(annulus))
+        self.assertEqual(len(areas), 2)
+        self.assertGreater(areas[0], 0.0)   # exterior CCW
+        self.assertLess(areas[1], 0.0)      # hole CW
 
 # ===========================================================================
 #  A1 — Symmetry of the uniaxial N-M cloud for centred sections

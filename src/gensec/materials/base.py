@@ -57,7 +57,11 @@ class Material(ABC):
         Most compressive admissible strain (typically negative).
     eps_max : float
         Most tensile admissible strain (typically positive).
+    name : str
+        Human-readable identifier set by the YAML loader.
     """
+
+    name: str = ""
 
     @property
     @abstractmethod

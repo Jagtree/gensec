@@ -52,6 +52,18 @@ from .geometry_plot import (
     write_geometry_report,
 )
 
+from .summary import (
+    governing_eta,
+    rank_results,
+    top_k_results,
+    compute_summary_stats,
+    print_demand_summary,
+    print_combination_summary,
+    print_envelope_summary,
+    build_verification_summary,
+    select_demands_for_fiber_details,
+)
+
 __all__ = [
     "print_section_info", "print_fiber_results",
     "plot_nm_diagram", "plot_stress_profile", "plot_mx_my_diagram",
@@ -72,6 +84,15 @@ __all__ = [
     "plot_polar_ductility_refactored",
     "plot_moment_curvature_surface",
     "plot_from_json",
+    "governing_eta",
+    "rank_results",
+    "top_k_results",
+    "compute_summary_stats",
+    "print_demand_summary",
+    "print_combination_summary",
+    "print_envelope_summary",
+    "build_verification_summary",
+    "select_demands_for_fiber_details",
     "plot_section_properties",
     "print_section_properties",
     "write_section_report",

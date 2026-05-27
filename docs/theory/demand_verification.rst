@@ -410,3 +410,70 @@ stress/strain state at every fiber and rebar:
 - :meth:`FiberSolver.get_fiber_results` — stress/strain extraction.
 
 Results are exported to CSV and plotted on the section geometry.
+
+
+On-demand :math:`\eta` (without domain generation)
+----------------------------------------------------
+
+The :class:`~gensec.solver.analysis.AnalysisEngine` provides an
+alternative way to compute :math:`\eta` that does **not** require
+pre-computing the full resistance domain.
+
+Instead of building a ConvexHull and ray-casting against it, the
+engine shoots a ray from the base point through the demand and
+finds the boundary via **bisection** on
+:meth:`~gensec.solver.FiberSolver.solve_equilibrium`:
+
+.. math::
+
+   \eta = \frac{|\mathbf{D} - \mathbf{B}|}{|\mathbf{R} - \mathbf{B}|}
+
+where :math:`\mathbf{D}` is the demand, :math:`\mathbf{B}` the base
+point, and :math:`\mathbf{R}` the domain boundary along the ray.
+
+A point :math:`\mathbf{P}` is classified as *inside the domain* when
+two conditions hold simultaneously:
+
+1. The equilibrium solver **converges** at :math:`\mathbf{P}`.
+2. All fiber strains in the converged state satisfy
+
+   .. math::
+
+      \varepsilon_{\min}^{(k)} \le \varepsilon_i
+      \le \varepsilon_{\max}^{(k)}
+
+   for each fiber :math:`i` with material :math:`k`.
+
+The boundary is found by exponential scan (bracketing) followed by
+bisection (~30 iterations, relative precision ~:math:`10^{-9}`).
+
+**Convexity guarantee.**  The resistance domain of RC sections under
+the parabola-rectangle law is convex.  When the base point
+:math:`\mathbf{B}` is interior (true for the origin and any
+previously verified staged point), the ray crosses the boundary
+exactly once, so bisection converges monotonically.
+
+**Computational cost.**  Each bisection step requires one
+``solve_equilibrium`` call (~5–15 Newton iterations).  Total cost
+per demand: ~15–25 equilibrium solves.  For comparison, the full
+3-D domain requires ~7 000–15 000 integrations.
+
+**When to use which.**
+
++----------------------------+-----------------------------------------+
+| Scenario                   | Recommended pipeline                    |
++============================+=========================================+
+| Few demands, no domain     | ``gensec analyze --eta``                |
+| plots needed               | (on-demand :math:`\eta`)                |
++----------------------------+-----------------------------------------+
+| Many demands, domain plots | ``gensec run``                          |
+| or M-χ curves needed       | (full domain pipeline)                  |
++----------------------------+-----------------------------------------+
+| Force decomposition only   | ``gensec analyze``                      |
+| (no :math:`\eta`)          | (no ``--eta`` flag)                     |
++----------------------------+-----------------------------------------+
+
+The on-demand :math:`\eta` is a scalar ray-cast metric equivalent to
+``eta_norm_ray`` in the domain pipeline.  The normalised metrics
+(``eta_norm``, ``eta_norm_beta``) require the full hull and are only
+available via ``gensec run``.

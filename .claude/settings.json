@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m pytest tests/ -q --tb=short)"
+      "Bash(python -m pytest tests/ -q --tb=short)",
+      "Bash(python -c \"from src.gensec.output.summary import print_demand_summary, build_verification_summary, select_demands_for_fiber_details; print\\('summary OK'\\)\")",
+      "Bash(python -c \"from src.gensec.output import print_demand_summary, rank_results; print\\('output __init__ OK'\\)\")",
+      "Bash(python -c \"from src.gensec.cli import main; print\\('cli OK'\\)\")",
+      "Bash(python -c \"from src.gensec.io_yaml import _parse_output_flags; r = _parse_output_flags\\({}\\); print\\(r['verification_top_k'], r['fiber_details_top_k']\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/test_analysis.py -v)"
     ]
   }
 }

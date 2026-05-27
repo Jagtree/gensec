@@ -11,18 +11,41 @@ the software mechanism.
 
 
 
-Overview: three layers
+Overview: two pipelines
 -----------------------
 
-The solver pipeline has three layers, each building on the previous:
+GenSec provides two pipelines built on the same
+:class:`~gensec.solver.FiberSolver`:
 
 .. mermaid::
 
-   flowchart LR
-       A["Layer 1<br/>FiberSolver<br/><i>strain plane → forces</i>"]
-       B["Layer 2<br/>NMDiagram<br/><i>scan configurations → domain</i>"]
-       C["Layer 3<br/>VerificationEngine<br/><i>domain + demands → η</i>"]
-       A --> B --> C
+   flowchart TD
+       FS["FiberSolver<br/><i>strain plane → forces</i>"]
+
+       subgraph domain["Domain pipeline (gensec run)"]
+           NM["NMDiagram<br/><i>scan → domain</i>"]
+           VE["VerificationEngine<br/><i>domain + demands → η</i>"]
+       end
+
+       subgraph analysis["Analysis pipeline (gensec analyze)"]
+           AE["AnalysisEngine<br/><i>solve + decompose</i>"]
+       end
+
+       FS --> NM --> VE
+       FS --> AE
+
+**Domain pipeline** (``gensec run``): generates the full resistance
+domain first, then verifies demands against it.  Essential when the
+domain itself is needed (plots, CSV export, moment-curvature
+analysis).  Cost: thousands of integrations.
+
+**Analysis pipeline** (``gensec analyze``): solves equilibrium
+directly for each demand, skipping domain generation entirely.
+Returns per-material force decomposition and (optionally) on-demand
+:math:`\eta`.  Cost: ~5–25 solves per demand — orders of magnitude
+lighter.
+
+Both pipelines build on three solver layers:
 
 - **Layer 1** (FiberSolver): the *direct problem* — given a strain
   plane, compute the resulting (N, Mx, My).  Also solves the *inverse
@@ -31,6 +54,8 @@ The solver pipeline has three layers, each building on the previous:
   strain configurations to build the resistance domain.
 - **Layer 3** (VerificationEngine): compares demand points against
   the domain boundary and computes utilization ratios.
+
+The analysis pipeline uses only Layer 1.
 
 
 Layer 1: FiberSolver
@@ -310,6 +335,97 @@ seismic stage is: *"the gravity load is certain; how much of the
 seismic capacity is being used?"*  This is the relevant question for
 seismic design, because the gravity load does not vary — only the
 seismic action is the "variable" that might exhaust capacity.
+
+
+Analysis pipeline: AnalysisEngine
+-----------------------------------
+
+The :class:`~gensec.solver.analysis.AnalysisEngine` lives in
+``solver/analysis.py``.  It is a lightweight alternative to the full
+domain-based pipeline: it operates directly on
+:meth:`~gensec.solver.FiberSolver.solve_equilibrium` without
+generating the resistance domain.
+
+
+Force decomposition
+~~~~~~~~~~~~~~~~~~~~
+
+Given a load state :math:`(N, M_x, M_y)`:
+
+.. mermaid::
+
+   flowchart TD
+       D["Input: N, Mx, My"]
+       SE["solve_equilibrium<br/>→ (ε₀, χₓ, χᵧ)"]
+       SF["strain_field<br/>→ strains at every fiber"]
+       BG["Group by material:<br/>bulk zones, rebar groups"]
+       SUM["Sum per group:<br/>Nₖ = Σ σᵢ·Aᵢ<br/>Mxₖ = Σ σᵢ·Aᵢ·lyᵢ<br/>Myₖ = −Σ σᵢ·Aᵢ·lxᵢ"]
+       OUT["Output: force per component"]
+
+       D --> SE --> SF --> BG --> SUM --> OUT
+
+The grouping follows the same material structure as the integrator:
+``_bulk_groups`` for concrete zones, ``_rebar_groups`` for
+reinforcement.  Each rebar group includes per-bar detail (strain,
+net stress, force).  Future element types (CFRP strips, tendons)
+follow the same aggregation scheme.
+
+
+On-demand :math:`\eta`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The analysis engine can compute :math:`\eta` without a pre-computed
+domain using ray–bisection:
+
+.. mermaid::
+
+   flowchart TD
+       D["Demand (N, Mx, My)"]
+       RAY["Define ray:<br/>base → demand → beyond"]
+       SCAN["Exponential scan:<br/>t = 1, 2, 4, 8, ..."]
+       CHECK{"solve_equilibrium converges<br/>AND strains within limits?"}
+       BISECT["Bisection on t:<br/>~30 iterations"]
+       ETA["η = 1 / t_boundary"]
+
+       D --> RAY --> SCAN --> CHECK
+       CHECK -- Yes --> SCAN
+       CHECK -- No --> BISECT --> ETA
+
+A point is *feasible* (inside the domain) if
+:meth:`~gensec.solver.FiberSolver.solve_equilibrium` converges
+**and** all fiber strains satisfy
+
+.. math::
+
+   \varepsilon_{\min}^{(k)} \le \varepsilon_i
+   \le \varepsilon_{\max}^{(k)}
+
+where the limits are those of the material :math:`k` assigned to
+fiber :math:`i`.
+
+The domain is convex, so bisection along any ray from an interior
+point converges monotonically.  Typical cost: 15–25 equilibrium
+solves per demand (vs. thousands of integrations for the full
+domain).
+
+
+Material naming
+~~~~~~~~~~~~~~~~
+
+Each :class:`~gensec.materials.base.Material` has a ``name``
+attribute set by the YAML loader to the key used in the
+``materials`` block.  The analysis engine uses this for
+human-readable output:
+
+.. code-block:: yaml
+
+   materials:
+     C25_30:           # → this becomes Material.name
+       type: concrete_ec2_gen1
+       class: C25/30
+
+For API-constructed materials without a ``name``, the class name
+(e.g. ``Concrete``, ``Steel``) is used as fallback.
 
 
 Material constitutive laws

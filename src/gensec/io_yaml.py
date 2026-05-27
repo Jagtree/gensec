@@ -290,7 +290,9 @@ def load_yaml(filepath):
     # ---- Materials ----
     materials = {}
     for mat_name, mat_spec in data.get("materials", {}).items():
-        materials[mat_name] = _build_material(mat_name, mat_spec)
+        mat = _build_material(mat_name, mat_spec)
+        mat.name = mat_name
+        materials[mat_name] = mat
 
     # ---- Section ----
     sec_spec = data["section"]
@@ -620,6 +622,10 @@ def _parse_output_flags(output_spec):
     flags.setdefault("eta_path_norm_beta", False)  # composite ratio along stage segment
     flags.setdefault("eta_path_2D", False)
     flags.setdefault("delta_N_tol", 0.03)
+
+    # Tiered reporting defaults.
+    flags.setdefault("verification_top_k", 10)
+    flags.setdefault("fiber_details_top_k", 5)
 
     # Domain generation defaults.
     flags.setdefault("generate_mx_my", False)

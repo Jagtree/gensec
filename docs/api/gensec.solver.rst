@@ -43,6 +43,14 @@ Demand checker
    :show-inheritance:
 
 
+Analysis engine
+----------------
+
+.. automodule:: gensec.solver.analysis
+   :members:
+   :show-inheritance:
+
+
 Package-level exports
 ----------------------
 

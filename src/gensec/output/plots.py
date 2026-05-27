@@ -31,11 +31,11 @@ Supports both rectangular and arbitrary polygon sections via the
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import PathPatch, Circle, Rectangle
+from matplotlib.patches import Circle, Rectangle
 from matplotlib.path import Path
 from matplotlib.colors import TwoSlopeNorm
 from scipy.spatial import ConvexHull
-
+from ._polydraw import draw_polygon
 
 # ==================================================================
 #  Section outline helper (used by all section-based plots)
@@ -43,10 +43,11 @@ from scipy.spatial import ConvexHull
 
 def _draw_polygon_outline(ax, sec, **kwargs):
     r"""
-    Draw the section outline as a matplotlib path patch.
+    Draw the section outline as a Matplotlib patch.
 
-    Correctly renders holes (interior rings) using compound paths.
-    Falls back to a rectangle if no ``polygon`` attribute exists.
+    Delegates hole-aware rendering to
+    :func:`gensec.output._polydraw.draw_polygon`. Falls back to a
+    rectangle if the section exposes no ``polygon`` attribute.
 
     Parameters
     ----------
@@ -56,49 +57,14 @@ def _draw_polygon_outline(ax, sec, **kwargs):
         Overrides for :class:`~matplotlib.patches.PathPatch`
         (``facecolor``, ``edgecolor``, ``linewidth``, …).
     """
+    defaults = dict(linewidth=2, edgecolor='black', facecolor='#E8E8E8')
+    defaults.update(kwargs)
+
     poly = getattr(sec, 'polygon', None)
-
     if poly is not None:
-        verts = []
-        codes = []
-
-        # Exterior ring — must be CCW for matplotlib even-odd fill.
-        # Shapely guarantees CCW for exteriors.
-        ext = np.array(poly.exterior.coords)
-        n_ext = len(ext)
-        verts.extend(ext.tolist())
-        codes.append(Path.MOVETO)
-        codes.extend([Path.LINETO] * (n_ext - 2))
-        codes.append(Path.CLOSEPOLY)
-
-        # Interior rings (holes) — must be CW (opposite to exterior)
-        # for the even-odd fill rule to carve them out.
-        for interior in poly.interiors:
-            ring = np.array(interior.coords)
-            # Ensure CW winding: if signed area > 0, ring is CCW → reverse
-            signed_area = np.sum(
-                ring[:-1, 0] * ring[1:, 1] - ring[1:, 0] * ring[:-1, 1]
-            ) / 2
-            if signed_area > 0:
-                ring = ring[::-1]
-            n_ring = len(ring)
-            verts.extend(ring.tolist())
-            codes.append(Path.MOVETO)
-            codes.extend([Path.LINETO] * (n_ring - 2))
-            codes.append(Path.CLOSEPOLY)
-
-        path = Path(verts, codes)
-        defaults = dict(linewidth=2, edgecolor='black',
-                        facecolor='#E8E8E8')
-        defaults.update(kwargs)
-        patch = PathPatch(path, **defaults)
-        ax.add_patch(patch)
+        draw_polygon(ax, poly, **defaults)
     else:
-        defaults = dict(linewidth=2, edgecolor='black',
-                        facecolor='#E8E8E8')
-        defaults.update(kwargs)
-        rect = Rectangle((0, 0), sec.B, sec.H, **defaults)
-        ax.add_patch(rect)
+        ax.add_patch(Rectangle((0, 0), sec.B, sec.H, **defaults))
 
 
 def _section_axis_limits(ax, sec):

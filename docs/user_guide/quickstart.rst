@@ -7,6 +7,11 @@ Quick start
 This page walks through the two main ways to use GenSec: the
 **command-line interface** (YAML-driven) and the **Python API**.
 
+GenSec has two CLI commands:
+
+- ``gensec run`` — full domain + verification pipeline
+- ``gensec analyze`` — lightweight force decomposition, no domain needed
+
 
 Command-line workflow
 ---------------------
@@ -47,6 +52,32 @@ Command-line workflow
    | ``surface_3d.png``            | 3-D resistance surface (if               |
    |                               | ``generate_3d_surface: true``)           |
    +-------------------------------+------------------------------------------+
+
+
+Lightweight analysis (force decomposition)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When you only need the internal force distribution — without
+generating the full resistance domain — use ``gensec analyze``:
+
+.. code-block:: bash
+
+   uv run gensec analyze input.yaml --output-dir results
+
+This skips diagram generation (no NMDiagram, no ConvexHull) and
+goes straight to solving equilibrium for each demand and
+combination.  Output is a per-material force decomposition, exported
+to ``analysis_results.json``.
+
+To also compute on-demand :math:`\eta` via ray–bisection (~15–25
+equilibrium solves per demand):
+
+.. code-block:: bash
+
+   uv run gensec analyze input.yaml --output-dir results --eta
+
+See :ref:`architecture_solver` for a pipeline comparison, and
+:doc:`yaml_reference` for which YAML flags apply.
 
 
 Python API workflow
@@ -177,3 +208,24 @@ Use :class:`~gensec.materials.TabulatedMaterial` for any arbitrary
 Set ``embedded=False`` for elements external to the bulk material so that
 GenSec does not subtract the displaced concrete (see
 :doc:`sign_conventions`).
+
+
+Force decomposition (Python API)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from gensec.solver.analysis import AnalysisEngine
+
+   solver = FiberSolver(section)
+   engine = AnalysisEngine(solver)
+
+   # Decompose forces for a single demand
+   result = engine.analyze(N=-1500e3, Mx=200e6)
+   for comp in result["components"]:
+       print(f"{comp['type']:>6s}  {comp['material_name']:>10s}"
+             f"  N = {comp['N_kN']:8.1f} kN")
+
+   # On-demand η (no domain needed)
+   eta_result = engine.compute_eta(N=-1500e3, Mx=200e6)
+   print(f"η = {eta_result['eta']:.4f}")

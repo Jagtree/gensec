@@ -487,3 +487,83 @@ def export_mx_my_csv(mx_my_data, filepath):
         for mx, my in zip(mx_my_data["Mx_kNm"],
                           mx_my_data["My_kNm"]):
             w.writerow([f"{mx:.6f}", f"{my:.6f}"])
+
+
+def export_analysis_json(demand_results, combination_results,
+                         filepath):
+    r"""
+    Export analysis (force decomposition) results to JSON.
+
+    Parameters
+    ----------
+    demand_results : list of dict
+        Output of :meth:`AnalysisEngine.analyze_demands`.
+    combination_results : list of dict
+        Output of :meth:`AnalysisEngine.analyze_combinations`.
+    filepath : str
+        Output file path.
+    """
+    def _clean(obj):
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, dict):
+            return {k: _clean(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_clean(v) for v in obj]
+        return obj
+
+    data = {}
+    if demand_results:
+        data["demands"] = _clean(demand_results)
+    if combination_results:
+        data["combinations"] = _clean(combination_results)
+
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def export_analysis_csv(demand_results, filepath):
+    r"""
+    Export demand analysis summary to CSV.
+
+    One row per component per demand, with columns for material
+    type, material name, N, Mx, My.
+
+    Parameters
+    ----------
+    demand_results : list of dict
+        Output of :meth:`AnalysisEngine.analyze_demands`.
+    filepath : str
+    """
+    with open(filepath, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow([
+            "demand", "converged", "strains_ok",
+            "eps0", "chi_x", "chi_y",
+            "comp_type", "material_name", "zone",
+            "N_kN", "Mx_kNm", "My_kNm",
+        ])
+        for dr in demand_results:
+            name = dr.get("name", "unnamed")
+            conv = dr.get("converged", False)
+            sok = dr.get("strains_ok", False)
+            ss = dr.get("strain_state", {})
+            for comp in dr.get("components", []):
+                w.writerow([
+                    name,
+                    conv,
+                    sok,
+                    f"{ss.get('eps0', 0):.10f}",
+                    f"{ss.get('chi_x', 0):.10e}",
+                    f"{ss.get('chi_y', 0):.10e}",
+                    comp["type"],
+                    comp["material_name"],
+                    comp.get("zone", ""),
+                    f"{comp['N_kN']:.4f}",
+                    f"{comp['Mx_kNm']:.6f}",
+                    f"{comp['My_kNm']:.6f}",
+                ])

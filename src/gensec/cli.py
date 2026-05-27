@@ -56,172 +56,17 @@ from .output import (
     export_moment_curvature_json, export_moment_curvature_csv,
     export_mx_my_json, export_mx_my_csv,
 )
+from .output.summary import (
+    print_demand_summary,
+    print_combination_summary,
+    print_envelope_summary,
+    build_verification_summary,
+    select_demands_for_fiber_details,
+    rank_results as _rank_results,
+)
 
 
-# ==================================================================
-#  Verification table printers
-# ==================================================================
-
-def _eta_columns(results):
-    """Detect which eta columns are present in results."""
-    cols = []
-    for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D"):
-        if any(key in r for r in results):
-            cols.append(key)
-    return cols
-
-
-def _print_demand_table(title, results):
-    """
-    Print a formatted demand verification table.
-
-    Adapts columns to whichever eta types are present.
-
-    Parameters
-    ----------
-    title : str
-    results : list of dict
-    """
-    if not results:
-        return
-
-    eta_cols = _eta_columns(results)
-    has_my = any(r.get("My_kNm", 0) != 0 for r in results)
-
-    print(f"\n{'=' * 80}")
-    print(f"  {title}")
-    print(f"{'=' * 80}")
-
-    # Build header.
-    hdr = f"  {'Name':>20} {'N[kN]':>8} {'Mx[kNm]':>9}"
-    if has_my:
-        hdr += f" {'My[kNm]':>9}"
-    for ec in eta_cols:
-        hdr += f" {ec:>8}"
-    hdr += f" {'Status':>8}"
-    print(hdr)
-    print("  " + "-" * (len(hdr) - 2))
-
-    all_ok = True
-    for r in results:
-        status = "OK" if r["verified"] else "FAIL"
-        if not r["verified"]:
-            all_ok = False
-        line = (f"  {r['name']:>20} {r['N_kN']:>8.1f}"
-                f" {r['Mx_kNm']:>9.2f}")
-        if has_my:
-            line += f" {r.get('My_kNm', 0):>9.2f}"
-        for ec in eta_cols:
-            val = r.get(ec)
-            if val is not None:
-                line += f" {val:>8.4f}"
-            else:
-                line += f" {'---':>8}"
-        line += f" {status:>8}"
-        print(line)
-
-    print("  " + "-" * (len(hdr) - 2))
-    if all_ok:
-        print("  All demands VERIFIED.")
-    else:
-        n_fail = sum(1 for r in results if not r["verified"])
-        print(f"  *** {n_fail} demand(s) NOT VERIFIED ***")
-    print("=" * 80)
-
-
-def _print_combination_table(title, combo_results):
-    """
-    Print combination verification summary.
-
-    For staged combinations, prints a sub-table per stage.
-
-    Parameters
-    ----------
-    title : str
-    combo_results : list of dict
-    """
-    if not combo_results:
-        return
-
-    print(f"\n{'=' * 80}")
-    print(f"  {title}")
-    print(f"{'=' * 80}")
-
-    for cr in combo_results:
-        name = cr["name"]
-        ctype = cr.get("type", "simple")
-        res = cr.get("resultant", {})
-        eta_gov = cr.get("eta_governing", cr.get("eta_norm", "---"))
-        status = "OK" if cr.get("verified", False) else "FAIL"
-
-        print(f"\n  -- {name} ({ctype}) --")
-        print(f"     Resultant: N={res.get('N_kN',0):.1f} kN,"
-              f" Mx={res.get('Mx_kNm',0):.2f} kNm,"
-              f" My={res.get('My_kNm',0):.2f} kNm")
-
-        if "stages" in cr:
-            # Detect which etas appear in stages.
-            stage_etas = []
-            for k in ("eta_norm", "eta_norm_beta", "eta_norm_ray",
-                      "eta_2D", "eta_path_norm_ray",
-                      "eta_path_norm_beta", "eta_path_2D"):
-                if any(k in s and s[k] is not None
-                       for s in cr["stages"]):
-                    stage_etas.append(k)
-
-            hdr = (f"     {'Stage':>20} {'N[kN]':>8} {'Mx':>9}"
-                   f" {'My':>9}")
-            for se in stage_etas:
-                hdr += f" {se:>12}"
-            print(hdr)
-            print("     " + "-" * (len(hdr) - 5))
-
-            for s in cr["stages"]:
-                cum = s.get("cumulative", {})
-                line = (f"     {s['name']:>20}"
-                        f" {cum.get('N_kN',0):>8.1f}"
-                        f" {cum.get('Mx_kNm',0):>9.2f}"
-                        f" {cum.get('My_kNm',0):>9.2f}")
-                for se in stage_etas:
-                    val = s.get(se)
-                    if val is not None:
-                        line += f" {val:>12.4f}"
-                    else:
-                        line += f" {'---':>12}"
-                print(line)
-                if "warning" in s:
-                    print(f"       WARNING: {s['warning']}")
-
-        print(f"     eta_governing = {eta_gov}  ->  {status}")
-
-    print(f"\n{'=' * 80}")
-
-
-def _print_envelope_table(title, envelope_results):
-    """
-    Print envelope verification summary.
-
-    Parameters
-    ----------
-    title : str
-    envelope_results : list of dict
-    """
-    if not envelope_results:
-        return
-
-    print(f"\n{'=' * 80}")
-    print(f"  {title}")
-    print(f"{'=' * 80}")
-    print(f"  {'Envelope':>25} {'eta_max':>8} {'Governing':>25}"
-          f" {'Status':>8}")
-    print("  " + "-" * 70)
-
-    for er in envelope_results:
-        status = "OK" if er["verified"] else "FAIL"
-        print(f"  {er['name']:>25} {er['eta_max']:>8.4f}"
-              f" {er['governing_member']:>25} {status:>8}")
-
-    print("=" * 80)
+# Legacy table printers removed — now in output.summary module.
 
 
 # ==================================================================
@@ -257,12 +102,26 @@ def main(argv=None):
     p_plot.add_argument("--dpi", type=int, default=150,
                         help="Plot resolution (default: 150).")
 
+    # --- ``gensec analyze`` ---
+    p_analyze = sub.add_parser(
+        "analyze",
+        help="Force decomposition without domain generation.")
+    p_analyze.add_argument("input_file",
+                           help="YAML input file.")
+    p_analyze.add_argument("--output-dir", type=str, default=".",
+                           help="Output directory (default: cwd).")
+    p_analyze.add_argument("--eta", action="store_true",
+                           help="Also compute on-demand eta for "
+                                "each demand / combination.")
+
     args = parser.parse_args(argv)
 
     if args.command == "run":
         _run(args)
     elif args.command == "plot":
         _plot(args)
+    elif args.command == "analyze":
+        _analyze(args)
     else:
         # No subcommand: if a positional arg looks like a YAML,
         # treat as ``run`` for backward compat during development.
@@ -334,6 +193,10 @@ def _run(args):
     n_levels_explicit = output_opts.get("n_levels_values", [])
     n_angles_mx_my = int(output_opts.get("n_angles_mx_my", 72))
 
+    # Tiered reporting parameters.
+    verification_top_k = int(output_opts.get("verification_top_k", 10))
+    fiber_details_top_k = int(output_opts.get("fiber_details_top_k", 5))
+
     print_section_info(section)
 
     # --- Solver ---
@@ -402,7 +265,7 @@ def _run(args):
     demand_results = []
     if demands:
         demand_results = engine.check_demands(demands)
-        _print_demand_table("DEMAND VERIFICATION", demand_results)
+        print_demand_summary(demand_results, top_k=verification_top_k)
 
         export_demand_results_csv(
             demand_results,
@@ -425,8 +288,8 @@ def _run(args):
                 print(f"  ERROR in combination "
                       f"'{combo['name']}': {exc}")
 
-        _print_combination_table("COMBINATION VERIFICATION",
-                                 combination_results)
+        print_combination_summary(combination_results,
+                                  top_k=verification_top_k)
 
         export_combination_results_json(
             combination_results,
@@ -445,18 +308,26 @@ def _run(args):
                 print(f"  ERROR in envelope "
                       f"'{env['name']}': {exc}")
 
-        _print_envelope_table("ENVELOPE VERIFICATION",
-                              envelope_results)
+        print_envelope_summary(envelope_results,
+                               top_k=verification_top_k)
 
         export_envelope_results_json(
             envelope_results,
             os.path.join(outdir, "envelope_summary.json"))
 
-    # --- Unified verification export ---
+    # --- Unified verification export (with statistics) ---
     if demand_results or combination_results or envelope_results:
         export_verification_json(
             demand_results, combination_results, envelope_results,
             os.path.join(outdir, "verification_summary.json"))
+
+        import json
+        summary = build_verification_summary(
+            demand_results, combination_results, envelope_results)
+        with open(os.path.join(outdir,
+                               "verification_statistics.json"),
+                  'w') as f:
+            json.dump(summary["statistics"], f, indent=2)
 
     # ==============================================================
     #  Per-demand fiber details and state plots
@@ -470,12 +341,29 @@ def _run(args):
         plt.close(fig_geom)
         print(f"\n  Exported: {p}")
 
-        print("\n  Per-demand details:")
+        # Build demand_plot for all demands (N-M diagram annotation).
         for d in demands:
+            demand_plot.append(
+                (d["N"] / 1e3, d["Mx"] / 1e6, d["name"]))
+
+        # Select which demands get full fiber details.
+        fiber_names = set(select_demands_for_fiber_details(
+            demand_results, top_k=fiber_details_top_k))
+        n_skipped = len(demands) - len(fiber_names)
+
+        if n_skipped > 0:
+            print(f"\n  Fiber details for top {len(fiber_names)} "
+                  f"demands (by eta); {n_skipped} skipped.")
+        else:
+            print("\n  Per-demand details:")
+
+        for d in demands:
+            label = d["name"]
+            if label not in fiber_names:
+                continue
+
             N_d, Mx_d, My_d = d["N"], d["Mx"], d["My"]
             sol = solver.solve_equilibrium(N_d, Mx_d, My_d)
-            label = d["name"]
-            demand_plot.append((N_d / 1e3, Mx_d / 1e6, label))
 
             if sol["converged"]:
                 fr = solver.get_fiber_results(
@@ -511,7 +399,18 @@ def _run(args):
 
     # --- Demand utilization heatmap ---
     if demand_results:
-        fig_hm = plot_demand_heatmap(demand_results)
+        # For large result sets, plot only the top-K in the heatmap
+        # (the bar chart becomes unreadable beyond ~30 items).
+        _HEATMAP_MAX = max(verification_top_k, 30)
+        if len(demand_results) > _HEATMAP_MAX:
+            hm_data = _rank_results(demand_results, "demand")[:_HEATMAP_MAX]
+            hm_title = (f"Demand Utilization "
+                        f"(top {_HEATMAP_MAX} of "
+                        f"{len(demand_results)})")
+        else:
+            hm_data = demand_results
+            hm_title = ""
+        fig_hm = plot_demand_heatmap(hm_data, title=hm_title)
         p = os.path.join(outdir, "demand_utilization.png")
         fig_hm.savefig(p, dpi=150)
         plt.close(fig_hm)
@@ -711,6 +610,180 @@ def _run(args):
         print(f"    {fn:45s}  {size:>8,} bytes")
     print("=" * 80)
     print("\nDone.")
+
+
+def _analyze(args):
+    r"""
+    ``gensec analyze`` subcommand: lightweight force decomposition.
+
+    Solves equilibrium for each demand and combination and reports
+    per-material force contributions.  Does **not** generate the
+    resistance domain (no NMDiagram, no ConvexHull).
+    """
+    outdir = args.output_dir
+    os.makedirs(outdir, exist_ok=True)
+
+    print(f"\nLoading: {args.input_file}")
+    data = load_yaml(args.input_file)
+    section = data["section"]
+    demands = data["demands"]
+    combinations = data.get("combinations", [])
+
+    print_section_info(section)
+
+    solver = FiberSolver(section)
+    from .solver.analysis import AnalysisEngine
+    engine = AnalysisEngine(solver)
+
+    demand_db = {d["name"]: d for d in demands}
+
+    # ==============================================================
+    #  1. Demand analysis
+    # ==============================================================
+    demand_results = []
+    if demands:
+        print(f"\nAnalyzing {len(demands)} demand(s)...")
+        demand_results = engine.analyze_demands(demands)
+        _print_analysis_table("FORCE DECOMPOSITION — DEMANDS",
+                              demand_results)
+
+        if args.eta:
+            print("\nComputing on-demand η...")
+            for dr in demand_results:
+                if dr["converged"]:
+                    eta_r = engine.compute_eta(
+                        dr["total"]["N"],
+                        dr["total"]["Mx"],
+                        dr["total"]["My"])
+                    dr["eta"] = eta_r["eta"]
+                    dr["demand_inside"] = eta_r["demand_inside"]
+                    print(f"  {dr['name']:>20s}  η = {eta_r['eta']:.4f}"
+                          f"  inside={eta_r['demand_inside']}")
+                else:
+                    dr["eta"] = None
+                    print(f"  {dr['name']:>20s}  NOT CONVERGED")
+
+    # ==============================================================
+    #  2. Combination analysis
+    # ==============================================================
+    combination_results = []
+    if combinations:
+        print(f"\nAnalyzing {len(combinations)} combination(s)...")
+        combination_results = engine.analyze_combinations(
+            combinations, demand_db)
+        for cr in combination_results:
+            if cr.get("type") == "staged":
+                _print_staged_analysis(cr)
+            else:
+                _print_analysis_table(
+                    f"FORCE DECOMPOSITION — {cr['name']}",
+                    [cr])
+
+            if args.eta and cr.get("converged", False):
+                total = cr.get("total", cr.get("resultant", {}))
+                eta_r = engine.compute_eta(
+                    total.get("N", 0),
+                    total.get("Mx", 0),
+                    total.get("My", 0))
+                cr["eta"] = eta_r["eta"]
+                print(f"  η = {eta_r['eta']:.4f}"
+                      f"  inside={eta_r['demand_inside']}")
+
+    # ==============================================================
+    #  3. Export
+    # ==============================================================
+    from .output.export import export_analysis_json
+    export_analysis_json(
+        demand_results, combination_results,
+        os.path.join(outdir, "analysis_results.json"))
+    print(f"\n  Exported: {outdir}/analysis_results.json")
+
+    print("\nDone.")
+
+
+def _print_analysis_table(title, results):
+    r"""Print force decomposition summary for analyzed demands."""
+    if not results:
+        return
+
+    print(f"\n{'=' * 80}")
+    print(f"  {title}")
+    print(f"{'=' * 80}")
+
+    for r in results:
+        name = r.get("name", "unnamed")
+        conv = r.get("converged", False)
+        sok = r.get("strains_ok", False)
+        if not conv:
+            status = "NO CONV"
+        elif not sok:
+            status = "WARN"
+        else:
+            status = "OK"
+
+        total = r.get("total", {})
+        print(f"\n  {name}  (N={total.get('N',0)/1e3:.1f} kN,"
+              f" Mx={total.get('Mx',0)/1e6:.2f} kNm,"
+              f" My={total.get('My',0)/1e6:.2f} kNm)"
+              f"  [{status}]")
+
+        ss = r.get("strain_state", {})
+        print(f"    ε₀ = {ss.get('eps0',0)*1e3:.4f} ‰"
+              f"   χx = {ss.get('chi_x',0)*1e6:.2f} 1/km"
+              f"   χy = {ss.get('chi_y',0)*1e6:.2f} 1/km")
+
+        for comp in r.get("components", []):
+            ctype = comp["type"]
+            mname = comp["material_name"]
+            if ctype == "bulk":
+                zone = comp.get("zone", 0)
+                print(f"    [{ctype}  zone={zone}] {mname:>16s}"
+                      f"  N={comp['N_kN']:>10.2f} kN"
+                      f"  Mx={comp['Mx_kNm']:>10.4f} kNm"
+                      f"  My={comp['My_kNm']:>10.4f} kNm")
+            else:
+                print(f"    [{ctype}]          {mname:>16s}"
+                      f"  N={comp['N_kN']:>10.2f} kN"
+                      f"  Mx={comp['Mx_kNm']:>10.4f} kNm"
+                      f"  My={comp['My_kNm']:>10.4f} kNm")
+                for lay in comp.get("layers", []):
+                    print(f"      bar {lay['index']+1:>2d}"
+                          f"  y={lay['y']:>7.1f}"
+                          f"  ε={lay['eps']*1e3:>8.3f}‰"
+                          f"  σ_net={lay['sigma_net']:>8.2f} MPa"
+                          f"  F={lay['F_net_kN']:>8.2f} kN")
+
+    print(f"\n{'=' * 80}")
+
+
+def _print_staged_analysis(cr):
+    r"""Print staged combination analysis summary."""
+    name = cr["name"]
+    res = cr.get("resultant", {})
+    print(f"\n{'=' * 80}")
+    print(f"  FORCE DECOMPOSITION — {name} (staged)")
+    print(f"  Resultant: N={res.get('N_kN',0):.1f} kN,"
+          f" Mx={res.get('Mx_kNm',0):.2f} kNm,"
+          f" My={res.get('My_kNm',0):.2f} kNm")
+    print(f"{'=' * 80}")
+
+    for stage in cr.get("stages", []):
+        sname = stage.get("name", "?")
+        cum = stage.get("cumulative", {})
+        conv = stage.get("converged", False)
+        print(f"\n  Stage: {sname}  (cum N={cum.get('N_kN',0):.1f},"
+              f" Mx={cum.get('Mx_kNm',0):.2f},"
+              f" My={cum.get('My_kNm',0):.2f})"
+              f"  [{'OK' if conv else 'NO CONV'}]")
+
+        for comp in stage.get("components", []):
+            ctype = comp["type"]
+            mname = comp["material_name"]
+            print(f"    [{ctype:>5s}] {mname:>16s}"
+                  f"  N={comp['N_kN']:>10.2f} kN"
+                  f"  Mx={comp['Mx_kNm']:>10.4f} kNm")
+
+    print(f"{'=' * 80}")
 
 
 if __name__ == "__main__":
