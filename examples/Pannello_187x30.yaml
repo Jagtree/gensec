@@ -26,8 +26,8 @@ section:
   B: 1870
   H: 300
   bulk_material: concrete_direct
-  n_fibers_y: 120
-  n_fibers_x: 60
+  n_fibers_y: 60
+  n_fibers_x: 30
   rebars:
     - {y: 50,  x: 50,   material: B450C, n_bars: 1, diameter: 26}
     - {y: 50,  x: 150,  material: B450C, n_bars: 1, diameter: 26}
@@ -62,7 +62,7 @@ output:
   # ── Domain generation ──
   generate_mx_my: true
   generate_3d_surface: true
-  n_angles_mx_my: 360
+  #n_angles_mx_my: 360
 
   # ── Moment-curvature and ductility ──
   generate_moment_curvature: true

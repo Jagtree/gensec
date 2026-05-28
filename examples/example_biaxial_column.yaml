@@ -39,6 +39,8 @@ section:
     - {y: 300, x: 50,  As: 314.16, material: steel_1, diameter: 20}
     - {y: 300, x: 350, As: 314.16, material: steel_1, diameter: 20}
 
+# TODO: investigate mx_chi @  Nm3649, Nm5285, mx_my @N1260, and other things
+
 demands:
   - name: Gravity
     N_kN: -1500

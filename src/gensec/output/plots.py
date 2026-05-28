@@ -716,15 +716,23 @@ def plot_demand_heatmap(check_results, title=""):
         offsets = y_pos + (t_idx - (n_types - 1) / 2) * bar_height
         vals = []
         colors = []
+        hatches = []
         for r in sorted_res:
             v = r.get(key)
             v = v if v is not None else 0.0
             vals.append(v)
-            colors.append('#F44336' if v > 1.0 else '#4CAF50')
+            if v > 1.0:
+                colors.append('#F44336')
+                hatches.append('///')
+            else:
+                colors.append(base_color)
+                hatches.append('')
 
         bars = ax.barh(offsets, vals, height=bar_height * 0.9,
                        color=colors, edgecolor='black',
                        linewidth=0.4, label=label, alpha=0.85)
+        for bar, h in zip(bars, hatches):
+            bar.set_hatch(h)
 
         for i, (bar, v) in enumerate(zip(bars, vals)):
             if v > 0:
@@ -883,6 +891,48 @@ def _resample_contour(contour, n_angles, cx=None, cy=None):
     return np.column_stack([x_closed, y_closed])
 
 
+def _arc_length_resample(contour, n_samples):
+    r"""
+    Resample a closed convex contour by normalised cumulative arc length,
+    starting at the vertex of maximum :math:`M_x`.
+
+    Unlike angular resampling from a shared centroid, this requires no
+    common reference point, so meridians remain coherent even when
+    contours migrate in :math:`M_x` across N levels (T, L, or any
+    singly-symmetric section).  The start landmark (max-Mx vertex) traces
+    a physical ridge of the surface through N.
+
+    Parameters
+    ----------
+    contour : ndarray, shape ``(m, 2)``
+        Convex boundary points ordered along the loop. Columns are (Mx, My).
+    n_samples : int
+        Number of equispaced arc-length stations on :math:`s \in [0, 1)`.
+
+    Returns
+    -------
+    ndarray, shape ``(n_samples + 1, 2)``
+        Resampled boundary; first station repeated at end for a closed ring.
+    """
+    i0 = int(np.argmax(contour[:, 0]))
+    pts = np.roll(contour, -i0, axis=0)
+
+    closed = np.vstack([pts, pts[:1]])
+    seg = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    s = np.concatenate([[0.0], np.cumsum(seg)])
+    total = s[-1]
+    if total <= 0.0:
+        return np.tile(pts[0], (n_samples + 1, 1))
+    s_norm = s / total
+
+    targets = np.linspace(0.0, 1.0, n_samples, endpoint=False)
+    mx = np.interp(targets, s_norm, closed[:, 0])
+    my = np.interp(targets, s_norm, closed[:, 1])
+
+    return np.column_stack([np.append(mx, mx[0]),
+                            np.append(my, my[0])])
+
+
 def plot_3d_surface(nm_3d, demands=None, title="",
                     n_levels=20, n_angles=72):
     r"""
@@ -925,14 +975,18 @@ def plot_3d_surface(nm_3d, demands=None, title="",
 
     # ---- Build structured surface from hull contour slices ----
     hull = ConvexHull(pts)
-    N_levels = np.linspace(N_min * 0.98, N_max * 0.98, n_levels)
 
-    # First pass: collect raw contours and find the largest one
-    # to use its centroid as the common angular reference.
-    raw_contours = []
-    raw_N = []
-    max_area = 0.0
-    ref_cx, ref_cy = 0.0, 0.0
+    # Cosine-spaced N levels: denser toward the apices where the hull tapers.
+    # Drop the two degenerate endpoints (zero-area apex slices).
+    u = np.linspace(-1.0, 1.0, n_levels)
+    N_levels = (0.5 * (N_max + N_min)
+                + 0.5 * (N_max - N_min) * np.sin(u * np.pi / 2.0))[1:-1]
+
+    # Single pass: arc-length resampling needs no shared centroid.
+    grid_Mx = []
+    grid_My = []
+    grid_N = []
+    valid_levels = []
 
     for nl in N_levels:
         contour = _hull_slice_at_N(pts, hull.simplices, nl)
@@ -942,23 +996,7 @@ def plot_3d_surface(nm_3d, demands=None, title="",
         span_y = contour[:, 1].max() - contour[:, 1].min()
         if span_x < 1e-3 and span_y < 1e-3:
             continue
-        raw_contours.append(contour)
-        raw_N.append(nl)
-        area = span_x * span_y
-        if area > max_area:
-            max_area = area
-            ref_cx = contour[:, 0].mean()
-            ref_cy = contour[:, 1].mean()
-
-    # Second pass: resample all contours with the common centroid.
-    grid_Mx = []
-    grid_My = []
-    grid_N = []
-    valid_levels = []
-
-    for contour, nl in zip(raw_contours, raw_N):
-        resampled = _resample_contour(contour, n_angles,
-                                      cx=ref_cx, cy=ref_cy)
+        resampled = _arc_length_resample(contour, n_angles)
         n_cols = resampled.shape[0]  # n_angles + 1 (closed loop)
         grid_Mx.append(resampled[:, 0])
         grid_My.append(resampled[:, 1])

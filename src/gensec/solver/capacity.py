@@ -97,7 +97,7 @@ class NMDiagram:
     :class:`NMDiagram` instance must be created.
     """
 
-    def __init__(self, solver, include_pivot_a=False):
+    def __init__(self, solver, include_pivot_a=True):
         self.solver = solver
         self.include_pivot_a = include_pivot_a
 
@@ -326,11 +326,12 @@ class NMDiagram:
         # Branch 4: bridge — variable compression at one edge,
         # max steel strain at the other.  Fills the N-gap between
         # crush-limited and tension branches for sections with
-        # large Ac/As ratio.
-        n_bridge = n_points // 2
-        for comp in np.linspace(0, emb, n_bridge):
-            _append(exg, comp)      # bottom tension, top crush
-            _append(comp, exg)      # bottom crush, top tension
+        # large Ac/As ratio.  Only included when include_pivot_a=True.
+        if self.include_pivot_a:
+            n_bridge = n_points // 2
+            for comp in np.linspace(0, emb, n_bridge):
+                _append(exg, comp)      # bottom tension, top crush
+                _append(comp, exg)      # bottom crush, top tension
 
         return np.array(eps0_list), np.array(chi_list)
 
@@ -567,13 +568,14 @@ class NMDiagram:
         ebot_parts.append(ev4)
         etop_parts.append(np.zeros(n4))
 
-        # Branch 4: bridge — ONE-SIDED, ALWAYS included.
+        # Branch 4: bridge — ONE-SIDED.
         # Bottom at max steel strain; top sweeps from 0
-        # to bulk crush.
-        n5 = n // 2
-        comp_sweep = np.linspace(0, emb, n5)
-        ebot_parts.append(np.full(n5, exg))
-        etop_parts.append(comp_sweep)
+        # to bulk crush.  Only included when include_pivot_a=True.
+        if self.include_pivot_a:
+            n5 = n // 2
+            comp_sweep = np.linspace(0, emb, n5)
+            ebot_parts.append(np.full(n5, exg))
+            etop_parts.append(comp_sweep)
 
         return np.concatenate(ebot_parts), np.concatenate(etop_parts)
 
@@ -838,33 +840,35 @@ class NMDiagram:
         else:
             eps0 = eps0_init.copy()
 
-        # Vectorized Newton iterations with early exit
-        N_arr = Mx_arr = My_arr = None
+        # Active-set Newton: only integrate non-converged configs.
+        n = len(chi_x_arr)
+        N_arr  = np.empty(n)
+        Mx_arr = np.empty(n)
+        My_arr = np.empty(n)
+        active = np.ones(n, dtype=bool)
+
         for _ in range(n_iter):
-            N_arr, Mx_arr, My_arr = sv.integrate_batch(
-                eps0, chi_x_arr, chi_y_arr)
+            idx = np.nonzero(active)[0]
+            if idx.size == 0:
+                break
+            Na, Mxa, Mya = sv.integrate_batch(
+                eps0[idx], chi_x_arr[idx], chi_y_arr[idx])
+            N_arr[idx], Mx_arr[idx], My_arr[idx] = Na, Mxa, Mya
 
-            residual = N_arr - N_fixed
-
-            # Early exit: all points converged
-            if np.all(np.abs(residual) < tol):
-                return eps0, N_arr, Mx_arr, My_arr
-
-            # Numerical Jacobian: dN/deps0
-            N_pert, _, _ = sv.integrate_batch(
-                eps0 + delta, chi_x_arr, chi_y_arr)
-            dNde = (N_pert - N_arr) / delta
-
-            # Newton update with step clamping
-            safe = np.abs(dNde) > 1.0
-            step = np.zeros_like(residual)
-            step[safe] = -residual[safe] / dNde[safe]
-            step = np.clip(step, -0.002, 0.002)
-            eps0 += step
-
-        # Final evaluation at last eps0
-        N_arr, Mx_arr, My_arr = sv.integrate_batch(
-            eps0, chi_x_arr, chi_y_arr)
+            residual = Na - N_fixed
+            conv = np.abs(residual) < tol
+            todo = ~conv
+            if todo.any():
+                sub = idx[todo]
+                N_pert, _, _ = sv.integrate_batch(
+                    eps0[sub] + delta, chi_x_arr[sub], chi_y_arr[sub])
+                dNde = (N_pert - Na[todo]) / delta
+                good = np.abs(dNde) > 1.0
+                step = np.zeros_like(dNde)
+                step[good] = -residual[todo][good] / dNde[good]
+                eps0[sub] += np.clip(step, -0.002, 0.002)
+                active[sub[~good]] = False  # collapsed tangent → drop
+            active[idx[conv]] = False       # converged → drop
 
         return eps0, N_arr, Mx_arr, My_arr
 
@@ -873,7 +877,8 @@ class NMDiagram:
     # ==================================================================
 
     def generate_mx_my(self, N_fixed, n_angles=72,
-                       n_points_per_angle=200, n_chi=36):
+                       n_points_per_angle=200, n_chi=20, n_scan=None):
+        # TODO: remove anything that concerns n_points_per_angle from the API, since it's not used internally.
         r"""
         Generate the Mx-My interaction contour at a fixed axial force.
 
@@ -903,7 +908,7 @@ class NMDiagram:
         n_points_per_angle : int, optional
             Kept for API compatibility; not used internally.
         n_chi : int, optional
-            Curvature magnitudes per direction. Default 36.
+            Curvature magnitudes per direction. Default 20.
 
         Returns
         -------
@@ -929,8 +934,8 @@ class NMDiagram:
         all_lx = self._all_lx
         all_ly = self._all_ly
 
-        # Scan 2× the requested angles internally for dense coverage.
-        n_scan = max(n_angles, 72)
+        if n_scan is None:
+            n_scan = min(max(n_angles, 72), 120)
         thetas = np.linspace(0, 2 * np.pi, n_scan, endpoint=False)
 
         chi_x_parts = []
@@ -943,7 +948,8 @@ class NMDiagram:
                 cos_t, sin_t, all_lx, all_ly)
             if chi_max < 1e-15:
                 continue
-            chis = np.linspace(chi_max / n_chi, chi_max, n_chi)
+            frac = np.linspace(1.0 / n_chi, 1.0, n_chi)
+            chis = chi_max * frac ** 0.7
             chi_x_parts.append(chis * cos_t)
             chi_y_parts.append(chis * sin_t)
 
@@ -1360,7 +1366,7 @@ class NMDiagram:
     # ==================================================================
 
     def generate_moment_curvature(self, N_fixed, chi_max=None,
-                                  n_points=100, direction='x'):
+                                  n_chi=100, direction='x'):
         r"""
         Generate the moment-curvature diagram at fixed axial force.
 
@@ -1381,7 +1387,7 @@ class NMDiagram:
         chi_max : float, optional
             Maximum curvature to scan [1/mm]. If ``None``, computed
             automatically from strain limits.
-        n_points : int, optional
+        n_chi : int, optional
             Number of curvature steps. Default 100.
         direction : str, optional
             ``'x'`` for Mx-chi_x (default) or ``'y'`` for My-chi_y.
@@ -1399,28 +1405,44 @@ class NMDiagram:
         Raises
         ------
         ValueError
-            If *N_fixed* is not finite, *n_points* < 1, or
+            If *N_fixed* is not finite, *n_chi* < 1, or
             *direction* not in ``{'x', 'y'}``.
         """
         self._validate_finite_float(N_fixed, "N_fixed")
-        self._validate_positive_int(n_points, "n_points")
+        self._validate_positive_int(n_chi, "n_chi")
         if direction not in ('x', 'y'):
             raise ValueError(
                 f"direction must be 'x' or 'y', got {direction!r}")
 
         sec = self.solver.sec
-        emb = self._emb
 
-        # Determine chi_max from geometry and strain limits.
+        # Determine chi_max from the strain-limit span bound.
+        #
+        # The ultimate curvature for *any* axial force is bounded above
+        # by the curvature at which the strain difference between the
+        # extreme fibres equals the full admissible strain range
+        # (eps_max_global - eps_min_bulk):
+        #
+        #     chi_u(N) <= (eps_xg - eps_mb) / span(direction)   for all N
+        #
+        # This is the same bound used by :meth:`_chi_max_for_direction`
+        # (and hence by :meth:`generate_mx_my` and the ductility
+        # computation).  The previous fixed heuristic assumed a neutral
+        # axis at ~0.2*depth and was calibrated on concrete crushing
+        # only; it systematically underestimated chi_max in the
+        # tension-controlled regime (low/zero/negative N, lightly
+        # reinforced sections), so the ultimate point fell outside the
+        # scanned window and was reported as ``None``.
         if chi_max is None:
-            if direction == 'x':
-                d_max = sec.H
-            else:
-                d_max = sec.B
-            if d_max > 0:
-                chi_max = abs(emb) / (d_max * 0.3) * 1.5
-            else:
-                chi_max = 1e-4
+            cos_t, sin_t = (1.0, 0.0) if direction == 'x' else (0.0, 1.0)
+            chi_max, span, _ = self._chi_max_for_direction(
+                cos_t, sin_t, self._all_lx, self._all_ly)
+            if not np.isfinite(chi_max) or chi_max <= 0.0:
+                # Degenerate projection (zero span): fall back to a
+                # geometry-based estimate so the scan is never empty.
+                d_max = sec.H if direction == 'x' else sec.B
+                chi_max = (abs(self._emb) / (d_max * 0.3) * 1.5
+                           if d_max > 0 else 1e-4)
 
         # Cracking strain from EC2 properties (if available).
         eps_cr = None
@@ -1434,9 +1456,9 @@ class NMDiagram:
 
         # Scan both positive and negative curvature
         results_pos = self._scan_chi_vectorized(
-            N_fixed, 0, chi_max, n_points, direction, eps_cr=eps_cr)
+            N_fixed, 0, chi_max, n_chi, direction, eps_cr=eps_cr)
         results_neg = self._scan_chi_vectorized(
-            N_fixed, 0, -chi_max, n_points, direction, eps_cr=eps_cr)
+            N_fixed, 0, -chi_max, n_chi, direction, eps_cr=eps_cr)
 
         # Merge: negative reversed + positive
         chi_all = np.concatenate([
@@ -1487,6 +1509,8 @@ class NMDiagram:
             "ultimate_M_neg": results_neg.get("ultimate_M"),
             "ductility_pos": mu_pos,
             "ductility_neg": mu_neg,
+            "diagnostics_pos": results_pos.get("diagnostics"),
+            "diagnostics_neg": results_neg.get("diagnostics"),
         }
 
     # ------------------------------------------------------------------
@@ -1522,6 +1546,37 @@ class NMDiagram:
         eps_cr : float or None
             Cracking strain of concrete (positive, tensile).
             If provided, the first-cracking point is detected.
+
+        Returns
+        -------
+        dict
+            Curvature scan results with the following keys:
+
+            ``chi`` : numpy.ndarray
+                Scanned curvatures [1/mm], shape ``(n_points,)``.
+            ``M`` : numpy.ndarray
+                Bending moment about the requested direction at
+                each step [N.mm].
+            ``eps_min`` : numpy.ndarray
+                Most compressive fibre strain at each step.
+            ``eps_max`` : numpy.ndarray
+                Most tensile fibre strain at each step.
+            ``yield_chi`` : float or None
+                Curvature at first rebar yield, or ``None`` if not
+                reached within the scan.
+            ``yield_M`` : float or None
+                Moment at first rebar yield.
+            ``ultimate_chi`` : float or None
+                Curvature at which a material strain limit is first
+                reached (concrete crushing or steel rupture), or
+                ``None`` if not reached.
+            ``ultimate_M`` : float or None
+                Moment at the ultimate curvature.
+            ``cracking_chi`` : float or None
+                Curvature at first concrete cracking, or ``None``
+                (requires ``eps_cr``).
+            ``cracking_M`` : float or None
+                Moment at first cracking.
         """
         sec = self.solver.sec
         exg = self._exg
@@ -1651,7 +1706,29 @@ class NMDiagram:
         Returns
         -------
         dict
-            Same keys and semantics as :meth:`_scan_chi`.
+            The base keys and semantics of :meth:`_scan_chi`,
+            plus a ``diagnostics`` sub-dict not produced by the
+            scalar scan:
+
+            ``chi_max_scanned`` : float
+                Largest scanned curvature magnitude [1/mm].
+            ``n_points`` : int
+                Number of curvature steps.
+            ``n_converged`` : int
+                Steps whose axial-equilibrium solve converged
+                (``|N - N_fixed| < fallback_tol``); event detection
+                is restricted to these rows.
+            ``cracking_reason`` : str or None
+                ``None`` when cracking is detected, otherwise why it
+                is not: ``'no_ec2_properties'`` (bulk lacks
+                ``fctm``/``Ecm``), ``'no_tension_in_range'`` (the
+                section stays in compression over the scanned
+                range), ``'no_convergence'``, or
+                ``'below_threshold'``.
+            ``ultimate_reason`` : str or None
+                ``None`` when the ultimate is detected, otherwise
+                ``'no_convergence'`` or
+                ``'limit_not_reached_in_range'``.
 
         Notes
         -----
@@ -1706,6 +1783,14 @@ class NMDiagram:
                 Mx_arr[j] = Mxj
                 My_arr[j] = Myj
 
+        # --- 3b. Convergence mask after the scalar fallback ---
+        #
+        # Event detection must only trust curvature steps whose axial
+        # equilibrium actually converged.  A non-converged row carries a
+        # meaningless strain field that would otherwise trigger or hide
+        # a cracking / yield / ultimate event at the wrong curvature.
+        converged = np.abs(N_arr - N_fixed) < fallback_tol
+
         # --- 4. Extract moments along the requested direction ---
         Ms = Mx_arr if direction == 'x' else My_arr
 
@@ -1735,40 +1820,70 @@ class NMDiagram:
         # --- 6. Vectorized event detection ---
         #
         # Events are detected as the *first* curvature step (smallest
-        # |χ|) where the condition is satisfied.  ``np.argmax`` on a
-        # boolean array returns the index of the first ``True``.
+        # |chi|) where the condition holds, restricted to steps that
+        # (a) have nonzero curvature and (b) converged in the
+        # equilibrium solve.  ``np.argmax`` on a boolean array returns
+        # the index of the first ``True``.
         cracking_chi = cracking_M = None
         yield_chi = yield_M = None
         ultimate_chi = ultimate_M = None
 
         nonzero = np.abs(chis) > 0
+        valid = nonzero & converged
 
-        # 6a. Cracking: first step where max bulk tensile strain ≥ ε_cr
-        if eps_cr is not None:
-            eb_max = eb.max(axis=1)
-            crack_mask = nonzero & (eb_max >= eps_cr)
+        diagnostics = {
+            "chi_max_scanned": (float(np.abs(chis).max())
+                                if chis.size else 0.0),
+            "n_points": int(n_points),
+            "n_converged": int(converged.sum()),
+            "cracking_reason": None,
+            "ultimate_reason": None,
+        }
+
+        eb_max = eb.max(axis=1)
+
+        # 6a. Cracking: first step where max bulk tensile strain >= eps_cr.
+        if eps_cr is None:
+            diagnostics["cracking_reason"] = "no_ec2_properties"
+        else:
+            crack_mask = valid & (eb_max >= eps_cr)
             if np.any(crack_mask):
                 k = int(np.argmax(crack_mask))
                 cracking_chi = float(chis[k])
                 cracking_M = float(Ms[k])
+            else:
+                # Distinguish a physically uncracked section (bulk never
+                # reaches tension within the scanned range, e.g. high
+                # compression) from a convergence / window failure.
+                reached = eb_max[valid]
+                if reached.size == 0:
+                    diagnostics["cracking_reason"] = "no_convergence"
+                elif reached.max() < eps_cr:
+                    diagnostics["cracking_reason"] = "no_tension_in_range"
+                else:
+                    diagnostics["cracking_reason"] = "below_threshold"
 
-        # 6b. Yield: first step where max |ε_rebar| ≥ ε_yd_min × 0.99
+        # 6b. Yield: first step where max |eps_rebar| >= eps_yd_min * 0.99.
         if self._eps_yd_min is not None and n_rebars > 0:
             er_abs_max = np.abs(er).max(axis=1)
-            yield_mask = nonzero & (er_abs_max >= self._eps_yd_min * 0.99)
+            yield_mask = valid & (er_abs_max >= self._eps_yd_min * 0.99)
             if np.any(yield_mask):
                 k = int(np.argmax(yield_mask))
                 yield_chi = float(chis[k])
                 yield_M = float(Ms[k])
 
-        # 6c. Ultimate: first step where any strain limit is reached
-        #     ε_min ≤ ε_cu × 0.99  or  ε_max ≥ ε_max_global × 0.99
-        ult_mask = nonzero & (
+        # 6c. Ultimate: first step where any strain limit is reached,
+        #     eps_min <= eps_cu * 0.99  or  eps_max >= eps_max_global * 0.99.
+        ult_mask = valid & (
             (eps_mins <= emb * 0.99) | (eps_maxs >= exg * 0.99))
         if np.any(ult_mask):
             k = int(np.argmax(ult_mask))
             ultimate_chi = float(chis[k])
             ultimate_M = float(Ms[k])
+        elif not np.any(valid):
+            diagnostics["ultimate_reason"] = "no_convergence"
+        else:
+            diagnostics["ultimate_reason"] = "limit_not_reached_in_range"
 
         return {
             "chi": chis, "M": Ms,
@@ -1776,6 +1891,7 @@ class NMDiagram:
             "yield_chi": yield_chi, "yield_M": yield_M,
             "ultimate_chi": ultimate_chi, "ultimate_M": ultimate_M,
             "cracking_chi": cracking_chi, "cracking_M": cracking_M,
+            "diagnostics": diagnostics,
         }
 
 

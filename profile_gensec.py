@@ -97,17 +97,17 @@ def run_all_stages(ctx):
             _all_contours)
         timings["mx_my"] = t
 
-    # 5. Moment-curvature at 3 N levels (NON batched: loop Python)
+    # 5. Moment-curvature at 3 N levels (vectorized via _scan_chi_vectorized)
     def _all_mc():
         for N in N_levels:
             nm_gen.generate_moment_curvature(
-                N, n_points=n_points, direction='x')
+                N, n_chi=n_points, direction='x')
     _, t = time_stage(
         f"generate_moment_curvature() x {len(N_levels)} N levels",
         _all_mc)
     timings["mc"] = t
 
-    # 6. Verification (uses internal Mx-My cache)
+    # 6. Verification (generates Mx-My contour per demand; separate cache from stage 4)
     demands = ctx["data"].get("demands", [])
     if demands:
         engine = VerificationEngine(
@@ -139,7 +139,7 @@ def deep_profile_stage(ctx, stage):
         "mx_my": lambda: nm_gen.generate_mx_my(
             0.0, n_angles=144, n_points_per_angle=n_points // 2),
         "mc": lambda: nm_gen.generate_moment_curvature(
-            0.0, n_points=n_points, direction='x'),
+            0.0, n_chi=n_points, direction='x'),
         "nm_x": lambda: nm_gen.generate(
             n_points=n_points, direction='x'),
     }
@@ -167,7 +167,7 @@ def deep_profile_stage(ctx, stage):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml_path")
-    ap.add_argument("--n-points", type=int, default=400)
+    ap.add_argument("--n-points", type=int, default=50)
     ap.add_argument("--deep", action="store_true",
                     help="Run cProfile on the heaviest stage.")
     ap.add_argument("--stage", default=None,

@@ -111,7 +111,7 @@ class TestMomentCurvatureOutput(unittest.TestCase):
         sec = _plain_section()
         sv = FiberSolver(sec)
         cls.mc = NMDiagram(sv).generate_moment_curvature(
-            N_fixed=-100e3, n_points=60)
+            N_fixed=-100e3, n_chi=60)
 
     def test_has_chi_array(self):
         self.assertIn("chi", self.mc)
@@ -149,7 +149,7 @@ class TestMomentCurvatureOutput(unittest.TestCase):
     def test_direction_y(self):
         sec = _plain_section()
         mc_y = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
-            N_fixed=0.0, n_points=40, direction="y")
+            N_fixed=0.0, n_chi=40, direction="y")
         self.assertEqual(mc_y["direction"], "y")
 
     def test_cracking_keys_present(self):
@@ -175,7 +175,7 @@ class TestMomentCurvatureOutput(unittest.TestCase):
         """At N=0 on a doubly symmetric section M(chi) = -M(-chi)."""
         sec = _plain_section()
         mc = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
-            N_fixed=0.0, n_points=60)
+            N_fixed=0.0, n_chi=60)
         chi = mc["chi"]
         M   = mc["M"]
         # The curve is assembled as [neg_reversed, pos[1:]]
@@ -201,7 +201,7 @@ class TestMomentCurvatureCracking(unittest.TestCase):
         sv = FiberSolver(sec)
         nm_gen = NMDiagram(sv)
         cls.mc = nm_gen.generate_moment_curvature(
-            N_fixed=-50e3, n_points=100)
+            N_fixed=-50e3, n_chi=100)
 
     def test_cracking_chi_pos_detected(self):
         self.assertIsNotNone(self.mc["cracking_chi_pos"])
@@ -228,7 +228,7 @@ class TestMomentCurvatureCracking(unittest.TestCase):
         """Basic Concrete (no .ec2 attribute) → cracking keys are None."""
         sec = _plain_section()
         mc = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
-            N_fixed=0.0, n_points=50)
+            N_fixed=0.0, n_chi=50)
         self.assertIsNone(mc["cracking_chi_pos"])
         self.assertIsNone(mc["cracking_M_pos"])
 
@@ -252,7 +252,7 @@ class TestMomentCurvatureKeyPoints(unittest.TestCase):
         sec = _ec2_section()
         sv = FiberSolver(sec)
         cls.mc = NMDiagram(sv).generate_moment_curvature(
-            N_fixed=0.0, n_points=100)
+            N_fixed=0.0, n_chi=100)
 
     def test_yield_chi_detected(self):
         self.assertIsNotNone(self.mc["yield_chi_pos"])
@@ -386,7 +386,7 @@ class TestExportMomentCurvature(unittest.TestCase):
         sec = _ec2_section()
         sv = FiberSolver(sec)
         cls.mc = NMDiagram(sv).generate_moment_curvature(
-            N_fixed=-50e3, n_points=60)
+            N_fixed=-50e3, n_chi=60)
         cls.td = tempfile.mkdtemp()
 
     def test_json_keys(self):
@@ -727,6 +727,132 @@ class TestExportCombinationEnvelope(unittest.TestCase):
         with open(p) as f:
             data = json.load(f)
         self.assertEqual(len(data["envelopes"]), 2)
+
+
+# ==================================================================
+#  Ultimate-point regression  (chi_max span-bound fix)
+# ==================================================================
+
+class TestMomentCurvatureUltimateRegression(unittest.TestCase):
+    r"""
+    Ultimate point must be detected at low / zero / tensile axial force.
+
+    Before the span-bound fix the heuristic
+
+    .. math::
+
+       \chi_{\max} = \frac{|\varepsilon_{cu}|}{0.3 \, d_{\max}} \cdot 1.5
+
+    assumed a neutral axis at roughly 20 % of the section depth and was
+    calibrated on concrete crushing only.  In the tension-controlled regime
+    the true ultimate curvature exceeded this heuristic, so the detection
+    condition was never satisfied inside the scanned window and
+    ``ultimate_chi_pos`` came back ``None``.
+    """
+
+    def test_ultimate_found_at_zero_axial_ec2(self):
+        sec = _ec2_section()
+        mc = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
+            N_fixed=0.0, n_chi=120)
+        self.assertIsNotNone(mc["ultimate_chi_pos"])
+        self.assertIsNotNone(mc["ultimate_M_pos"])
+        self.assertGreater(abs(mc["ultimate_chi_pos"]), 0.0)
+        self.assertIsNotNone(mc["ultimate_chi_neg"])
+
+    def test_ultimate_found_at_zero_axial_plain(self):
+        # Lightly reinforced (1 phi16 top, 1 phi16 bot): the regime where
+        # the old heuristic underestimated chi_max the most.
+        sec = _plain_section()
+        mc = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
+            N_fixed=0.0, n_chi=120)
+        self.assertIsNotNone(mc["ultimate_chi_pos"])
+        self.assertGreater(abs(mc["ultimate_chi_pos"]), 0.0)
+
+    def test_ultimate_found_under_tension_ec2(self):
+        # N = +100 kN net tension — well within the 6 phi16 capacity (~543 kN).
+        sec = _ec2_section()
+        mc = NMDiagram(FiberSolver(sec)).generate_moment_curvature(
+            N_fixed=+100e3, n_chi=120)
+        self.assertIsNotNone(mc["ultimate_chi_pos"])
+        self.assertGreater(abs(mc["ultimate_chi_pos"]), 0.0)
+
+    def test_ultimate_index_hits_a_strain_limit(self):
+        """At the detected ultimate at least one fibre reaches a limit."""
+        sec = _ec2_section()
+        nm = NMDiagram(FiberSolver(sec))
+        mc = nm.generate_moment_curvature(N_fixed=0.0, n_chi=120)
+        _, exg, emb, _ = nm._collect_strain_limits()
+        u = mc["ultimate_chi_pos"]
+        self.assertIsNotNone(u)
+        idx = int(np.argmin(np.abs(mc["chi"] - u)))
+        eps_min_u = float(mc["eps_min"][idx])
+        eps_max_u = float(mc["eps_max"][idx])
+        self.assertTrue(
+            eps_min_u <= emb * 0.99 or eps_max_u >= exg * 0.99,
+            f"At chi_u={u:.3e}, strains "
+            f"(eps_min={eps_min_u:.4e}, eps_max={eps_max_u:.4e}) do "
+            f"not reach the limits (emb={emb:.4e}, exg={exg:.4e})")
+
+
+# ==================================================================
+#  Diagnostics keys
+# ==================================================================
+
+class TestMomentCurvatureDiagnostics(unittest.TestCase):
+    """Diagnostic keys exposed by ``_scan_chi_vectorized``."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mc_plain = NMDiagram(FiberSolver(_plain_section())) \
+            .generate_moment_curvature(N_fixed=0.0, n_chi=80)
+        cls.mc_ec2 = NMDiagram(FiberSolver(_ec2_section())) \
+            .generate_moment_curvature(N_fixed=-200e3, n_chi=80)
+
+    def test_diagnostics_keys_present(self):
+        for mc in (self.mc_plain, self.mc_ec2):
+            self.assertIn("diagnostics_pos", mc)
+            self.assertIn("diagnostics_neg", mc)
+            self.assertIsNotNone(mc["diagnostics_pos"])
+            self.assertIsNotNone(mc["diagnostics_neg"])
+            for key in ("chi_max_scanned", "n_points",
+                        "n_converged", "cracking_reason",
+                        "ultimate_reason"):
+                self.assertIn(key, mc["diagnostics_pos"])
+                self.assertIn(key, mc["diagnostics_neg"])
+
+    def test_plain_concrete_cracking_reason_no_ec2(self):
+        # No .ec2 attribute on bulk material → cracking cannot be computed.
+        self.assertIsNone(self.mc_plain["cracking_chi_pos"])
+        self.assertEqual(
+            self.mc_plain["diagnostics_pos"]["cracking_reason"],
+            "no_ec2_properties")
+
+    def test_ec2_section_cracking_reason_none_when_detected(self):
+        # Reason is None (success sentinel) when cracking is found.
+        self.assertIsNotNone(self.mc_ec2["cracking_chi_pos"])
+        self.assertIsNone(
+            self.mc_ec2["diagnostics_pos"]["cracking_reason"])
+
+    def test_ultimate_reason_none_when_detected(self):
+        for mc in (self.mc_plain, self.mc_ec2):
+            if mc["ultimate_chi_pos"] is not None:
+                self.assertIsNone(
+                    mc["diagnostics_pos"]["ultimate_reason"])
+
+    def test_majority_of_steps_converge(self):
+        diag = self.mc_ec2["diagnostics_pos"]
+        ratio = diag["n_converged"] / diag["n_points"]
+        self.assertGreater(
+            ratio, 0.9,
+            f"Only {ratio * 100:.0f}% of curvature steps converged "
+            f"({diag['n_converged']}/{diag['n_points']})")
+
+    def test_chi_max_scanned_is_positive(self):
+        for mc in (self.mc_plain, self.mc_ec2):
+            self.assertGreater(
+                mc["diagnostics_pos"]["chi_max_scanned"], 0.0)
+            self.assertGreater(
+                mc["diagnostics_neg"]["chi_max_scanned"], 0.0)
 
 
 if __name__ == "__main__":

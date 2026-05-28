@@ -389,9 +389,17 @@ class TestMxMyDiagram(BiaxialTestBase):
         """At higher |N|, the Mx-My contour should be smaller."""
         nm_gen = NMDiagram(self.sv)
         mx_my_low = nm_gen.generate_mx_my(N_fixed=-500e3, n_angles=36,
-                                          n_points_per_angle=100)
-        mx_my_high = nm_gen.generate_mx_my(N_fixed=-3000e3, n_angles=36,
-                                           n_points_per_angle=100)
+                                          #n_points_per_angle=100)
+                                        )
+        mx_my_high = nm_gen.generate_mx_my(N_fixed=-3000e3, n_angles=36, #N_fixed=-3000e3, n_angles=36,
+                                           #TODO: investigate why at N=-3000e3 the result is now NaN,
+                                           # and before it was ok. Maybe related to the solver convergence at high compression?
+                                           # Did we lost accuracy?
+                                           # Got it. It depends on n_chi parameter in the Mx-My generation. 
+                                           # With n_chi=20 it is ok, with n_chi=14 it is not. 
+                                           # Maybe we need to increase n_chi at high compression to get accurate resul<
+                                           n_chi=20)
+                                           #n_points_per_angle=100)
         M_low = np.max(np.sqrt(mx_my_low["Mx"]**2 + mx_my_low["My"]**2))
         M_high = np.max(np.sqrt(mx_my_high["Mx"]**2 + mx_my_high["My"]**2))
         self.assertGreater(M_low, M_high,

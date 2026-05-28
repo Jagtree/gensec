@@ -1007,6 +1007,8 @@ class VerificationEngine:
         self.do_path_2D = output_flags.get("eta_path_2D", False)
         self.delta_N_tol = float(output_flags.get("delta_N_tol", 0.03))
         self.n_angles = int(output_flags.get("n_angles_mx_my", 72))
+        self.n_scan   = int(output_flags.get("n_scan_mx_my", 120))
+        self.n_chi    = int(output_flags.get("n_chi_mx_my", 14))
 
         # Auto-disable 2-D contour operations when the resistance
         # domain is 2-D (uniaxial N-M only).  In that case every
@@ -1059,6 +1061,8 @@ class VerificationEngine:
                     N_fixed,
                     n_angles=self.n_angles,
                     n_points_per_angle=self.n_points,
+                    n_chi=self.n_chi,
+                    n_scan=self.n_scan,
                 )
                 self._contour_cache[key] = MxMyContour(mx_my_data)
             except Exception:

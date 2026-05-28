@@ -798,7 +798,7 @@ def render_plot(
             direction = kwargs.get("direction", "x")
             data = nm_gen.generate_moment_curvature(
                 N_fixed=N_kN * 1e3,
-                n_points=int(kwargs.get("n_points", 400)),
+                n_chi=int(kwargs.get("n_chi", 400)),
                 direction=direction,
             )
             fig = plot_moment_curvature(data)

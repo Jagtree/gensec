@@ -631,6 +631,8 @@ def _parse_output_flags(output_spec):
     flags.setdefault("generate_mx_my", False)
     flags.setdefault("generate_3d_surface", False)
     flags.setdefault("n_angles_mx_my", 144)
+    flags.setdefault("n_scan_mx_my", 120)
+    flags.setdefault("n_chi_mx_my", 14)
 
     # Moment-curvature and ductility generation defaults.
     flags.setdefault("generate_moment_curvature", True)

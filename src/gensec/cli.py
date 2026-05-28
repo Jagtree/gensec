@@ -85,8 +85,12 @@ def main(argv=None):
     p_run = sub.add_parser(
         "run", help="Run analysis from YAML input file.")
     p_run.add_argument("input_file", help="YAML input file.")
-    p_run.add_argument("--n-points", type=int, default=200,
-                       help="N-M diagram resolution (default: 400).")
+    p_run.add_argument("--n-points", type=int, default=50,
+                       help="N-M diagram resolution (default: 50).")
+    p_run.add_argument("--n-chi", type=int, default=100,
+                       help="Curvature scan steps per direction for "
+                            "moment-curvature and polar ductility "
+                            "(default: 100).")
     p_run.add_argument("--output-dir", type=str, default=".",
                        help="Output directory (default: current dir).")
 
@@ -516,7 +520,7 @@ def _run(args):
 
             print(f"  Generating Mx-chi at N={N_fixed/1e3:.0f} kN...")
             mc_x = nm_gen.generate_moment_curvature(
-                N_fixed, n_points=args.n_points, direction='x')
+                N_fixed, n_chi=args.n_chi, direction='x')
             mc_collection_x.append(mc_x)
             # Data export (always).
             p_json = os.path.join(outdir, f"mx_chi_N{N_label}.json")
@@ -534,7 +538,7 @@ def _run(args):
                 print(f"  Generating My-chi at"
                       f" N={N_fixed/1e3:.0f} kN...")
                 mc_y = nm_gen.generate_moment_curvature(
-                    N_fixed, n_points=args.n_points, direction='y')
+                    N_fixed, n_chi=args.n_chi, direction='y')
                 mc_collection_y.append(mc_y)
                 p_json = os.path.join(outdir, f"my_chi_N{N_label}.json")
                 export_moment_curvature_json(mc_y, p_json)
@@ -572,7 +576,7 @@ def _run(args):
                   f" N={N_fixed/1e3:.0f} kN...")
             fig = plot_polar_ductility_refactored(
                 nm_gen, N_fixed, n_angles=n_angles_mx_my,
-                n_points=args.n_points)
+                n_chi=args.n_chi)
             p = os.path.join(
                 outdir, f"polar_ductility_N{N_label}.png")
             fig.savefig(p, dpi=150)
