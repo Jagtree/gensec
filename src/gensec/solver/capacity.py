@@ -40,6 +40,32 @@ import warnings
 import numpy as np
 from .integrator import FiberSolver
 
+# --- Equilibrium feasibility guard ---------------------------------
+# A (eps0, chi) state is physically valid only if the axial residual
+#   |N(eps0, chi) - N_target|
+# stays below this tolerance. Beyond it the target N is unreachable at
+# that curvature: the solver returns the closest non-equilibrium state,
+# whose moment is meaningless and must be discarded (set to NaN).
+# Absolute + relative form: the 10 N floor dominates as N_target -> 0
+# (near-pure bending); the relative term avoids false positives at high
+# |N_target|, where 10 N is below the Newton noise.
+_FEAS_ABS_TOL = 10.0      # [N]
+_FEAS_REL_TOL = 1.0e-4    # [-]
+
+
+def _feas_tol(N_target):
+    """Axial-equilibrium feasibility tolerance [N] for a given target."""
+    return max(_FEAS_ABS_TOL, _FEAS_REL_TOL * abs(N_target))
+
+
+# --- Mx-My domain degeneracy ---------------------------------------
+# The interaction domain is declared collapsed (axial limit, M_Rd ~ 0)
+# when its outer radius falls below this fraction of a section plastic
+# moment scale  M_ref = f_cd * B * H**2 / 4.  The 3+ order-of-magnitude
+# gap between a real domain (~1e8 N*mm) and limit noise (<=1e3 N*mm)
+# makes the exact coefficient non-critical.
+_DOMAIN_DEGEN_FRAC = 1.0e-3
+
 
 class NMDiagram:
     r"""
@@ -112,6 +138,7 @@ class NMDiagram:
         self._exg = emax_g        # eps_max_global
         self._emb = b.eps_min     # eps_min_bulk (crush)
         self._exb = b.eps_max     # eps_max_bulk
+        self._fcd_bulk = getattr(b, 'fcd', None)  # design strength [N/mm²]
 
         # ----- cached lever arms -----
         self._all_lx = np.concatenate([
@@ -969,11 +996,12 @@ class NMDiagram:
         all_chi_y = np.concatenate(chi_y_parts)
 
         # Vectorized Newton: solve eps0 for all configs at once.
+        ftol = _feas_tol(N_fixed)
         _, N_arr, Mx_arr, My_arr = self._vectorized_solve_N(
-            N_fixed, all_chi_x, all_chi_y)
+            N_fixed, all_chi_x, all_chi_y, tol=ftol)
 
         # Filter converged points.
-        conv = np.abs(N_arr - N_fixed) < 1e3
+        conv = np.abs(N_arr - N_fixed) <= ftol
         Mx_conv = Mx_arr[conv]
         My_conv = My_arr[conv]
 
@@ -989,6 +1017,24 @@ class NMDiagram:
                 "Mx_kNm": Mxa / 1e6, "My_kNm": Mya / 1e6,
                 "N_fixed_kN": N_fixed / 1e3,
             }
+
+        # Collapsed domain check: the domain degenerates at the axial limits.
+        sec = self.solver.sec
+        f_cd = abs(self._fcd_bulk) if self._fcd_bulk is not None else 0.0
+        M_ref = f_cd * sec.B * sec.H ** 2 / 4.0
+        R = float(np.hypot(Mx_conv, My_conv).max())
+        if M_ref > 0 and R < _DOMAIN_DEGEN_FRAC * M_ref:
+            Mxa = np.full(n_angles, np.nan)
+            Mya = np.full(n_angles, np.nan)
+            warnings.warn(
+                f"generate_mx_my: collapsed domain at "
+                f"N={N_fixed / 1e3:.1f} kN (R={R:.2e} N*mm "
+                f"< {_DOMAIN_DEGEN_FRAC * M_ref:.2e}); "
+                f"M_Rd ≈ 0 at axial limit.",
+                RuntimeWarning, stacklevel=2)
+            return {"Mx": Mxa, "My": Mya,
+                    "Mx_kNm": Mxa / 1e6, "My_kNm": Mya / 1e6,
+                    "N_fixed_kN": N_fixed / 1e3, "degenerate": True}
 
         # Build convex hull of converged cloud.
         pts = np.column_stack([Mx_conv, My_conv])
@@ -1043,6 +1089,7 @@ class NMDiagram:
             "Mx": Mxa, "My": Mya,
             "Mx_kNm": Mxa / 1e6, "My_kNm": Mya / 1e6,
             "N_fixed_kN": N_fixed / 1e3,
+            "degenerate": False,
         }
 
     # ==================================================================
@@ -1615,6 +1662,12 @@ class NMDiagram:
                 sv, N_fixed, chi_x, chi_y, eps0_guess, emb)
 
             N, Mx, My = sv.integrate(eps0, chi_x, chi_y)
+            if abs(N - N_fixed) > _feas_tol(N_fixed):
+                # Target N unreachable at this curvature: drop the point.
+                Ms[k] = np.nan
+                eps_mins[k] = np.nan
+                eps_maxs[k] = np.nan
+                continue          # keep previous eps0_guess; skip event detection
             M = Mx if direction == 'x' else My
             Ms[k] = M
             eps0_guess = eps0  # warm-start
@@ -1791,6 +1844,11 @@ class NMDiagram:
         # a cracking / yield / ultimate event at the wrong curvature.
         converged = np.abs(N_arr - N_fixed) < fallback_tol
 
+        # --- Feasibility mask: drop points failing axial equilibrium ---
+        feasible = np.abs(N_arr - N_fixed) <= _feas_tol(N_fixed)
+        Mx_arr = np.where(feasible, Mx_arr, np.nan)
+        My_arr = np.where(feasible, My_arr, np.nan)
+
         # --- 4. Extract moments along the requested direction ---
         Ms = Mx_arr if direction == 'x' else My_arr
 
@@ -1828,7 +1886,7 @@ class NMDiagram:
         yield_chi = yield_M = None
         ultimate_chi = ultimate_M = None
 
-        nonzero = np.abs(chis) > 0
+        nonzero = (np.abs(chis) > 0) & feasible
         valid = nonzero & converged
 
         diagnostics = {

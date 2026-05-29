@@ -518,10 +518,21 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
     -------
     matplotlib.figure.Figure
     """
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     Mx = mx_my_data["Mx_kNm"]
     My = mx_my_data["My_kNm"]
     N_fixed = mx_my_data.get("N_fixed_kN", 0)
+
+    if mx_my_data.get("degenerate") or np.all(np.isnan(Mx)):
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        ax.text(0.5, 0.5,
+                f"Domain collapsed: $M_{{Rd}} \\approx 0$\n"
+                f"(axial limit, N = {N_fixed:.0f} kN)",
+                ha='center', va='center', transform=ax.transAxes,
+                fontsize=12)
+        ax.set_axis_off()
+        return fig
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
 
     pts = np.column_stack([Mx, My])
     try:
@@ -544,14 +555,11 @@ def plot_mx_my_diagram(mx_my_data, demands=None, title=""):
     ax.set_xlabel("Mx [kN·m]")
     ax.set_ylabel("My [kN·m]")
     ax.set_title(title or f"Mx-My interaction at N = {N_fixed:.0f} kN")
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
-              fontsize=9, ncol=3, borderaxespad=0)
+    ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.15)
     return fig
-
 
 # ==================================================================
 #  Moment-curvature diagram

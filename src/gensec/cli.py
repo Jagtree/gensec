@@ -470,9 +470,12 @@ def _run(args):
         elif n_levels_mode == "auto":
             N_min_d = float(nm_data["N"].min())
             N_max_d = float(nm_data["N"].max())
+            # n_levels_count interior values, endpoints (N_Rd,min / N_Rd,max,
+            # where M ≡ 0) deliberately excluded. To analyse the axial limits,
+            # request them explicitly via n_levels_mode: explicit.
             N_levels_analysis = sorted(
-                np.linspace(N_min_d, N_max_d, n_levels_count).tolist())
-            print(f"\n  N levels (auto, {n_levels_count} values): "
+                np.linspace(N_min_d, N_max_d, n_levels_count + 2)[1:-1].tolist())
+            print(f"\n  N levels (auto, {n_levels_count} interior values): "
                   f"[{N_min_d/1e3:.0f}, {N_max_d/1e3:.0f}] kN")
         else:
             N_levels_analysis = sorted(

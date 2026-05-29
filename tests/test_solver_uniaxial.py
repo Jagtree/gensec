@@ -447,8 +447,11 @@ class TestMomentCurvature(unittest.TestCase):
                            abs(mc["yield_chi_pos"]))
 
     def test_symmetric_section_symmetric_mchi(self):
-        """Doubly symmetric section -> M-chi symmetric."""
+        """Doubly symmetric section -> M-chi symmetric for valid points."""
         mc = self.nm_gen.generate_moment_curvature(N_fixed=-1000e3)
-        M_max = mc["M_kNm"].max()
-        M_min = mc["M_kNm"].min()
+        M_kNm = mc["M_kNm"]
+        # Extreme-curvature points may be infeasible (NaN) — use nanmax/nanmin.
+        M_max = float(np.nanmax(M_kNm))
+        M_min = float(np.nanmin(M_kNm))
+        self.assertFalse(np.isnan(M_max), "All M values are NaN — no valid equilibrium found")
         self.assertAlmostEqual(M_max, -M_min, delta=abs(M_max) * 0.05)

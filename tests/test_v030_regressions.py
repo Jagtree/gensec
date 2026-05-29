@@ -852,6 +852,85 @@ class TestStagedWarning(unittest.TestCase):
         # flag is on.
         self.assertNotIn("staged combination", buf.getvalue())
 
+# ===========================================================================
+#  B4 — Axial-limit robustness: equilibrium guard & Mx-My degeneracy
+# ===========================================================================
+
+class TestB4_AxialLimitRobustness(unittest.TestCase):
+    r"""
+    At the axial limits of the resistance domain the bending capacity
+    collapses to zero, and beyond an infeasible curvature the target
+    :math:`N` is physically unreachable.  The solver must:
+
+    (i)  flag the Mx-My domain as degenerate at :math:`N_{Rd,\min}`
+         (pure tension) and :math:`N_{Rd,\max}` (squash);
+    (ii) mark unreachable moment-curvature steps as ``NaN`` rather than
+         recording the closest non-equilibrium state, while leaving the
+         feasible interior branch untouched.
+
+    Pre-patch: ``generate_mx_my`` returns a noisy, asymmetric hull at
+    the axial limits with no ``degenerate`` flag, and
+    ``generate_moment_curvature`` contains no ``NaN`` (it silently plots
+    non-equilibrium moments).  Post-patch: limits are flagged,
+    unreachable steps are ``NaN``, interior curves are unchanged.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from gensec.geometry import RectSection, RebarLayer
+        from gensec.materials import Concrete, Steel
+        from gensec.solver import FiberSolver, NMDiagram
+
+        steel = Steel(fyk=450.0)
+        As = np.pi / 4 * 20 ** 2
+        rb = [
+            RebarLayer(y=45,  x=45,  As=As, material=steel),
+            RebarLayer(y=45,  x=255, As=As, material=steel),
+            RebarLayer(y=455, x=45,  As=As, material=steel),
+            RebarLayer(y=455, x=255, As=As, material=steel),
+        ]
+        sec = RectSection(B=300, H=500, bulk_material=Concrete(fck=30.0),
+                          rebars=rb, n_fibers_y=30, n_fibers_x=15)
+        cls.gen = NMDiagram(FiberSolver(sec))
+
+        # Axial limits straight from the uniaxial N-M cloud — the very
+        # quantities cli.py samples in ``n_levels_mode: auto``.
+        nm = cls.gen.generate(n_points=120, direction='x')
+        cls.N_squash = float(np.min(nm["N"]))    # N_Rd,max (compression)
+        cls.N_tens = float(np.max(nm["N"]))      # N_Rd,min (tension)
+        cls.N_interior = 0.5 * (cls.N_squash + cls.N_tens)
+
+    # --- (i) Mx-My domain degeneracy -------------------------------
+    def test_mx_my_degenerate_at_squash(self):
+        res = self.gen.generate_mx_my(self.N_squash, n_angles=72)
+        self.assertTrue(res.get("degenerate", False))
+
+    def test_mx_my_degenerate_at_tension(self):
+        res = self.gen.generate_mx_my(self.N_tens, n_angles=72)
+        self.assertTrue(res.get("degenerate", False))
+
+    def test_mx_my_nondegenerate_interior(self):
+        res = self.gen.generate_mx_my(self.N_interior, n_angles=72)
+        self.assertFalse(res.get("degenerate", False))
+        self.assertTrue(np.all(np.isfinite(res["Mx"])))
+        self.assertGreater(np.nanmax(np.hypot(res["Mx"], res["My"])), 0.0)
+
+    # --- (ii) M-χ feasibility guard --------------------------------
+    def test_mc_no_nan_before_ultimate_interior(self):
+        mc = self.gen.generate_moment_curvature(
+            self.N_interior, n_points=80, direction='x')
+        u_pos, u_neg = mc["ultimate_chi_pos"], mc["ultimate_chi_neg"]
+        self.assertIsNotNone(u_pos)
+        self.assertIsNotNone(u_neg)
+        band = (mc["chi"] >= u_neg) & (mc["chi"] <= u_pos)
+        self.assertTrue(np.all(np.isfinite(mc["M"][band])))
+
+    def test_mc_guard_fires_near_squash(self):
+        # Just inside squash: only small χ is feasible, so the guard
+        # must NaN-mask the unreachable portion of the curve.
+        mc = self.gen.generate_moment_curvature(
+            self.N_squash * 0.995, n_points=80, direction='x')
+        self.assertTrue(np.any(np.isnan(mc["M"])))
 
 if __name__ == "__main__":
     unittest.main()

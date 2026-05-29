@@ -455,3 +455,316 @@ None.  All public API additions are additive.
 | Stale `@pytest.mark.xfail` on `test_analyze_biaxial_column_returns_valid_model` | Now XPASS; decorator should be removed. | v0.3.4 |
 | `integrate_batch_with_tangent` | Analytical tangent in batch mode → halves Newton cost in `_vectorized_solve_N`. | v0.4.0 |
 | Warm-start propagation in `generate_polar_curvature` | Pass `eps0_init` from angle *i* to *i*+1; useful only if fallback rate is high. | v0.4.0 |
+
+
+## Axial-limit robustness: equilibrium feasibility guard & Mx-My domain degeneracy
+
+Correctness-focused release.  At the extremes of the resistance domain
+the bending capacity is *identically* zero: at `N_Rd,min` (pure tension)
+every bar yields uniformly and the section is fully cracked; at
+`N_Rd,max` (squash) the strain field is uniform compression.  Two
+defects made the analyses near these limits produce physically
+meaningless, unstable output:
+
+1. **Sampling on the extremes.**  `n_levels_mode: auto` used
+   `linspace(N_min, N_max, n)`, so the first and last sampled axial
+   levels coincided *exactly* with `N_Rd,max` / `N_Rd,min`, where
+   `M ≡ 0`.
+
+2. **Silent non-equilibrium states.**  Beyond a small curvature the
+   target `N` becomes physically unreachable.  In that case
+   `_solve_eps0_for_N` finds no sign-change bracket and returns
+   `argmin |N(ε₀) − N_target|` — a state that does **not** satisfy axial
+   equilibrium.  Both moment-curvature scanners and `generate_mx_my`
+   recorded the moment of that state without checking the residual.
+
+Symptoms (release-driving): saw-toothed M-χ curves at `N` near the
+limits (moment ≈ `1e-7…1e-3` kN·m, i.e. floating-point zero amplified by
+matplotlib autoscaling) and a spuriously **asymmetric** Mx-My contour at
+`N_Rd,min`, formed by the convex hull of a noise cloud around the origin.
+
+Two orthogonal fixes:
+
+- **(A)** the `auto` sampler now excludes the domain extremes;
+- **(B)** an **axial-equilibrium feasibility guard** masks unreachable
+  states as `NaN` (M-χ) and flags collapsed interaction domains
+  (Mx-My).  (B) is normative-agnostic — it only enforces that no
+  reported result violates `ΣN = N_target`.
+
+The Mx-My asymmetry is resolved **not** by symmetrising the noise but by
+recognising that the domain has collapsed to a point and refusing to
+draw a hull through floating-point dust.
+
+| Defect (pre-patch)                                   | Location                          | Fix |
+|------------------------------------------------------|-----------------------------------|-----|
+| `auto` levels land on `N_Rd,min` / `N_Rd,max`        | `cli.py` ~569                     | A   |
+| M-χ records non-equilibrium moments                  | `_scan_chi` ~1562                 | B   |
+| M-χ (vectorized) records non-equilibrium moments     | `_scan_chi_vectorized` ~1708      | B   |
+| Mx-My convergence filter too loose (`1e3` N)         | `generate_mx_my` ~966             | B   |
+| Mx-My hull built on collapsed-domain noise           | `generate_mx_my` ~985             | B   |
+| Mx-My legend overlaps the x-axis label               | `plot_mx_my_diagram` ~581         | cosmetic |
+
+---
+
+## Files modified
+
+### 1. `src/gensec/solver/capacity.py`
+
+**Two module constants, one helper, three guarded call-sites.**
+
+#### A. Module-level feasibility constants + helper
+
+Insert near the top of the module (above the `NMDiagram` class).
+
+```python
+# --- Equilibrium feasibility guard ---------------------------------
+# A (eps0, chi) state is physically valid only if the axial residual
+#   |N(eps0, chi) - N_target|
+# stays below this tolerance. Beyond it the target N is unreachable at
+# that curvature: the solver returns the closest non-equilibrium state,
+# whose moment is meaningless and must be discarded (set to NaN).
+# Absolute + relative form: the 10 N floor dominates as N_target -> 0
+# (near-pure bending); the relative term avoids false positives at high
+# |N_target|, where 10 N is below the Newton noise.
+_FEAS_ABS_TOL = 10.0      # [N]
+_FEAS_REL_TOL = 1.0e-4    # [-]
+
+def _feas_tol(N_target):
+    """Axial-equilibrium feasibility tolerance [N] for a given target."""
+    return max(_FEAS_ABS_TOL, _FEAS_REL_TOL * abs(N_target))
+
+# --- Mx-My domain degeneracy ---------------------------------------
+# The interaction domain is declared collapsed (axial limit, M_Rd ~ 0)
+# when its outer radius falls below this fraction of a section plastic
+# moment scale  M_ref = f_cd * B * H**2 / 4.  The 3+ order-of-magnitude
+# gap between a real domain (~1e8 N*mm) and limit noise (<=1e3 N*mm)
+# makes the exact coefficient non-critical.
+_DOMAIN_DEGEN_FRAC = 1.0e-3
+```
+
+`_solve_eps0_for_N` is **unchanged**: its `argmin` fallback is still the
+right behaviour for genuinely converging problems; the callers now
+decide whether the returned state is admissible.
+
+#### B. `_scan_chi` — scalar guard
+
+After `N, Mx, My = sv.integrate(eps0, chi_x, chi_y)` (~line 1562),
+**before** `M = ...`:
+
+```python
+if abs(N - N_fixed) > _feas_tol(N_fixed):
+    # Target N unreachable at this curvature: drop the point.
+    Ms[k] = np.nan
+    eps_mins[k] = np.nan
+    eps_maxs[k] = np.nan
+    continue          # keep previous eps0_guess; skip event detection
+```
+
+The `continue` preserves the previous warm-start (the infeasible ε₀ is
+discarded) and prevents cracking/yield/ultimate detection from running
+on a non-equilibrium state.
+
+#### C. `_scan_chi_vectorized` — vectorized guard
+
+After the scalar fallback loop (~line 1708), **before** the moment
+extraction:
+
+```python
+# --- Feasibility mask: drop points failing axial equilibrium ---
+feasible = np.abs(N_arr - N_fixed) <= _feas_tol(N_fixed)
+Mx_arr = np.where(feasible, Mx_arr, np.nan)
+My_arr = np.where(feasible, My_arr, np.nan)
+```
+
+Then fold the mask into the event-detection guard:
+
+```python
+nonzero = (np.abs(chis) > 0) & feasible
+```
+
+(masks 6a/6b/6c already key off `nonzero`).  The `NaN` moments break the
+M-χ polyline at the last feasible χ automatically in matplotlib.
+
+#### D. `generate_mx_my` — tolerance + domain degeneracy
+
+Tighten the solve/filter tolerance (~lines 966–972):
+
+```python
+ftol = _feas_tol(N_fixed)
+_, N_arr, Mx_arr, My_arr = self._vectorized_solve_N(
+    N_fixed, all_chi_x, all_chi_y, tol=ftol)
+
+conv = np.abs(N_arr - N_fixed) <= ftol
+Mx_conv = Mx_arr[conv]
+My_conv = My_arr[conv]
+```
+
+Add collapsed-domain detection immediately after the existing
+`len(Mx_conv) < 3` guard (~line 985):
+
+```python
+# Section plastic moment scale; f_cd from the bulk constitutive law.
+sec = self.solver.sec
+f_cd = abs(self._fcd_bulk)
+M_ref = f_cd * sec.B * sec.H**2 / 4.0
+R = float(np.hypot(Mx_conv, My_conv).max())
+if R < _DOMAIN_DEGEN_FRAC * M_ref:
+    Mxa = np.full(n_angles, np.nan)
+    Mya = np.full(n_angles, np.nan)
+    warnings.warn(
+        f"generate_mx_my: collapsed domain at "
+        f"N={N_fixed / 1e3:.1f} kN (R={R:.2e} N*mm "
+        f"< {_DOMAIN_DEGEN_FRAC * M_ref:.2e}); "
+        f"M_Rd ≈ 0 at axial limit.",
+        RuntimeWarning, stacklevel=2)
+    return {"Mx": Mxa, "My": Mya,
+            "Mx_kNm": Mxa / 1e6, "My_kNm": Mya / 1e6,
+            "N_fixed_kN": N_fixed / 1e3, "degenerate": True}
+```
+
+Add `"degenerate": False` to the normal `return` for a stable schema.
+
+**New attribute required:** `self._fcd_bulk` — the bulk material design
+compressive strength (positive), cached in `NMDiagram.__init__` next to
+`self._emb`.  If a material type exposes no `f_cd`, fall back to a
+documented elastic-based estimate (does not affect the order-of-magnitude
+degeneracy test).
+
+---
+
+### 2. `src/gensec/cli.py`
+
+**One call-site update (behavioural change in `auto` mode).**
+
+`n_levels_mode: auto` now samples the *open* interval — the domain
+extremes `N_Rd,min` / `N_Rd,max` (where `M ≡ 0`) are excluded.  Users
+who want the limits request them explicitly via `n_levels_mode:
+explicit`.
+
+Lines ~569–572:
+
+```python
+# BEFORE
+N_levels_analysis = sorted(
+    np.linspace(N_min_d, N_max_d, n_levels_count).tolist())
+
+# AFTER
+# n_levels_count interior values; endpoints (N_Rd,min / N_Rd,max,
+# where M ≡ 0) deliberately excluded.
+N_levels_analysis = sorted(
+    np.linspace(N_min_d, N_max_d, n_levels_count + 2)[1:-1].tolist())
+```
+
+Update the adjacent `print` to state that the values are interior.
+
+---
+
+### 3. `src/gensec/output/plots.py`
+
+**One degenerate-case branch, one cosmetic fix.**
+
+#### A. `plot_mx_my_diagram` — collapsed-domain annotation
+
+At the top of the function, after `N_fixed = mx_my_data.get(...)`
+(~line 558):
+
+```python
+if mx_my_data.get("degenerate") or np.all(np.isnan(Mx)):
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    ax.text(0.5, 0.5,
+            f"Domain collapsed: $M_{{Rd}} \\approx 0$\n"
+            f"(axial limit, N = {N_fixed:.0f} kN)",
+            ha='center', va='center', transform=ax.transAxes,
+            fontsize=12)
+    ax.set_axis_off()
+    return fig
+```
+
+#### B. `plot_mx_my_diagram` — legend no longer overlaps the x-label
+
+The single-entry legend was anchored below the axes (`bbox_to_anchor=
+(0.5, -0.08)`), overlapping the `Mx [kN·m]` label.  Replace the block
+(~lines 581–586):
+
+```python
+# BEFORE
+ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
+          fontsize=9, ncol=3, borderaxespad=0)
+ax.grid(True, alpha=0.3)
+ax.set_aspect('equal', adjustable='box')
+fig.tight_layout()
+fig.subplots_adjust(bottom=0.15)
+return fig
+
+# AFTER
+ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
+ax.grid(True, alpha=0.3)
+ax.set_aspect('equal', adjustable='box')
+fig.tight_layout()
+return fig
+```
+
+---
+
+### 4. `tests/test_v030_regressions.py`
+
+**One new test class: `TestB4_AxialLimitRobustness`** (5 tests).
+
+- `test_mx_my_degenerate_at_squash` / `_at_tension` — `generate_mx_my`
+  at the two axial limits must return `degenerate=True`.
+- `test_mx_my_nondegenerate_interior` — interior `N` yields a finite,
+  non-degenerate contour with non-zero outer radius.
+- `test_mc_no_nan_before_ultimate_interior` — feasible pre-ultimate M-χ
+  branch contains no `NaN` (defensive regression: the guard must not
+  over-mask valid interior steps).
+- `test_mc_guard_fires_near_squash` — at `0.995·N_Rd,max` the guard must
+  `NaN`-mask the unreachable portion of the curve.
+
+Discriminators (fail pre-patch, pass post-patch): the two `degenerate`
+tests and `test_mc_guard_fires_near_squash`.
+
+---
+
+## Files NOT modified
+
+| File              | Reason                                                      |
+|-------------------|-------------------------------------------------------------|
+| `integrator.py`   | `integrate`, `integrate_batch`, `strain_field` reused as-is |
+| `check.py`        | η metrics consume capacity output; degenerate domains now flagged upstream |
+| `io_yaml.py`      | No new YAML keys (constants are hardcoded by design)        |
+| `geometry.py`     | Not involved                                                |
+| `materials/*`     | Not involved (apart from reading `f_cd`, already exposed)   |
+| `api.py`          | Inherits the fixes through the solver/plot layers           |
+
+---
+
+## Testing plan
+
+### New tests (`test_v030_regressions.py::TestB4_AxialLimitRobustness`)
+
+```
+test_mx_my_degenerate_at_squash
+test_mx_my_degenerate_at_tension
+test_mx_my_nondegenerate_interior
+test_mc_no_nan_before_ultimate_interior
+test_mc_guard_fires_near_squash
+```
+
+### Manual verification
+
+Re-run `example_biaxial_column.yaml`:
+
+- `auto` levels no longer include `+1260` / `−5285` kN; the three
+  interior levels produce clean M-χ curves and finite Mx-My contours.
+- Forcing `n_levels_mode: explicit` with `[1260]` reproduces the
+  collapsed-domain annotation instead of the asymmetric blob.
+
+---
+
+## Follow-up items (not in v0.3.3)
+
+| Item | Description | Target |
+|------|-------------|--------|
+| Expose `_fcd_bulk` uniformly | Guarantee every material type provides a design compressive strength, or a documented surrogate | v0.4.0 |
+| Feasibility guard in `generate_biaxial` | Same residual check on the 3-D surface cloud, for consistency with `generate_mx_my` | v0.3.4 |
+| Inherited from v0.3.2 | Remove `_scan_chi`; drop the `n_points` alias in `plot_polar_ductility` after CLI/API migration | v0.3.3/0.3.4 |
