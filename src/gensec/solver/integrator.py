@@ -898,9 +898,15 @@ class FiberSolver:
         # ----------------------------------------------------------
         if abs(Mx_target) < M_tol and abs(My_target) < M_tol:
             sol = self._solve_pure_axial(N_target, tol, max_iter)
-            if sol["converged"]:
+            if (sol["converged"]
+                    and abs(sol["Mx"]) < M_tol
+                    and abs(sol["My"]) < M_tol):
                 return sol
-            # If pure-axial fails (shouldn't), fall through to 2×2
+            # Fall through: a converged pure-axial (chi=0) state can
+            # still violate moment equilibrium when the section carries
+            # eccentric *internal* self-stress (e.g. an eccentric bonded
+            # tendon at prestress transfer). chi=0 cannot balance that
+            # moment, so the full uniaxial/biaxial solve is required.
 
         # ----------------------------------------------------------
         #  Uniaxial or near-uniaxial

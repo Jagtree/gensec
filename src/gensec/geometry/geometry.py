@@ -565,7 +565,7 @@ class GenericSection:
             self.A_tendons = np.array([t.Ap for t in self.tendons],
                                       dtype=float)
             self.eps_init_tendons = np.array(
-                [t.eps_init for t in self.tendons], dtype=float)
+                [t.eps_pe   for t in self.tendons], dtype=float)
             self.embedded_tendons = np.array(
                 [t.embedded for t in self.tendons], dtype=bool)
             self.mat_indices_tendon = np.array(

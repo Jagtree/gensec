@@ -20,8 +20,28 @@
 Point fiber definitions (rebars, FRP strips, tendons).
 
 Phase 2: each fiber has both x and y coordinates for biaxial bending.
+
+Element taxonomy
+----------------
+This module defines **section elements** — objects that are part of the
+capacity state.  Two element kinds live here:
+
+- :class:`RebarLayer` — a passive point fiber (mild steel, GFRP,
+  stainless, ...).  The constitutive material distinguishes a "slow" bar
+  from an ordinary one; there is deliberately no separate class.
+- :class:`Tendon` — a **bonded** prestressing element, strain-compatible
+  with the section, carrying a :class:`PrestressingSteel` law plus an
+  effective prestrain :math:`\\varepsilon_{pe}`.
+
+A prestressing *force* applied to hardened concrete (jacking, unbonded
+or external tendons) is **not** an element — it is a load source and is
+modeled by ``PrestressAction`` in the demand layer, never here.  The
+element-vs-load split is the bonded-vs-unbonded boundary: bonded →
+``Tendon`` element (in the capacity state); unbonded/external/during
+jacking → ``PrestressAction`` load (in the demand).
 """
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 from ..materials.base import Material
@@ -85,7 +105,6 @@ class RebarLayer:
 
     def __post_init__(self):
         """Compute As from diameter if not provided explicitly."""
-        import math
         if self.As <= 0.0 and self.diameter > 0.0:
             self.As = self.n_bars * math.pi / 4.0 * self.diameter ** 2
         if self.As <= 0.0:
@@ -98,118 +117,119 @@ class RebarLayer:
 @dataclass
 class Tendon:
     r"""
-    A prestressing tendon as a point fiber with a locked-in prestrain.
+    A bonded prestressing tendon as a strain-compatible section element.
 
-    A tendon is distinct from a :class:`RebarLayer`: it carries an
-    **effective prestrain** :math:`\varepsilon_{pe}` that is locked in
-    independently of the section's strain field.  The total strain
-    seen by the tendon's constitutive law is
+    A :class:`Tendon` is the prestress counterpart of
+    :class:`RebarLayer`: a point fiber carrying its own
+    :class:`~gensec.materials.steel.PrestressingSteel` law, plus the one
+    datum that distinguishes a tendon from a passive bar — the
+    **effective prestrain** :math:`\varepsilon_{pe}`.
+
+    The solver evaluates the tendon's constitutive law at the **offset
+    total strain**
 
     .. math::
 
-        \varepsilon_{\text{tot},i}
-            = \varepsilon_{\text{sec},i} + \varepsilon_{\text{init},i}
+        \varepsilon_{\text{tot}}
+            = \varepsilon_{\text{sec}} + \varepsilon_{pe},
 
-    where :math:`\varepsilon_{\text{sec},i}` is the section strain at
-    the tendon location (from the strain plane) and
-    :math:`\varepsilon_{\text{init},i}` is the locked-in initial
-    strain.  In this phase (bonded, single instant, no losses) the
-    initial strain equals the effective prestrain,
-    :math:`\varepsilon_{\text{init}} = \varepsilon_{pe}`.
+    while the displaced bulk (for an embedded tendon) is evaluated at the
+    section strain :math:`\varepsilon_{\text{sec}}` alone.  Equivalently,
+    :math:`\varepsilon_{pe}` is a per-element imposed-strain offset; the
+    same generic mechanism also carries shrinkage/thermal fields on the
+    bulk (named ``eps_init`` there).
 
-    Hard correctness invariant
-    --------------------------
-    The initial strain is **not** added to the section strain field
-    globally.  Only the tendon evaluates its own law at the offset
-    total strain; the displaced bulk (concrete) that the tendon
-    occupies is evaluated at the **section** strain alone — the
-    concrete never sees the tendon's locked-in strain.  This is
-    enforced in the integrator, which evaluates the tendon and the
-    displaced-bulk laws at two different strain arguments.
+    Reference datum and elastic shortening
+    --------------------------------------
+    :math:`\varepsilon_{pe}` is referenced to the **unstrained-concrete**
+    (casting) state, so that :math:`\varepsilon_{\text{sec}}=0` means the
+    pre-transfer (jacking) configuration.  For a pre-tensioned strand,
+    :math:`\varepsilon_{pe}` is initialised to the jacking strain
+    :math:`\sigma_{p0}/E_p`.  The immediate **elastic-shortening loss is
+    not stored** in :math:`\varepsilon_{pe}`: it *emerges* from section
+    equilibrium as a non-zero :math:`\varepsilon_{\text{sec}}` at the
+    tendon (see :mod:`gensec.solver.prestress_transfer`).  Only the
+    later, time-dependent losses (relaxation, creep, shrinkage) reduce
+    :math:`\varepsilon_{pe}` and thereby move the resistance domain.
 
-    Sign convention
-    --------------
-    :math:`\varepsilon_{pe} > 0` is a tensile prestrain, consistent
-    with the symmetric prestressing-steel diagram.
+    Because :math:`\varepsilon_{pe}` is referenced to the geometric
+    datum, the same fixed offset is correct for the whole life including
+    the capacity-domain integration
+    :math:`\sigma_p(\varepsilon_{\text{sec}} + \varepsilon_{pe})`.
+
+    The area :math:`A_p` may be given directly or computed from a single
+    strand area and a strand count:
+
+    .. math::
+
+        A_p = n_{\text{strands}} \cdot A_{\text{strand}}.
 
     Parameters
     ----------
     y : float
-        Vertical coordinate from bottom edge [mm].
-    material : Material
-        Constitutive law, typically
-        :class:`~gensec.materials.steel.PrestressingSteel`.
+        Vertical coordinate from the bottom edge [mm].
     Ap : float, optional
         Tendon cross-sectional area [mm²].  If 0 or omitted, computed
-        from ``n_strands`` and ``area_strand``.
-    eps_pe : float, optional
-        Effective prestrain (after losses, positive = tension).
-        Default 0.0.  In Phase 1 this is taken as the locked-in
-        initial strain directly.
+        from ``A_strand`` and ``n_strands``.
+    material : Material
+        Prestressing-steel constitutive law (total-strain), e.g. a
+        :class:`~gensec.materials.steel.PrestressingSteel`.
     x : float, optional
-        Horizontal coordinate from left edge [mm].  If ``None``,
-        defaults to the section centroid x-coordinate during
-        assembly.
-    system : {'pre', 'post'}, optional
-        Prestressing system: pre-tensioned or post-tensioned.  Stored
-        for downstream phases (anchorage, bond, duct grouting); does
-        not change the Phase 1 bonded computation.  Default ``'pre'``.
-    bonded : bool, optional
-        Whether the tendon is bonded to the surrounding concrete.
-        Phase 1 supports **bonded only**; ``False`` raises
-        :class:`NotImplementedError`.  Default ``True``.
+        Horizontal coordinate from the left edge [mm].  If ``None``,
+        defaults to the section x-centroid during section assembly.
+    eps_pe : float, optional
+        Effective prestrain referenced to the unstrained-concrete state.
+        Default 0.0 (an un-prestressed tendon degenerates to a passive
+        bar).  For a pre-tensioned strand this is the jacking strain
+        :math:`\sigma_{p0}/E_p` before time-dependent losses.
     embedded : bool, optional
-        If ``True`` (default), the tendon displaces bulk material and
-        the integrator subtracts the bulk contribution at the tendon
-        location (evaluated at the section strain).  Set ``False`` for
-        external (unbonded-external, e.g. deviated) tendons — out of
-        Phase 1 scope.
+        If ``True`` (default), the tendon is inside the bulk and the
+        integrator subtracts the displaced-bulk stress at its location
+        to avoid double-counting the area.  ``False`` for external /
+        unbonded geometry (but note: an unbonded prestressing *force* on
+        hardened concrete belongs in ``PrestressAction``, not here).
     n_strands : int, optional
-        Number of strands.  Default 1.  Used to compute ``Ap`` when
-        ``area_strand`` is given.
-    area_strand : float, optional
-        Single-strand area [mm²].  Default 0.  When positive and
-        ``Ap`` is 0, ``Ap = n_strands * area_strand``.
+        Number of strands.  Default 1.  Used with ``A_strand`` to
+        compute ``Ap``.
+    A_strand : float, optional
+        Single-strand area [mm²].  Default 0.  When positive and ``Ap``
+        is 0, ``Ap = n_strands * A_strand``.
 
-    Attributes
-    ----------
-    eps_init : float
-        Locked-in initial strain applied as an offset by the solver.
-        In Phase 1, equals ``eps_pe``.
+    Notes
+    -----
+    The geometry and integrator treat tendons and bars through the same
+    point-fiber code paths; the prestrain offset is the only addition.
+    At section assembly, :attr:`eps_pe` is mapped onto the solver's
+    generic per-element offset array.
+
+    Examples
+    --------
+    A single 7-wire strand (Ap = 150 mm²) jacked to 1395 MPa
+    (:math:`E_p = 195\,000` MPa):
+
+    >>> from gensec.materials.steel import PrestressingSteel
+    >>> ps = PrestressingSteel(f_p01d=1391.3, Ep=195000.0)
+    >>> t = Tendon(y=60.0, Ap=150.0, material=ps,
+    ...            eps_pe=1395.0 / 195000.0)
+    >>> round(t.eps_pe, 5)
+    0.00715
     """
 
     y: float
-    material: Material = None
     Ap: float = 0.0
-    eps_pe: float = 0.0
+    material: Material = None
     x: Optional[float] = None
-    system: str = "pre"
-    bonded: bool = True
+    eps_pe: float = 0.0
     embedded: bool = True
     n_strands: int = 1
-    area_strand: float = 0.0
+    A_strand: float = 0.0
 
     def __post_init__(self):
-        """Validate area/system and derive the initial strain."""
-        if self.Ap <= 0.0 and self.area_strand > 0.0:
-            self.Ap = self.n_strands * self.area_strand
+        """Compute Ap from strand area/count if not given explicitly."""
+        if self.Ap <= 0.0 and self.A_strand > 0.0:
+            self.Ap = self.n_strands * self.A_strand
         if self.Ap <= 0.0:
             raise ValueError(
                 f"Tendon at y={self.y}: Ap must be positive. "
-                f"Provide Ap directly or set area_strand > 0."
+                f"Provide Ap directly or set A_strand > 0."
             )
-        if self.system not in ("pre", "post"):
-            raise ValueError(
-                f"Tendon at y={self.y}: system must be 'pre' or "
-                f"'post', got '{self.system}'."
-            )
-        if not self.bonded:
-            raise NotImplementedError(
-                "Phase 1 supports bonded tendons only "
-                "(bonded=True). Unbonded/external tendons require "
-                "the member-level elongation compatibility of a "
-                "later phase."
-            )
-        # Phase 1: single instant, no losses → initial strain is the
-        # effective prestrain directly.
-        self.eps_init = self.eps_pe
