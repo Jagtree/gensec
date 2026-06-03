@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------------------
+# GenSec — prestress Phase 1 example
+#
+# A rectangular post-tensioned beam section with a single bonded tendon.
+# Demonstrates:
+#   - the prestressing_steel_ec2 material (designation OR explicit values)
+#   - the tendons block with an effective prestrain eps_pe
+#   - partial factor gamma_S derived from the limit state / national annex
+#
+# Phase 1 scope: bonded tendon, single instant, no losses, no staging.
+# The locked-in prestrain eps_pe is supplied directly; loss computation
+# and staged construction are later phases.
+# ---------------------------------------------------------------------------
+
+materials:
+  # Concrete C40/50 (EC2), parabola-rectangle, ULS fundamental.
+  conc:
+    type: concrete_ec2_gen1
+    fck: 40
+    ls: F
+
+  # Prestressing steel — option A: standard EN 10138 designation.
+  # The inclined design branch towards f_pd is selected; gamma_S = 1.15
+  # is resolved from ls='F'.
+  ps_strand:
+    type: prestressing_steel_ec2
+    class: Y1860S7        # f_p01k=1600, f_pk=1860, eps_uk=0.035, Ep=195000
+    ls: F
+    diagram: inclined     # or 'horizontal'
+    # eps_ud_factor: 0.9  # default, EC2 §3.3.6(7)
+
+  # Ordinary reinforcement (B450C).
+  rebar_steel:
+    type: steel
+    fyk: 450
+    Es: 200000
+
+  # Option B (equivalent, explicit) — uncomment to use instead:
+  # ps_strand:
+  #   type: prestressing_steel_ec2
+  #   f_p01k: 1600
+  #   f_pk: 1860
+  #   eps_uk: 0.035
+  #   Ep: 195000
+  #   ls: F
+  #   diagram: inclined
+
+section:
+  B: 400
+  H: 800
+  bulk_material: conc
+  n_fibers_y: 200
+
+  rebars:
+    - {y: 60,  x: 60,  As: 314, material: rebar_steel}
+    - {y: 60,  x: 340, As: 314, material: rebar_steel}
+
+  # Prestressing tendons (Phase 1: bonded).
+  tendons:
+    - y: 120          # eccentric, below centroid (yc = 400)
+      x: 200          # centred in x
+      material: ps_strand
+      Ap: 1400        # mm^2  (e.g. 10 strands * 140 mm^2)
+      eps_pe: 0.0065  # effective prestrain after losses (tension +)
+      system: post    # 'pre' or 'post' (stored; no effect in Phase 1)
+      bonded: true    # Phase 1 supports bonded only

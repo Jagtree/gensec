@@ -19,11 +19,12 @@
 """
 Geometry subpackage.
 
-Provides section definition classes: point fibers (:class:`RebarLayer`)
-and rectangular section assemblies (:class:`RectSection`).
+Provides section definition classes: point fibers (:class:`RebarLayer`),
+prestressing tendons (:class:`Tendon`) and rectangular section assemblies
+(:class:`RectSection`).
 """
 
-from .fiber import RebarLayer
+from .fiber import RebarLayer, Tendon
 from .section import RectSection
 from .geometry import GenericSection
 
@@ -36,7 +37,7 @@ from .properties import (
     compute_kern_polygon,
 )
 
-__all__ = ["RebarLayer", "RectSection", "GenericSection",
+__all__ = ["RebarLayer", "Tendon", "RectSection", "GenericSection",
     "SectionProperties",
     "HomogenizedRebar",
     "compute_section_properties",

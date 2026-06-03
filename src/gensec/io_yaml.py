@@ -90,11 +90,14 @@ import yaml
 import numpy as np
 
 from .materials import Concrete, Steel, TabulatedMaterial
-from .geometry.fiber import RebarLayer
+from .geometry.fiber import RebarLayer, Tendon
 from .geometry.section import RectSection
 from .geometry.geometry import GenericSection
 from .geometry import primitives as prim
-from .materials.ec2_bridge import concrete_from_class, concrete_from_ec2
+from .materials.ec2_bridge import (
+    concrete_from_class, concrete_from_ec2,
+    prestress_from_ec2, prestress_from_class,
+)
 
 
 # ---- Material builders (unchanged) ----
@@ -152,6 +155,39 @@ def _build_material(name, spec):
 
     # Resolve backward-compatible aliases.
     mat_type = _MATERIAL_ALIASES.get(mat_type, mat_type)
+
+    if mat_type == "prestressing_steel_ec2":
+        # EC2 §3.3 prestressing steel. Either a standard designation
+        # ('class', e.g. 'Y1860S7') or explicit characteristic values
+        # (f_p01k, f_pk, eps_uk). The partial factor derives from the
+        # limit state / national annex, exactly as for concrete.
+        common = dict(
+            ls=spec.get("ls", "F"),
+            NA=spec.get("NA", "EC2"),
+            eps_ud_factor=float(spec.get("eps_ud_factor", 0.9)),
+            gamma_s_override=spec.get("gamma_s_override"),
+            diagram=spec.get("diagram", "horizontal"),
+            works_in_compression=bool(
+                spec.get("works_in_compression", True)),
+        )
+        ps_class = spec.get("class")
+        if ps_class:
+            return prestress_from_class(ps_class, **common)
+        f_p01k = spec.get("f_p01k")
+        f_pk = spec.get("f_pk")
+        eps_uk = spec.get("eps_uk")
+        if f_p01k is None or f_pk is None or eps_uk is None:
+            raise ValueError(
+                f"Material '{name}': prestressing_steel_ec2 requires "
+                f"'class' (e.g. 'Y1860S7') or all of "
+                f"'f_p01k', 'f_pk', 'eps_uk'."
+            )
+        return prestress_from_ec2(
+            f_p01k=float(f_p01k), f_pk=float(f_pk),
+            eps_uk=float(eps_uk),
+            Ep=float(spec.get("Ep", 195000.0)),
+            **common,
+        )
 
     if mat_type == "concrete_ec2_gen1":
         # Tension branch flags (common to both class-based and fck-based).
@@ -305,6 +341,9 @@ def load_yaml(filepath):
     # Parse rebars (common to both modes)
     rebars = _parse_rebars(sec_spec, materials)
 
+    # Parse tendons (prestress, common to both modes)
+    tendons = _parse_tendons(sec_spec, materials)
+
     if "shape" in sec_spec:
         # ---- New generic mode ----
         polygon = _build_polygon(sec_spec)
@@ -328,6 +367,7 @@ def load_yaml(filepath):
             mesh_size=float(sec_spec.get("mesh_size", 10)),
             mesh_method=sec_spec.get("mesh_method", "grid"),
             bulk_materials=bulk_materials,
+            tendons=tendons,
         )
     else:
         # ---- Legacy rectangular mode ----
@@ -339,6 +379,7 @@ def load_yaml(filepath):
             n_fibers_y=int(sec_spec.get("n_fibers_y",
                             sec_spec.get("n_fibers", 100))),
             n_fibers_x=int(sec_spec.get("n_fibers_x", 1)),
+            tendons=tendons,
         )
 
     # ---- Demands ----
@@ -402,6 +443,59 @@ def _parse_rebars(sec_spec, materials):
             diameter=float(rb_spec.get("diameter", 0)),
         ))
     return rebars
+
+
+def _parse_tendons(sec_spec, materials):
+    r"""
+    Parse the ``tendons`` list from a section YAML block (prestress).
+
+    Each tendon entry specifies a location, a prestressing-steel
+    material, an area (directly via ``Ap`` or via ``n_strands`` and
+    ``area_strand``), and an effective prestrain ``eps_pe`` (positive
+    = tension).  Phase 1 supports bonded tendons only.
+
+    .. code-block:: yaml
+
+        tendons:
+          - y: 80
+            x: 200
+            material: ps_1
+            Ap: 1400
+            eps_pe: 0.0065
+            system: post
+            bonded: true
+
+    Parameters
+    ----------
+    sec_spec : dict
+        Section specification dict.
+    materials : dict
+        Material name → Material mapping.
+
+    Returns
+    -------
+    list of Tendon
+    """
+    tendons = []
+    for t_spec in sec_spec.get("tendons", []):
+        mat_name = t_spec["material"]
+        if mat_name not in materials:
+            raise ValueError(
+                f"Tendon material '{mat_name}' not found in materials."
+            )
+        tendons.append(Tendon(
+            y=float(t_spec["y"]),
+            material=materials[mat_name],
+            Ap=float(t_spec.get("Ap", 0)),
+            eps_pe=float(t_spec.get("eps_pe", 0.0)),
+            x=float(t_spec["x"]) if "x" in t_spec else None,
+            system=t_spec.get("system", "pre"),
+            bonded=bool(t_spec.get("bonded", True)),
+            embedded=bool(t_spec.get("embedded", True)),
+            n_strands=int(t_spec.get("n_strands", 1)),
+            area_strand=float(t_spec.get("area_strand", 0)),
+        ))
+    return tendons
 
 
 def _parse_demand(d_spec):

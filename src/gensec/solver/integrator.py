@@ -99,6 +99,22 @@ class FiberSolver:
         self._ly_rebar = self.sec.y_rebars - self.y_ref
         self._lx_rebar = self.sec.x_rebars - self.x_ref
 
+        # Tendon lever arms and locked-in initial strains.  Sections
+        # without tendons (legacy or non-prestressed) expose empty
+        # arrays from ``_setup_tendons``; ``getattr`` keeps the solver
+        # tolerant of sections built before the prestress phase.
+        self._y_tendon = getattr(self.sec, 'y_tendons',
+                                 np.empty(0, dtype=float))
+        self._x_tendon = getattr(self.sec, 'x_tendons',
+                                 np.empty(0, dtype=float))
+        self._ly_tendon = self._y_tendon - self.y_ref
+        self._lx_tendon = self._x_tendon - self.x_ref
+        self._eps_init_tendon = getattr(
+            self.sec, 'eps_init_tendons', np.empty(0, dtype=float))
+        self._has_tendons = len(self._y_tendon) > 0
+        self._tendon_groups = (self._build_tendon_groups()
+                               if self._has_tendons else [])
+
         # Build bulk material groups for multi-material support
         self._bulk_groups = self._build_bulk_groups()
         self._is_multi_material = len(self._bulk_groups) > 1
@@ -149,6 +165,54 @@ class FiberSolver:
             groups[key][2].append(i)
         return [(rm, bm, np.array(ix))
                 for rm, bm, ix in groups.values()]
+
+    def _build_tendon_groups(self):
+        r"""
+        Group tendons by the pair
+        ``(tendon material, bulk-zone material)``.
+
+        Identical zoning logic to :meth:`_build_rebar_groups`: a
+        bonded tendon inside a confined core must subtract the bulk
+        stress evaluated with the constitutive law of the zone it
+        physically occupies.  Splitting by ``(tendon mat, zone mat)``
+        vectorises the lookup with no per-tendon branching.
+
+        Unlike rebars, the tendon's own law is evaluated at the
+        **offset** total strain (section strain + locked-in initial
+        strain), while the displaced-bulk subtraction uses the
+        **section** strain — the two arguments differ.  The grouping
+        carries the per-tendon initial-strain offset alongside the
+        indices so the integrator can apply it group-wise.
+
+        Returns
+        -------
+        list of tuple
+            Each tuple is
+            ``(tendon_material, bulk_zone_material,
+            ndarray_of_tendon_indices, ndarray_of_eps_init)``.
+        """
+        sec = self.sec
+        all_bulk_mats = (sec.get_all_bulk_materials()
+                         if hasattr(sec, 'get_all_bulk_materials')
+                         else [sec.bulk_material])
+        mat_idx_t = getattr(sec, 'mat_indices_tendon', None)
+        if mat_idx_t is None:
+            mat_idx_t = np.zeros(len(sec.tendons), dtype=int)
+
+        groups = {}
+        for i, t in enumerate(sec.tendons):
+            key = (id(t.material), int(mat_idx_t[i]))
+            if key not in groups:
+                bulk_mat = all_bulk_mats[mat_idx_t[i]]
+                groups[key] = (t.material, bulk_mat, [])
+            groups[key][2].append(i)
+
+        out = []
+        for rm, bm, ix in groups.values():
+            ix_arr = np.array(ix)
+            out.append((rm, bm, ix_arr,
+                        self._eps_init_tendon[ix_arr]))
+        return out
 
     def _build_bulk_groups(self):
         r"""
@@ -214,6 +278,165 @@ class FiberSolver:
         eb = eps0 + chi_x * self._ly_bulk - chi_y * self._lx_bulk
         er = eps0 + chi_x * self._ly_rebar - chi_y * self._lx_rebar
         return eb, er
+
+    # ==================================================================
+    #  Tendon contribution (prestress) — decoupled-argument core
+    # ==================================================================
+
+    def _tendon_section_strain(self, eps0, chi_x, chi_y=0.0):
+        r"""
+        Section strain at each tendon location (no prestrain offset).
+
+        .. math::
+
+            \varepsilon_{\text{sec},i} = \varepsilon_0
+                + \chi_x (y_i - y_{\text{ref}})
+                - \chi_y (x_i - x_{\text{ref}})
+
+        This is the strain the **displaced bulk** sees.  The tendon's
+        own law is evaluated at this value plus the locked-in initial
+        strain; see :meth:`_tendon_forces`.
+
+        Parameters
+        ----------
+        eps0, chi_x : float
+        chi_y : float, optional
+
+        Returns
+        -------
+        numpy.ndarray
+            Section strain at tendons, shape ``(n_tendons,)``.
+        """
+        return (eps0 + chi_x * self._ly_tendon
+                - chi_y * self._lx_tendon)
+
+    def _tendon_forces(self, et_sec, want_tangent=False):
+        r"""
+        Accumulate tendon force/moment contributions (and tangent).
+
+        Implements the hard correctness invariant for bonded
+        prestress: the tendon evaluates its own constitutive law at
+        the **offset total strain**
+
+        .. math::
+
+            \varepsilon_{\text{tot},i} =
+                \varepsilon_{\text{sec},i} + \varepsilon_{\text{init},i}
+
+        while the **displaced bulk** is evaluated at the section
+        strain :math:`\varepsilon_{\text{sec},i}` alone.  The net
+        embedded-tendon stress is therefore evaluated at two different
+        arguments:
+
+        .. math::
+
+            \sigma^{\text{net}}_i =
+                \sigma_p(\varepsilon_{\text{sec},i}
+                         + \varepsilon_{\text{init},i})
+                - \sigma_{\text{bulk}}(\varepsilon_{\text{sec},i})
+
+        Because :math:`\varepsilon_{\text{init},i}` is a constant in
+        this phase, the chain rule passes it through unchanged, so the
+        net tangent modulus is
+
+        .. math::
+
+            E^{\text{net}}_{t,i} =
+                E^{p}_t(\varepsilon_{\text{sec},i}
+                        + \varepsilon_{\text{init},i})
+                - E^{\text{bulk}}_t(\varepsilon_{\text{sec},i})
+
+        evaluated at the same two arguments; the
+        :math:`\boldsymbol{\varphi}\boldsymbol{\varphi}^T` outer
+        product structure of the stiffness is unaffected.
+
+        Parameters
+        ----------
+        et_sec : numpy.ndarray
+            Section strain at tendons, shape ``(n_tendons,)`` (1-D) or
+            ``(n_configs, n_tendons)`` (batch).
+        want_tangent : bool, optional
+            If ``True``, also accumulate the 3×3 tangent-stiffness
+            contribution.  Only valid for the 1-D case.  Default
+            ``False``.
+
+        Returns
+        -------
+        N, Mx, My : float or numpy.ndarray
+            Tendon force/moment contributions.  Scalars for the 1-D
+            case, arrays of shape ``(n_configs,)`` for the batch case.
+        K : numpy.ndarray, optional
+            3×3 tangent-stiffness contribution.  Returned only when
+            ``want_tangent`` is ``True``.
+
+        Notes
+        -----
+        ``embedded`` is honoured exactly as for rebars: a
+        non-embedded tendon does not displace bulk, so the bulk
+        subtraction is skipped for those entries.
+        """
+        batch = et_sec.ndim == 2
+        embedded = getattr(self.sec, 'embedded_tendons',
+                           np.ones(et_sec.shape[-1], dtype=bool))
+
+        if batch:
+            N = np.zeros(et_sec.shape[0])
+            Mx = np.zeros(et_sec.shape[0])
+            My = np.zeros(et_sec.shape[0])
+        else:
+            N = Mx = My = 0.0
+            if want_tangent:
+                K = np.zeros((3, 3))
+
+        for mat, bulk_mat, idx, eps_init in self._tendon_groups:
+            a = self.sec.A_tendons[idx]
+            ly_t = self._ly_tendon[idx]
+            lx_t = self._lx_tendon[idx]
+            emb = embedded[idx]
+
+            if batch:
+                e_sec_g = et_sec[:, idx]
+                e_tot_g = e_sec_g + eps_init[None, :]
+                s_tendon = mat.stress_array(e_tot_g)
+                s_bulk = bulk_mat.stress_array(e_sec_g)
+                s_net = s_tendon.copy()
+                s_net[:, emb] -= s_bulk[:, emb]
+                fa = s_net * a[None, :]
+                N += fa.sum(axis=1)
+                Mx += (fa * ly_t[None, :]).sum(axis=1)
+                My -= (fa * lx_t[None, :]).sum(axis=1)
+                continue
+
+            e_sec_g = et_sec[idx]
+            e_tot_g = e_sec_g + eps_init
+            s_tendon = mat.stress_array(e_tot_g)
+            s_bulk = bulk_mat.stress_array(e_sec_g)
+            s_net = s_tendon.copy()
+            s_net[emb] -= s_bulk[emb]
+            fa = s_net * a
+            N += float(np.sum(fa))
+            Mx += float(np.sum(fa * ly_t))
+            My -= float(np.sum(fa * lx_t))
+
+            if want_tangent:
+                Et_tendon = mat.tangent_array(e_tot_g)
+                Et_bulk = bulk_mat.tangent_array(e_sec_g)
+                Et_net = Et_tendon.copy()
+                Et_net[emb] -= Et_bulk[emb]
+                EtA = Et_net * a
+                K[0, 0] += float(np.sum(EtA))
+                K[0, 1] += float(np.sum(EtA * ly_t))
+                K[0, 2] -= float(np.sum(EtA * lx_t))
+                K[1, 1] += float(np.sum(EtA * ly_t * ly_t))
+                K[1, 2] -= float(np.sum(EtA * ly_t * lx_t))
+                K[2, 2] += float(np.sum(EtA * lx_t * lx_t))
+
+        if not batch and want_tangent:
+            K[1, 0] = K[0, 1]
+            K[2, 0] = K[0, 2]
+            K[2, 1] = K[1, 2]
+            return N, Mx, My, K
+        return N, Mx, My
 
     def integrate(self, eps0, chi_x, chi_y=0.0):
         r"""
@@ -286,6 +509,14 @@ class FiberSolver:
             N += float(np.sum(fa))
             Mx += float(np.sum(fa * self._ly_rebar[idx]))
             My -= float(np.sum(fa * self._lx_rebar[idx]))
+
+        # ---- Tendon contribution (prestress) ----
+        if self._has_tendons:
+            et = self._tendon_section_strain(eps0, chi_x, chi_y)
+            Nt, Mxt, Myt = self._tendon_forces(et)
+            N += Nt
+            Mx += Mxt
+            My += Myt
 
         return N, Mx, My
 
@@ -404,6 +635,17 @@ class FiberSolver:
             K[1, 2] -= float(np.sum(EtA_r * ly_r * lx_r))
             K[2, 2] += float(np.sum(EtA_r * lx_r * lx_r))
 
+        # ---- Tendon contribution (prestress) ----
+        # Decoupled-argument force and tangent; see _tendon_forces.
+        if self._has_tendons:
+            et = self._tendon_section_strain(eps0, chi_x, chi_y)
+            Nt, Mxt, Myt, Kt = self._tendon_forces(
+                et, want_tangent=True)
+            N += Nt
+            Mx += Mxt
+            My += Myt
+            K += Kt
+
         # Symmetric
         K[1, 0] = K[0, 1]
         K[2, 0] = K[0, 2]
@@ -470,6 +712,19 @@ class FiberSolver:
 
         # Rebar strains: (n, n_rebars)
         n_rebars = len(self.sec.y_rebars)
+
+        # ---- Tendon contribution (prestress), batch ----
+        # Computed before the rebar early-return so a section with
+        # tendons but no rebars is handled correctly.
+        if self._has_tendons:
+            et = (eps0[:, None]
+                  + chi_x[:, None] * self._ly_tendon[None, :]
+                  - chi_y[:, None] * self._lx_tendon[None, :])
+            Nt, Mxt, Myt = self._tendon_forces(et)
+            N = N + Nt
+            Mx = Mx + Mxt
+            My = My + Myt
+
         if n_rebars == 0:
             return N, Mx, My
 
@@ -1261,7 +1516,15 @@ class FiberSolver:
         emb = self.sec.embedded_rebars
         sr_net[emb] -= sb_at_rebars[emb]
 
-        return {
+        # ---- Tendon stresses (SLS): decoupled-argument evaluation ----
+        # Each tendon's own law is evaluated at the offset total strain
+        # (section strain + locked-in prestrain); the displaced bulk is
+        # evaluated at the section strain.  Reported quantities:
+        #   eps_sec  — section strain at the tendon
+        #   eps_tot  — total strain seen by the tendon law
+        #   sigma    — tendon stress sigma_p(eps_tot)
+        #   sigma_net— net embedded stress (after bulk subtraction)
+        result = {
             "bulk": {
                 "x": self.sec.x_fibers.copy(),
                 "y": self.sec.y_fibers.copy(),
@@ -1279,6 +1542,34 @@ class FiberSolver:
                 "embedded": self.sec.embedded_rebars.copy(),
             },
         }
+
+        if self._has_tendons:
+            et_sec = self._tendon_section_strain(eps0, chi_x, chi_y)
+            et_tot = np.zeros_like(et_sec)
+            sp = np.zeros_like(et_sec)
+            sb_at_tendons = np.zeros_like(et_sec)
+            for mat, bulk_mat, idx, eps_init in self._tendon_groups:
+                e_sec_g = et_sec[idx]
+                e_tot_g = e_sec_g + eps_init
+                et_tot[idx] = e_tot_g
+                sp[idx] = mat.stress_array(e_tot_g)
+                sb_at_tendons[idx] = bulk_mat.stress_array(e_sec_g)
+            sp_net = sp.copy()
+            emb_t = self.sec.embedded_tendons
+            sp_net[emb_t] -= sb_at_tendons[emb_t]
+            result["tendons"] = {
+                "x": self.sec.x_tendons.copy(),
+                "y": self.sec.y_tendons.copy(),
+                "eps_sec": et_sec.copy(),
+                "eps_init": self._eps_init_tendon.copy(),
+                "eps_tot": et_tot.copy(),
+                "sigma": sp.copy(),
+                "sigma_net": sp_net.copy(),
+                "A": self.sec.A_tendons.copy(),
+                "embedded": self.sec.embedded_tendons.copy(),
+            }
+
+        return result
 
     def strains_within_limits(self, eps0, chi_x, chi_y=0.0):
         r"""
@@ -1323,5 +1614,16 @@ class FiberSolver:
             if np.any(e_group < mat.eps_min) or \
                np.any(e_group > mat.eps_max):
                 return False
+
+        # Tendons: limits apply to the TOTAL strain (section strain +
+        # locked-in prestrain), since that is the argument of the
+        # tendon's constitutive law.
+        if self._has_tendons:
+            et_sec = self._tendon_section_strain(eps0, chi_x, chi_y)
+            for mat, _bulk_mat, idx, eps_init in self._tendon_groups:
+                e_tot = et_sec[idx] + eps_init
+                if np.any(e_tot < mat.eps_min) or \
+                   np.any(e_tot > mat.eps_max):
+                    return False
 
         return True

@@ -53,7 +53,7 @@ from ..materials.base import Material
 
 
 def RectSection(B, H, bulk_material, rebars,
-                n_fibers_y=100, n_fibers_x=1):
+                n_fibers_y=100, n_fibers_x=1, tendons=None):
     r"""
     Create a rectangular :class:`GenericSection`.
 
@@ -93,6 +93,7 @@ def RectSection(B, H, bulk_material, rebars,
         mesh_size=dy,
         mesh_method="grid",
         n_grid_y=n_fibers_y,
+        tendons=tendons if tendons is not None else [],
     )
 
     if n_fibers_x > 1:

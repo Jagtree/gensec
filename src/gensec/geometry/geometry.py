@@ -74,7 +74,7 @@ from shapely.geometry import Polygon, MultiPolygon, box as shapely_box
 from shapely.ops import unary_union
 from shapely import affinity
 
-from .fiber import RebarLayer
+from .fiber import RebarLayer, Tendon
 from ..materials.base import Material
 
 
@@ -173,6 +173,7 @@ class GenericSection:
     bulk_materials: List[tuple] = field(default_factory=list)
     n_grid_x: Optional[int] = None
     n_grid_y: Optional[int] = None
+    tendons: List["Tendon"] = field(default_factory=list)
 
     def __post_init__(self):
         # ---- Validate polygon ----
@@ -213,6 +214,9 @@ class GenericSection:
 
         # ---- Rebars ----
         self._setup_rebars()
+
+        # ---- Tendons (prestress, Phase 1: bonded) ----
+        self._setup_tendons()
 
     # ------------------------------------------------------------------
     #  Grid meshing
@@ -530,6 +534,52 @@ class GenericSection:
             self.embedded_rebars = np.empty(0, dtype=bool)
             self.mat_indices_rebar = np.empty(0, dtype=int)
 
+    def _setup_tendons(self):
+        r"""
+        Finalize tendon arrays (prestress, Phase 1).
+
+        Builds the parallel point-fiber arrays the solver consumes for
+        tendons, analogous to :meth:`_setup_rebars` but with the extra
+        ``eps_init_tendons`` array carrying each tendon's locked-in
+        initial strain.  As for rebars:
+
+        - a tendon with ``x=None`` defaults to the section x-centroid;
+        - ``mat_indices_tendon`` records which bulk-material zone each
+          tendon physically displaces, so the integrator subtracts the
+          correct zone's stress (evaluated at the **section** strain,
+          per the hard correctness invariant).
+
+        For a section with no tendons, all arrays are empty and the
+        solver's tendon block is skipped.
+        """
+        xc = self.x_centroid
+        for t in self.tendons:
+            if t.x is None:
+                t.x = xc
+
+        if self.tendons:
+            self.x_tendons = np.array([t.x for t in self.tendons],
+                                      dtype=float)
+            self.y_tendons = np.array([t.y for t in self.tendons],
+                                      dtype=float)
+            self.A_tendons = np.array([t.Ap for t in self.tendons],
+                                      dtype=float)
+            self.eps_init_tendons = np.array(
+                [t.eps_init for t in self.tendons], dtype=float)
+            self.embedded_tendons = np.array(
+                [t.embedded for t in self.tendons], dtype=bool)
+            self.mat_indices_tendon = np.array(
+                [self._material_index(t.x, t.y)
+                 for t in self.tendons],
+                dtype=int)
+        else:
+            self.x_tendons = np.empty(0, dtype=float)
+            self.y_tendons = np.empty(0, dtype=float)
+            self.A_tendons = np.empty(0, dtype=float)
+            self.eps_init_tendons = np.empty(0, dtype=float)
+            self.embedded_tendons = np.empty(0, dtype=bool)
+            self.mat_indices_tendon = np.empty(0, dtype=int)
+
     # ------------------------------------------------------------------
     #  Geometric properties
     # ------------------------------------------------------------------
@@ -606,6 +656,15 @@ class GenericSection:
         NotImplementedError
             If the section has more than one bulk material zone
             (multi-material homogenization is not yet supported).
+
+        Notes
+        -----
+        Tendons are **excluded** from the homogenized (ideal) section
+        in this phase.  The existing-prestress domain and SLS stresses
+        are obtained by ULS/SLS fiber integration with the locked-in
+        prestrain (see the solver), not from the elastic ideal
+        section; folding the tendon transformed area in here would
+        double-count once the prestrain is applied at the fiber level.
         """
         from .properties import (
             compute_section_properties, HomogenizedRebar,

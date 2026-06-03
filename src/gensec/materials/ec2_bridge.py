@@ -47,9 +47,10 @@ Create an S355 structural steel plate, 20 mm thick:
 
 import numpy as np
 from .concrete import Concrete
-from .steel import Steel
+from .steel import Steel, PrestressingSteel
 from .ec2_properties import fben2, ConcClassFck
 from .en10025_properties import Steel_EN10025_2
+from .prestress_properties import fbpren, PrestressClassData
 
 
 def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
@@ -221,3 +222,130 @@ def steel_from_en10025(grade='S355', t=0, young=200000,
     )
     s.en10025 = en
     return s
+
+
+def prestress_from_ec2(f_p01k, f_pk, eps_uk, Ep=195000.0,
+                       ls='F', NA='EC2', eps_ud_factor=0.9,
+                       gamma_s_override=None, diagram='horizontal',
+                       works_in_compression=True):
+    r"""
+    Create a GenSec :class:`PrestressingSteel` from EC2 §3.3 inputs.
+
+    Instantiates the EC2 property class
+    :class:`~gensec.materials.prestress_properties.fbpren` to resolve
+    :math:`\gamma_S` (from the limit state / National Annex) and the
+    design diagram values, then builds a GenSec
+    :class:`~gensec.materials.steel.PrestressingSteel`.  This is the
+    prestressing-steel analogue of :func:`concrete_from_ec2`.
+
+    Parameters
+    ----------
+    f_p01k : float
+        Characteristic 0.1 % proof stress [MPa].
+    f_pk : float
+        Characteristic tensile strength [MPa].
+    eps_uk : float
+        Characteristic strain at maximum force.
+    Ep : float, optional
+        Modulus of elasticity [MPa].  Default 195000.
+    ls : str, optional
+        Limit state: ``'F'``, ``'A'`` or ``'S'``.  Default ``'F'``.
+    NA : str, optional
+        National Annex.  Default ``'EC2'``.
+    eps_ud_factor : float, optional
+        Factor for :math:`\varepsilon_{ud} = k\,\varepsilon_{uk}`.
+        Default 0.9 (EN 1992-1-1 §3.3.6(7)).
+    gamma_s_override : float or None, optional
+        Explicit :math:`\gamma_S`.  Default ``None`` (use table).
+    diagram : {'horizontal', 'inclined'}, optional
+        Idealization of the design diagram (EN 1992-1-1 §3.3.6(7)):
+
+        - ``'horizontal'`` — top branch at :math:`f_{p0.1d}` with no
+          strain limit need (the limit is still applied at
+          :math:`\varepsilon_{ud}`).
+        - ``'inclined'`` — branch rising to the interpolated stress at
+          :math:`\varepsilon_{ud}` towards :math:`f_{pd}`.
+
+        Default ``'horizontal'``.
+    works_in_compression : bool, optional
+        Symmetric diagram if ``True``.  Default ``True``.
+
+    Returns
+    -------
+    PrestressingSteel
+        GenSec material with design values from EC2.  Carries an
+        ``ec2`` attribute holding the :class:`fbpren` instance.
+
+    Notes
+    -----
+    The ``diagram`` choice maps onto the generic
+    :class:`PrestressingSteel` purely through the second-branch
+    endpoint stress ``sigma_ud``: ``'horizontal'`` passes
+    :math:`f_{p0.1d}` (zero slope), ``'inclined'`` passes the
+    interpolated :math:`\sigma_{ud}`.  No constitutive branching is
+    needed, which is why the material itself stays idealization-free.
+    """
+    ec2 = fbpren(f_p01k=f_p01k, f_pk=f_pk, eps_uk=eps_uk, Ep=Ep,
+                 ls=ls, NA=NA, eps_ud_factor=eps_ud_factor,
+                 gamma_s_override=gamma_s_override)
+
+    if diagram == 'inclined':
+        sigma_ud = ec2.sigma_ud_inclined
+    elif diagram == 'horizontal':
+        sigma_ud = ec2.f_p01d
+    else:
+        raise ValueError(
+            f"Unknown diagram='{diagram}'. Use 'horizontal' or "
+            f"'inclined'."
+        )
+
+    ps = PrestressingSteel(
+        f_p01d=ec2.f_p01d,
+        sigma_ud=sigma_ud,
+        eps_ud=ec2.eps_ud,
+        Ep=ec2.Ep,
+        works_in_compression=works_in_compression,
+    )
+    ps.ec2 = ec2
+    return ps
+
+
+def prestress_from_class(ps_class, ls='F', NA='EC2',
+                         eps_ud_factor=0.9, gamma_s_override=None,
+                         diagram='horizontal',
+                         works_in_compression=True):
+    r"""
+    Create a GenSec :class:`PrestressingSteel` from a standard
+    designation (EN 10138).
+
+    Parameters
+    ----------
+    ps_class : str
+        Designation key from
+        :data:`~gensec.materials.prestress_properties.PrestressClassData`
+        (e.g. ``'Y1860S7'``).
+    ls, NA, eps_ud_factor, gamma_s_override, diagram,
+    works_in_compression
+        Passed through to :func:`prestress_from_ec2`.
+
+    Returns
+    -------
+    PrestressingSteel
+
+    Raises
+    ------
+    ValueError
+        If the designation is not recognized.
+    """
+    if ps_class not in PrestressClassData:
+        raise ValueError(
+            f"Unknown prestressing-steel class '{ps_class}'. "
+            f"Valid: {list(PrestressClassData.keys())}"
+        )
+    d = PrestressClassData[ps_class]
+    return prestress_from_ec2(
+        f_p01k=d.f_p01k, f_pk=d.f_pk, eps_uk=d.eps_uk, Ep=d.Ep,
+        ls=ls, NA=NA, eps_ud_factor=eps_ud_factor,
+        gamma_s_override=gamma_s_override, diagram=diagram,
+        works_in_compression=works_in_compression,
+    )

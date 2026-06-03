@@ -340,3 +340,382 @@ class Steel(Material):
         Et[m_e] = self.Es
         Et[m_p] = E_hard
         return Et
+
+
+# ------------------------------------------------------------------
+#  Prestressing steel — EC2 §3.3 generic bilinear diagram
+# ------------------------------------------------------------------
+
+@njit(cache=True)
+def _pssteel_stress_kernel(eps_flat, Ep, eps_el, sig_el, eps_ud,
+                           E_hard, works_in_compression):
+    r"""
+    Numba-accelerated stress kernel for the generic bilinear
+    prestressing-steel diagram (EC2 §3.3.6).
+
+    The diagram is fully described by four numbers and a hardening
+    slope, leaving the *idealization* (horizontal vs. inclined top
+    branch) entirely to the caller:
+
+    - first (elastic) branch of slope ``Ep`` up to the proof point
+      :math:`(\varepsilon_{el}, \sigma_{el})`;
+    - second branch of slope ``E_hard`` up to the design ultimate
+      strain :math:`\varepsilon_{ud}`;
+    - zero beyond :math:`\varepsilon_{ud}` (rupture).
+
+    The law is **symmetric**: the same shape is mirrored in
+    compression so that a generic locked-in initial strain remains
+    meaningful in either sign, consistent with treating the
+    prestrain as a material-agnostic offset applied by the solver.
+
+    Parameters
+    ----------
+    eps_flat : numpy.ndarray
+        1-D **total** strain array (section strain + initial
+        prestrain already added by the caller).
+    Ep : float
+        Modulus of elasticity of the prestressing steel [MPa].
+    eps_el : float
+        Strain at the end of the elastic branch (positive),
+        :math:`\varepsilon_{el} = \sigma_{el}/E_p`.
+    sig_el : float
+        Stress at the end of the elastic branch (positive), i.e. the
+        design proof stress :math:`f_{p0.1d}`.
+    eps_ud : float
+        Design ultimate strain (positive).
+    E_hard : float
+        Slope of the second branch [MPa].  Zero reproduces the
+        horizontal-top idealization; a positive value reproduces the
+        inclined branch towards :math:`f_{pd}` (or :math:`f_{pk}`).
+    works_in_compression : bool
+        If ``False``, compressive stress is zero.
+
+    Returns
+    -------
+    numpy.ndarray
+        1-D stress array [MPa].
+    """
+    out = np.zeros(eps_flat.shape[0], dtype=np.float64)
+    for i in range(eps_flat.shape[0]):
+        e = eps_flat[i]
+        if e >= 0.0:
+            if e <= eps_el:
+                out[i] = Ep * e
+            elif e <= eps_ud:
+                out[i] = sig_el + E_hard * (e - eps_el)
+            # else: 0 (rupture)
+        elif works_in_compression:
+            ea = -e
+            if ea <= eps_el:
+                out[i] = Ep * e
+            elif ea <= eps_ud:
+                out[i] = -(sig_el + E_hard * (ea - eps_el))
+            # else: 0
+    return out
+
+
+@njit(cache=True)
+def _pssteel_tangent_kernel(eps_flat, Ep, eps_el, eps_ud,
+                            E_hard, works_in_compression):
+    r"""
+    Numba-accelerated tangent-modulus kernel for prestressing steel.
+
+    .. math::
+
+        E_t(\varepsilon) =
+        \begin{cases}
+            E_p & |\varepsilon| \le \varepsilon_{el} \\
+            E_{\text{hard}}
+                & \varepsilon_{el} < |\varepsilon| \le \varepsilon_{ud} \\
+            0 & |\varepsilon| > \varepsilon_{ud}
+        \end{cases}
+
+    Parameters
+    ----------
+    eps_flat : numpy.ndarray
+        1-D total strain array.
+    Ep, eps_el, eps_ud, E_hard : float
+    works_in_compression : bool
+
+    Returns
+    -------
+    numpy.ndarray
+        1-D tangent-modulus array [MPa].
+    """
+    out = np.zeros(eps_flat.shape[0], dtype=np.float64)
+    for i in range(eps_flat.shape[0]):
+        e = eps_flat[i]
+        ea = abs(e)
+        if e >= 0.0 or works_in_compression:
+            if ea <= eps_el:
+                out[i] = Ep
+            elif ea <= eps_ud:
+                out[i] = E_hard
+    return out
+
+
+@dataclass
+class PrestressingSteel(Material):
+    r"""
+    Prestressing steel — generic bilinear design diagram (EC2 §3.3.6).
+
+    This material implements the EC2 idealized stress-strain diagram
+    for prestressing steel as a **generic** bilinear law, deliberately
+    not committing to a single national-annex idealization.  The
+    diagram is:
+
+    .. math::
+
+        \sigma_p(\varepsilon) =
+        \begin{cases}
+            E_p\,\varepsilon
+                & |\varepsilon| \le \varepsilon_{el} \\[4pt]
+            \operatorname{sign}(\varepsilon)\!\left[
+                f_{p0.1d} + E_{\text{hard}}
+                \bigl(|\varepsilon| - \varepsilon_{el}\bigr)\right]
+                & \varepsilon_{el} < |\varepsilon| \le \varepsilon_{ud} \\[4pt]
+            0 & |\varepsilon| > \varepsilon_{ud}
+        \end{cases}
+
+    where :math:`\varepsilon_{el} = f_{p0.1d}/E_p` is the strain at
+    the proof point and
+
+    .. math::
+
+        E_{\text{hard}} =
+        \frac{\sigma_{ud} - f_{p0.1d}}
+             {\varepsilon_{ud} - \varepsilon_{el}}
+
+    is the second-branch slope.  Choosing the second-branch endpoint
+    stress :math:`\sigma_{ud}` recovers every common idealization:
+
+    - :math:`\sigma_{ud} = f_{p0.1d}` → **horizontal** top branch
+      (:math:`E_{\text{hard}} = 0`);
+    - :math:`\sigma_{ud} = f_{pd}` → **inclined** branch towards the
+      design tensile strength;
+    - :math:`\sigma_{ud} = f_{pk}` → inclined branch towards the
+      characteristic tensile strength (a characteristic-level diagram,
+      :math:`\gamma_S = 1`).
+
+    This material is **constitutive-only**: it knows nothing about
+    prestrain, prestressing systems, bond, or losses.  The locked-in
+    prestrain of a tendon is supplied by the geometry/solver layer as
+    a per-element initial-strain offset (see
+    :class:`~gensec.geometry.fiber.Tendon`), so that the same diagram
+    can also serve generic initial-strain problems (shrinkage,
+    thermal) without modification.
+
+    Design values are expected to be supplied **already factored**.
+    The mapping from characteristic strengths and a chosen limit
+    state / national annex to design values lives in
+    :mod:`~gensec.materials.ec2_bridge`
+    (see :func:`~gensec.materials.ec2_bridge.prestress_from_ec2`),
+    mirroring the concrete and structural-steel bridges.
+
+    Parameters
+    ----------
+    f_p01d : float
+        Design proof stress :math:`f_{p0.1d}` [MPa] (the 0.1 % proof
+        stress divided by :math:`\gamma_S`).  End of the elastic
+        branch.
+    sigma_ud : float, optional
+        Stress [MPa] at the design ultimate strain
+        :math:`\varepsilon_{ud}`.  Sets the second-branch slope.
+        Default equals ``f_p01d`` (horizontal top branch).
+    eps_ud : float, optional
+        Design ultimate strain (positive).  Default 0.02.
+    Ep : float, optional
+        Modulus of elasticity [MPa].  Default 195000 (EC2 §3.3.6(3)
+        nominal value for strand; use 205000 for wires and bars).
+    works_in_compression : bool, optional
+        If ``False``, the compressive branch returns zero.  Default
+        ``True`` (symmetric diagram).
+
+    Attributes
+    ----------
+    eps_el : float
+        Strain at the end of the elastic branch,
+        :math:`f_{p0.1d}/E_p`.
+    E_hard : float
+        Second-branch slope [MPa].
+
+    Notes
+    -----
+    The EC2 §3.3.6 recommended design ultimate strain is
+    :math:`\varepsilon_{ud} = 0.9\,\varepsilon_{uk}`; this material
+    takes :math:`\varepsilon_{ud}` directly so that a national annex
+    omitting the reduction is reachable by input.
+
+    Examples
+    --------
+    Inclined-branch diagram for a Y1860S7 strand, fundamental ULS
+    (:math:`\gamma_S = 1.15`), second branch towards :math:`f_{pk}`:
+
+    >>> ps = PrestressingSteel(
+    ...     f_p01d=1600.0 / 1.15,
+    ...     sigma_ud=1860.0,            # towards f_pk (example)
+    ...     eps_ud=0.9 * 0.035,
+    ...     Ep=195000.0,
+    ... )
+    >>> round(ps.eps_el, 5)
+    0.00714
+    """
+
+    f_p01d: float = 1391.3            # e.g. 1600/1.15
+    sigma_ud: float = 0.0             # 0 → set to f_p01d in __post_init__
+    eps_ud: float = 0.02
+    Ep: float = 195000.0
+    works_in_compression: bool = True
+
+    def __post_init__(self):
+        if self.sigma_ud <= 0.0:
+            # Default to the horizontal-top idealization.
+            self.sigma_ud = self.f_p01d
+        self.eps_el = self.f_p01d / self.Ep
+        denom = self.eps_ud - self.eps_el
+        self.E_hard = ((self.sigma_ud - self.f_p01d) / denom
+                       if denom > 0.0 else 0.0)
+
+    @property
+    def E(self):
+        r"""Elastic modulus :math:`E_p` [MPa].
+
+        Exposed under the common ``E`` name used by the homogenization
+        machinery and by sections building lever-arm-weighted moduli.
+        """
+        return self.Ep
+
+    @property
+    def eps_min(self):
+        """Most compressive admissible strain."""
+        return -self.eps_ud if self.works_in_compression else 0.0
+
+    @property
+    def eps_max(self):
+        """Most tensile admissible strain."""
+        return self.eps_ud
+
+    # ------------------------------------------------------------------
+    #  Scalar interface
+    # ------------------------------------------------------------------
+
+    def stress(self, eps):
+        r"""
+        Evaluate stress for a single **total** strain value.
+
+        Parameters
+        ----------
+        eps : float
+            Total strain (section strain + locked-in prestrain).
+
+        Returns
+        -------
+        float
+            Stress [MPa].
+        """
+        if eps >= 0.0:
+            if eps <= self.eps_el:
+                return self.Ep * eps
+            if eps <= self.eps_ud:
+                return self.f_p01d + self.E_hard * (eps - self.eps_el)
+            return 0.0
+        if not self.works_in_compression:
+            return 0.0
+        ea = -eps
+        if ea <= self.eps_el:
+            return self.Ep * eps
+        if ea <= self.eps_ud:
+            return -(self.f_p01d + self.E_hard * (ea - self.eps_el))
+        return 0.0
+
+    def tangent(self, eps):
+        r"""
+        Scalar tangent modulus :math:`E_t = d\sigma_p / d\varepsilon`.
+
+        Returns
+        -------
+        float
+        """
+        ea = abs(eps)
+        if eps >= 0.0 or self.works_in_compression:
+            if ea <= self.eps_el:
+                return self.Ep
+            if ea <= self.eps_ud:
+                return self.E_hard
+        return 0.0
+
+    # ------------------------------------------------------------------
+    #  Vectorized interface (any-shape, Numba-accelerated when available)
+    # ------------------------------------------------------------------
+
+    def stress_array(self, eps):
+        r"""
+        Vectorized stress computation over **total** strains.
+
+        Accepts arrays of **any shape**.  When *numba* is installed,
+        the inner loop is JIT-compiled.
+
+        Parameters
+        ----------
+        eps : numpy.ndarray
+            Total strain array.
+
+        Returns
+        -------
+        numpy.ndarray
+            Stress array [MPa], same shape as *eps*.
+        """
+        if _HAS_NUMBA:
+            flat = np.ascontiguousarray(eps.ravel(), dtype=np.float64)
+            return _pssteel_stress_kernel(
+                flat, self.Ep, self.eps_el, self.f_p01d, self.eps_ud,
+                self.E_hard, self.works_in_compression,
+            ).reshape(eps.shape)
+
+        sigma = np.zeros_like(eps, dtype=np.float64)
+        ea = np.abs(eps)
+        sign = np.sign(eps)
+
+        if self.works_in_compression:
+            m_e = ea <= self.eps_el
+            m_p = (ea > self.eps_el) & (ea <= self.eps_ud)
+        else:
+            m_e = (eps >= 0) & (ea <= self.eps_el)
+            m_p = (eps >= 0) & (ea > self.eps_el) & (ea <= self.eps_ud)
+
+        sigma[m_e] = self.Ep * eps[m_e]
+        sigma[m_p] = sign[m_p] * (
+            self.f_p01d + self.E_hard * (ea[m_p] - self.eps_el))
+        return sigma
+
+    def tangent_array(self, eps):
+        r"""
+        Vectorized tangent modulus :math:`E_t = d\sigma_p/d\varepsilon`.
+
+        Parameters
+        ----------
+        eps : numpy.ndarray
+
+        Returns
+        -------
+        numpy.ndarray
+            Same shape as *eps*.
+        """
+        if _HAS_NUMBA:
+            flat = np.ascontiguousarray(eps.ravel(), dtype=np.float64)
+            return _pssteel_tangent_kernel(
+                flat, self.Ep, self.eps_el, self.eps_ud,
+                self.E_hard, self.works_in_compression,
+            ).reshape(eps.shape)
+
+        Et = np.zeros_like(eps, dtype=np.float64)
+        ea = np.abs(eps)
+        if self.works_in_compression:
+            m_e = ea <= self.eps_el
+            m_p = (ea > self.eps_el) & (ea <= self.eps_ud)
+        else:
+            m_e = (eps >= 0) & (ea <= self.eps_el)
+            m_p = (eps >= 0) & (ea > self.eps_el) & (ea <= self.eps_ud)
+        Et[m_e] = self.Ep
+        Et[m_p] = self.E_hard
+        return Et
