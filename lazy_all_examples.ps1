@@ -6,3 +6,4 @@ uv run gensec run examples/example_input.yaml --output-dir results/example_input
 uv run gensec run examples/example_custom.yaml --output-dir results/example_custom
 uv run gensec run examples/vcaslu_1.yaml --output-dir results/vcaslu_1
 uv run gensec run examples/example_v2_1.yaml --output-dir results/example_v2_1
+uv run gensec run examples/example_prestress.yaml --output-dir results/example_prestress

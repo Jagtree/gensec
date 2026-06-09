@@ -56,6 +56,8 @@ Usage
     eta = engine.compute_eta(N=-1500e3, Mx=200e6, My=0.0)
 """
 
+import contextlib
+
 import numpy as np
 from .integrator import FiberSolver
 
@@ -131,9 +133,18 @@ class AnalysisEngine:
     class name is used as a fallback.
     """
 
-    def __init__(self, solver):
+    def __init__(self, solver, staged_manager=None):
         self.solver = solver
         self._name_map = _build_material_name_map(solver)
+
+        # Phase-3 staged section-state evolution.  When ``None`` the
+        # engine analyses every stage on the single fixed section
+        # (pre-Phase-3 behaviour).  When a
+        # :class:`~gensec.solver.section_state.StagedDomainManager` is
+        # supplied, each stage's force decomposition is performed on the
+        # solver of that stage's materialized section view, so the
+        # decomposition reflects the active element set at the stage.
+        self.staged_manager = staged_manager
 
     # ------------------------------------------------------------------
     #  Core: analyze a single load state
@@ -530,34 +541,97 @@ class AnalysisEngine:
 
         return components
 
+    @contextlib.contextmanager
+    def _active_solver(self, bundle):
+        r"""
+        Temporarily analyse on *bundle*'s solver (the materialized
+        section view of a stage).  No-op when *bundle* is ``None``
+        (static engine), so the legacy single-section path is untouched.
+
+        The material name map is a superset of the view's materials, so
+        it is reused without rebuilding (lookups are by material id and
+        every id in the view also exists in the base map).
+        """
+        if bundle is None:
+            yield
+            return
+        prev = self.solver
+        self.solver = bundle.solver
+        try:
+            yield
+        finally:
+            self.solver = prev
+
     def _analyze_staged(self, name, stages, demand_db,
                         tol, max_iter):
         r"""
-        Analyze a staged combination.
+        Analyze a staged combination, with optional section-state
+        evolution (Phase 3).
 
-        Each stage is resolved cumulatively and analyzed
-        independently, producing per-stage force decompositions.
+        Each stage is resolved cumulatively and analyzed independently,
+        producing per-stage force decompositions.  Under a staged
+        manager (``self.staged_manager``) the decomposition for each
+        stage is performed on that stage's materialized section view,
+        and the cumulative demand includes the force-release actions of
+        any elements deactivated at the stage (so the reduced section is
+        analysed at the demand that preserves equilibrium across the
+        cut).  Without a manager the behaviour is identical to the
+        pre-Phase-3 driver.
         """
+        mgr = self.staged_manager
+        static = mgr is None
+
+        if static:
+            bundles = [None] * len(stages)
+            deact = [([], False)] * len(stages)
+        else:
+            _states, _hashes, bundles, deact = mgr.resolve_stages(stages)
+
         cum_N = 0.0
         cum_Mx = 0.0
         cum_My = 0.0
         stage_results = []
 
-        for stage in stages:
-            res = _resolve_components(
-                stage["components"], demand_db)
-            cum_N += res["N"]
-            cum_Mx += res["Mx"]
-            cum_My += res["My"]
+        for k, stage in enumerate(stages):
+            bundle = bundles[k]
+            prev_N, prev_Mx, prev_My = cum_N, cum_Mx, cum_My
 
-            ar = self.analyze(cum_N, cum_Mx, cum_My,
-                              tol=tol, max_iter=max_iter)
+            res = _resolve_components(
+                stage.get("components", []), demand_db)
+            dN, dMx, dMy = res["N"], res["Mx"], res["My"]
+
+            if not static:
+                d_idx, release = deact[k]
+                if d_idx and k > 0:
+                    for act in mgr.deactivation_actions(
+                            bundles[k - 1], d_idx,
+                            (prev_N, prev_Mx, prev_My),
+                            release=release):
+                        aN, aMx, aMy = act.triple()
+                        dN += aN
+                        dMx += aMx
+                        dMy += aMy
+            for act in stage.get("_prestress_actions", []):
+                aN, aMx, aMy = act.triple()
+                dN += aN
+                dMx += aMx
+                dMy += aMy
+
+            cum_N += dN
+            cum_Mx += dMx
+            cum_My += dMy
+
+            with self._active_solver(bundle):
+                ar = self.analyze(cum_N, cum_Mx, cum_My,
+                                  tol=tol, max_iter=max_iter)
             ar["name"] = stage["name"]
             ar["cumulative"] = {
                 "N_kN": round(cum_N / 1e3, 2),
                 "Mx_kNm": round(cum_Mx / 1e6, 4),
                 "My_kNm": round(cum_My / 1e6, 4),
             }
+            if not static:
+                ar["domain_hash"] = _hashes[k]
             stage_results.append(ar)
 
         return {

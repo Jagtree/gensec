@@ -918,7 +918,8 @@ class TestB4_AxialLimitRobustness(unittest.TestCase):
     # --- (ii) M-χ feasibility guard --------------------------------
     def test_mc_no_nan_before_ultimate_interior(self):
         mc = self.gen.generate_moment_curvature(
-            self.N_interior, n_points=80, direction='x')
+            self.N_interior, n_chi=80, direction='x')
+            #self.N_interior, n_points=80, direction='x')
         u_pos, u_neg = mc["ultimate_chi_pos"], mc["ultimate_chi_neg"]
         self.assertIsNotNone(u_pos)
         self.assertIsNotNone(u_neg)
@@ -929,7 +930,8 @@ class TestB4_AxialLimitRobustness(unittest.TestCase):
         # Just inside squash: only small χ is feasible, so the guard
         # must NaN-mask the unreachable portion of the curve.
         mc = self.gen.generate_moment_curvature(
-            self.N_squash * 0.995, n_points=80, direction='x')
+            self.N_squash * 0.995, n_chi=80, direction='x')
+            #self.N_squash * 0.995, n_points=80, direction='x')
         self.assertTrue(np.any(np.isnan(mc["M"])))
 
 if __name__ == "__main__":

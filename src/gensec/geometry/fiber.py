@@ -34,8 +34,8 @@ capacity state.  Two element kinds live here:
   effective prestrain :math:`\\varepsilon_{pe}`.
 
 A prestressing *force* applied to hardened concrete (jacking, unbonded
-or external tendons) is **not** an element — it is a load source and is
-modeled by ``PrestressAction`` in the demand layer, never here.  The
+or external tendons) is **not** an element — it is a load source modeled
+by ``PrestressAction`` in the demand layer, never here.  The
 element-vs-load split is the bonded-vs-unbonded boundary: bonded →
 ``Tendon`` element (in the capacity state); unbonded/external/during
 jacking → ``PrestressAction`` load (in the demand).
@@ -152,11 +152,6 @@ class Tendon:
     later, time-dependent losses (relaxation, creep, shrinkage) reduce
     :math:`\varepsilon_{pe}` and thereby move the resistance domain.
 
-    Because :math:`\varepsilon_{pe}` is referenced to the geometric
-    datum, the same fixed offset is correct for the whole life including
-    the capacity-domain integration
-    :math:`\sigma_p(\varepsilon_{\text{sec}} + \varepsilon_{pe})`.
-
     The area :math:`A_p` may be given directly or computed from a single
     strand area and a strand count:
 
@@ -170,7 +165,7 @@ class Tendon:
         Vertical coordinate from the bottom edge [mm].
     Ap : float, optional
         Tendon cross-sectional area [mm²].  If 0 or omitted, computed
-        from ``A_strand`` and ``n_strands``.
+        from ``area_strand`` and ``n_strands``.
     material : Material
         Prestressing-steel constitutive law (total-strain), e.g. a
         :class:`~gensec.materials.steel.PrestressingSteel`.
@@ -178,29 +173,46 @@ class Tendon:
         Horizontal coordinate from the left edge [mm].  If ``None``,
         defaults to the section x-centroid during section assembly.
     eps_pe : float, optional
-        Effective prestrain referenced to the unstrained-concrete state.
-        Default 0.0 (an un-prestressed tendon degenerates to a passive
-        bar).  For a pre-tensioned strand this is the jacking strain
-        :math:`\sigma_{p0}/E_p` before time-dependent losses.
+        Effective prestrain referenced to the unstrained-concrete state
+        (tension positive).  Default 0.0.  For a pre-tensioned strand
+        this is the jacking strain :math:`\sigma_{p0}/E_p` before
+        time-dependent losses.
     embedded : bool, optional
         If ``True`` (default), the tendon is inside the bulk and the
         integrator subtracts the displaced-bulk stress at its location
-        to avoid double-counting the area.  ``False`` for external /
-        unbonded geometry (but note: an unbonded prestressing *force* on
-        hardened concrete belongs in ``PrestressAction``, not here).
+        to avoid double-counting the area.  This is the integrator-level
+        flag actually consumed by the solver.
+    bonded : bool, optional
+        Architectural flag marking the tendon as a strain-compatible
+        **element**.  Default ``True``.  The current phase supports
+        bonded tendons only; ``bonded=False`` (unbonded/external) is a
+        *load*, not an element, and must be modeled as a
+        ``PrestressAction`` in the demand layer — so it raises here.
+    system : str, optional
+        Construction-system tag (``'pre'`` / ``'post'``).  **Stored only,
+        no behavioural effect.**  Retained for I/O round-tripping; per
+        the element-vs-load taxonomy the modeling behaviour is fixed by
+        ``bonded`` and by the element's placement, so this field is
+        redundant and slated for removal — do not branch on it.
     n_strands : int, optional
-        Number of strands.  Default 1.  Used with ``A_strand`` to
+        Number of strands.  Default 1.  Used with ``area_strand`` to
         compute ``Ap``.
-    A_strand : float, optional
+    area_strand : float, optional
         Single-strand area [mm²].  Default 0.  When positive and ``Ap``
-        is 0, ``Ap = n_strands * A_strand``.
+        is 0, ``Ap = n_strands * area_strand``.
+
+    Raises
+    ------
+    ValueError
+        If ``Ap`` cannot be resolved to a positive value, or if
+        ``bonded`` is ``False`` (use a ``PrestressAction`` load instead).
 
     Notes
     -----
     The geometry and integrator treat tendons and bars through the same
     point-fiber code paths; the prestrain offset is the only addition.
     At section assembly, :attr:`eps_pe` is mapped onto the solver's
-    generic per-element offset array.
+    generic per-element offset array (``eps_init_tendons``).
 
     Examples
     --------
@@ -221,15 +233,24 @@ class Tendon:
     x: Optional[float] = None
     eps_pe: float = 0.0
     embedded: bool = True
+    bonded: bool = True
+    system: str = "pre"
     n_strands: int = 1
-    A_strand: float = 0.0
+    area_strand: float = 0.0
 
     def __post_init__(self):
-        """Compute Ap from strand area/count if not given explicitly."""
-        if self.Ap <= 0.0 and self.A_strand > 0.0:
-            self.Ap = self.n_strands * self.A_strand
+        """Resolve ``Ap`` and enforce the bonded-element invariant."""
+        if self.Ap <= 0.0 and self.area_strand > 0.0:
+            self.Ap = self.n_strands * self.area_strand
         if self.Ap <= 0.0:
             raise ValueError(
                 f"Tendon at y={self.y}: Ap must be positive. "
-                f"Provide Ap directly or set A_strand > 0."
+                f"Provide Ap directly or set area_strand > 0."
+            )
+        if not self.bonded:
+            raise ValueError(
+                f"Tendon at y={self.y}: bonded=False is not a section "
+                f"element. An unbonded/external prestressing force on "
+                f"hardened concrete is a load — model it as a "
+                f"PrestressAction in the demand layer, not as a Tendon."
             )

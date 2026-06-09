@@ -113,6 +113,8 @@ VerificationEngine
     envelopes, managing contour caches and producing structured results.
 """
 
+import contextlib
+
 import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.optimize import linprog
@@ -989,12 +991,32 @@ class VerificationEngine:
         in v0.3.
     n_points : int, optional
         Resolution passed to ``generate_mx_my``. Default 200.
+    staged_manager : StagedDomainManager or None, optional
+        Phase-3 driver for section-state evolution across stages.
+        ``None`` (default) keeps the legacy single-domain behaviour.
+        When supplied, staged combinations rebuild/reuse a resistance
+        domain per section state (keyed by the capacity state hash) and
+        reset the demand path on every hash change.  A run of
+        consecutive same-hash stages — e.g. seismic on the in-service
+        section — keeps the path rays continuous and reproduces the
+        legacy staged behaviour exactly.
     """
 
-    def __init__(self, nm_3d, nm_gen, output_flags, n_points=200):
+    def __init__(self, nm_3d, nm_gen, output_flags, n_points=200,
+                 staged_manager=None):
         self.domain = DomainChecker(nm_3d)
         self.nm_gen = nm_gen
         self.n_points = n_points
+
+        # Phase-3 staged section-state evolution.  When ``None`` the
+        # engine behaves exactly as pre-Phase-3: a single fixed domain
+        # (``self.domain``) for every stage.  When a
+        # :class:`~gensec.solver.section_state.StagedDomainManager` is
+        # supplied, each stage is verified against the resistance
+        # domain of its own section state, and ``self.domain`` /
+        # ``self._contour_cache`` are swapped per stage via
+        # :meth:`_active_domain`.
+        self.staged_manager = staged_manager
 
         # Parse flags with defaults.
         self.do_norm = output_flags.get("eta_norm", True)
@@ -1334,29 +1356,227 @@ class VerificationEngine:
         result.update(etas_dict)
         return result
 
+    @contextlib.contextmanager
+    def _active_domain(self, bundle):
+        r"""
+        Temporarily point ``self.domain`` and ``self._contour_cache``
+        at *bundle* for the duration of a ``with`` block.
+
+        This lets every existing metric method (:meth:`_compute_etas`,
+        :meth:`_get_contour`, the ``domain.eta_path_*`` calls) operate
+        on a stage-specific resistance domain **without changing their
+        signatures**.  When *bundle* is ``None`` (legacy / static
+        engine) the context is a no-op, so the swap never perturbs the
+        single-domain code path and the staged output stays bit-
+        identical to the pre-Phase-3 behaviour.
+
+        Parameters
+        ----------
+        bundle : DomainBundle or None
+
+        Notes
+        -----
+        The save/restore is synchronous and single-threaded; the
+        previous domain is always restored in ``finally``.  A future
+        parallel/re-entrant driver should switch to passing the domain
+        explicitly instead of mutating ``self`` (see the design note on
+        domain-swap vs parametrization).
+        """
+        if bundle is None:
+            yield
+            return
+        prev_domain = self.domain
+        prev_cache = self._contour_cache
+        self.domain = bundle.domain
+        self._contour_cache = bundle.contour_cache
+        try:
+            yield
+        finally:
+            self.domain = prev_domain
+            self._contour_cache = prev_cache
+
+    def _stage_path_and_point(self, sr, base, target, all_etas):
+        r"""
+        Compute the path metrics (base → target) and the cumulative
+        point metrics on the **currently active** domain, appending
+        every enabled value to *all_etas*.
+
+        This is the exact body of the legacy ``_check_staged`` ``k>0``
+        branch, factored out so that the static / single-hash path
+        produces its numbers from the same code (guaranteeing
+        regression identity) and the hash-boundary path can reuse it on
+        the new domain.
+
+        Parameters
+        ----------
+        sr : dict
+            Per-stage result, mutated in place.
+        base : tuple of float
+            Path base ``(N, Mx, My)`` [N, N·mm].
+        target : tuple of float
+            Path target ``(N, Mx, My)`` (the cumulative demand).
+        all_etas : list
+            Governing-eta accumulator, appended to in place.
+        """
+        prev_N, prev_Mx, prev_My = base
+        cum_N, cum_Mx, cum_My = target
+
+        sr["base"] = {
+            "N_kN": round(prev_N / 1e3, 2),
+            "Mx_kNm": round(prev_Mx / 1e6, 4),
+            "My_kNm": round(prev_My / 1e6, 4),
+        }
+
+        # eta_path_norm_ray (3D ray-cast in normalised space)
+        if self.do_path:
+            ep = self.domain.eta_path_norm_ray(
+                prev_N, prev_Mx, prev_My,
+                cum_N, cum_Mx, cum_My)
+            sr["eta_path_norm_ray"] = round(ep, 4)
+            all_etas.append(ep)
+
+        # eta_path_norm_beta (composite-ratio along segment)
+        if self.do_path_norm_beta:
+            epb = self.domain.eta_path_norm_beta(
+                prev_N, prev_Mx, prev_My,
+                cum_N, cum_Mx, cum_My)
+            sr["eta_path_norm_beta"] = round(epb, 4)
+            all_etas.append(epb)
+
+        # eta_path_2D (conditional on delta_N)
+        if self.do_path_2D:
+            delta_N_abs = abs(cum_N - prev_N)
+            N_range = self.domain.N_range
+            if N_range > 0:
+                delta_N_ratio = delta_N_abs / N_range
+            else:
+                delta_N_ratio = 0.0
+
+            if delta_N_ratio < self.delta_N_tol:
+                contour = self._get_contour(cum_N)
+                if contour is not None:
+                    ep2 = contour.eta_path_2D(
+                        prev_Mx, prev_My, cum_Mx, cum_My)
+                    sr["eta_path_2D"] = round(ep2, 4)
+                    all_etas.append(ep2)
+                else:
+                    sr["eta_path_2D"] = None
+                    sr["warning"] = (
+                        "Mx-My contour degenerate at "
+                        f"N={cum_N/1e3:.1f} kN, "
+                        "eta_path_2D skipped"
+                    )
+            else:
+                sr["eta_path_2D"] = None
+                sr["warning"] = (
+                    f"delta_N={delta_N_ratio*100:.1f}% "
+                    f"> tol={self.delta_N_tol*100:.1f}%, "
+                    f"eta_path_2D skipped"
+                )
+
+        # Cumulative point metrics.  All enabled metrics contribute to
+        # the governing eta_max.
+        cum_etas = self._compute_etas(cum_N, cum_Mx, cum_My)
+        if "eta_norm" in cum_etas:
+            sr["eta_norm"] = cum_etas["eta_norm"]
+            all_etas.append(cum_etas["eta_norm"])
+        if "eta_norm_beta" in cum_etas:
+            sr["eta_norm_beta"] = cum_etas["eta_norm_beta"]
+            all_etas.append(cum_etas["eta_norm_beta"])
+        if "eta_norm_ray" in cum_etas:
+            sr["eta_norm_ray"] = cum_etas["eta_norm_ray"]
+            all_etas.append(cum_etas["eta_norm_ray"])
+        if "eta_2D" in cum_etas and cum_etas["eta_2D"] is not None:
+            sr["eta_2D"] = cum_etas["eta_2D"]
+            all_etas.append(cum_etas["eta_2D"])
+
+    def _resolve_stage_states(self, stages):
+        r"""
+        Pass 1 of the staged driver: derive the per-stage section
+        states, capacity hashes and resistance bundles.
+
+        Delegates to
+        :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`,
+        the single source of truth for stage-operation interpretation
+        (shared with :class:`~gensec.solver.analysis.AnalysisEngine`).
+
+        Parameters
+        ----------
+        stages : list of dict
+
+        Returns
+        -------
+        states, hashes, bundles, deact
+
+        Raises
+        ------
+        RuntimeError
+            If called without a :attr:`staged_manager`.
+        """
+        if self.staged_manager is None:
+            raise RuntimeError(
+                "_resolve_stage_states requires a staged_manager")
+        return self.staged_manager.resolve_stages(stages)
+
     def _check_staged(self, name, stages, demand_db):
         r"""
-        Internal: verify a staged combination.
+        Internal: verify a staged combination, with optional
+        section-state evolution (Phase 3).
+
+        Two regimes:
+
+        - **Static** (``staged_manager is None``): one fixed resistance
+          domain for every stage.  Demand accumulates; the path base is
+          the origin at stage 0 and the previous cumulative thereafter.
+          Bit-identical to the pre-Phase-3 driver.
+        - **Staged section state** (manager supplied): each stage is
+          verified against the resistance domain of its own section
+          state, keyed by the capacity state hash.  The demand state is
+          *continuous* across stages (the structure does not unload when
+          its section changes), but a **hash change** switches the
+          normalising domain, so the per-stage path metric is measured
+          on the new domain from the carried-over cumulative demand.  A
+          run of consecutive same-hash stages keeps the path continuous
+          and reproduces the static behaviour exactly.
 
         Parameters
         ----------
         name : str
         stages : list of dict
-            Each stage has ``name`` and ``components``.
+            Each stage has ``name`` and ``components``; under a staged
+            manager it may also carry ``section_ops`` (see
+            :meth:`_resolve_stage_states`) and ``_prestress_actions``
+            (a list of :class:`~gensec.solver.section_state.PrestressAction`).
         demand_db : dict
 
         Returns
         -------
         dict
         """
-        # Warn the user when a multi-stage combination is processed
-        # with no path-aware metric enabled.  Without one of
-        # ``eta_path``, ``eta_path_norm_beta`` or ``eta_path_2D``,
-        # the report contains only the four point metrics evaluated
-        # at each cumulative state — which is information-poor for
-        # staged loading, since the loading *history* is not
-        # captured.  Print once per staged combination, on stderr.
-        if (len(stages) > 1
+        from .section_state import path_schedule
+
+        mgr = self.staged_manager
+        static = mgr is None
+
+        # ---- Pass 1: per-stage domains + path schedule ----
+        # States/hashes/bundles depend only on the section, never on
+        # loads, so they are resolved before the demand walk.
+        if static:
+            hashes = ["__STATIC__"] * len(stages)
+            bundles = [None] * len(stages)         # None => self.domain
+            deact = [([], False)] * len(stages)
+        else:
+            _states, hashes, bundles, deact = \
+                self._resolve_stage_states(stages)
+
+        sched = path_schedule(hashes)
+
+        # History-capture warning: only when no path metric is enabled
+        # AND the run is single-hash (no section-state evolution).
+        # Multi-hash staging *does* capture history (per-stage domain),
+        # so the legacy "history not analysed" caveat does not apply.
+        single_hash = len(set(hashes)) <= 1
+        if (len(stages) > 1 and single_hash
                 and not (self.do_path
                          or self.do_path_norm_beta
                          or self.do_path_2D)):
@@ -1372,6 +1592,7 @@ class VerificationEngine:
                 file=sys.stderr,
             )
 
+        # ---- Pass 2: demand walk ----
         cum_N = 0.0
         cum_Mx = 0.0
         cum_My = 0.0
@@ -1380,10 +1601,37 @@ class VerificationEngine:
         all_etas = []
 
         for k, stage in enumerate(stages):
-            inc = self.resolve_components(stage["components"], demand_db)
+            bundle = bundles[k]
+            prev_N, prev_Mx, prev_My = cum_N, cum_Mx, cum_My
+
+            # Demand increment: factored components ...
+            inc = self.resolve_components(
+                stage.get("components", []), demand_db)
             dN, dMx, dMy = inc["N"], inc["Mx"], inc["My"]
 
-            prev_N, prev_Mx, prev_My = cum_N, cum_Mx, cum_My
+            # ... plus force-release actions from elements deactivated
+            # at this stage (evaluated on the PRE-removal bundle at the
+            # demand carried into the stage, so equilibrium of the
+            # reduced section is preserved) ...
+            if not static:
+                d_idx, release = deact[k]
+                if d_idx and k > 0:
+                    for act in mgr.deactivation_actions(
+                            bundles[k - 1], d_idx,
+                            (prev_N, prev_Mx, prev_My),
+                            release=release):
+                        aN, aMx, aMy = act.triple()
+                        dN += aN
+                        dMx += aMx
+                        dMy += aMy
+
+            # ... plus any explicit prestress actions on the stage.
+            for act in stage.get("_prestress_actions", []):
+                aN, aMx, aMy = act.triple()
+                dN += aN
+                dMx += aMx
+                dMy += aMy
+
             cum_N += dN
             cum_Mx += dMx
             cum_My += dMy
@@ -1401,86 +1649,38 @@ class VerificationEngine:
                     "My_kNm": round(cum_My / 1e6, 4),
                 },
             }
+            # Per-stage domain provenance (staged runs only, so the
+            # static output dict stays byte-for-byte legacy).
+            if not static:
+                sr["domain_hash"] = hashes[k]
+                sr["domain_reset"] = sched[k]["reset"]
 
-            if k == 0:
-                # Stage 0: base is origin → all enabled ray-cast
-                # metrics contribute to the governing eta_max.
-                etas_dict = self._compute_etas(cum_N, cum_Mx, cum_My)
-                sr.update(etas_dict)
-                for key in ("eta_norm", "eta_norm_beta", "eta_norm_ray", "eta_2D"):
-                    if key in sr and sr[key] is not None:
-                        all_etas.append(sr[key])
-            else:
-                # Stage k > 0: compute path-based η.
-                sr["base"] = {
-                    "N_kN": round(prev_N / 1e3, 2),
-                    "Mx_kNm": round(prev_Mx / 1e6, 4),
-                    "My_kNm": round(prev_My / 1e6, 4),
-                }
-
-                # eta_path_norm_ray (3D ray-cast in normalised space)
-                if self.do_path:
-                    ep = self.domain.eta_path_norm_ray(
-                        prev_N, prev_Mx, prev_My,
-                        cum_N, cum_Mx, cum_My)
-                    sr["eta_path_norm_ray"] = round(ep, 4)
-                    all_etas.append(ep)
-
-                # eta_path_norm_beta (composite-ratio along segment)
-                if self.do_path_norm_beta:
-                    epb = self.domain.eta_path_norm_beta(
-                        prev_N, prev_Mx, prev_My,
-                        cum_N, cum_Mx, cum_My)
-                    sr["eta_path_norm_beta"] = round(epb, 4)
-                    all_etas.append(epb)
-
-                # eta_path_2D (conditional on delta_N)
-                if self.do_path_2D:
-                    delta_N_abs = abs(cum_N - prev_N)
-                    N_range = self.domain.N_range
-                    if N_range > 0:
-                        delta_N_ratio = delta_N_abs / N_range
-                    else:
-                        delta_N_ratio = 0.0
-
-                    if delta_N_ratio < self.delta_N_tol:
-                        contour = self._get_contour(cum_N)
-                        if contour is not None:
-                            ep2 = contour.eta_path_2D(
-                                prev_Mx, prev_My, cum_Mx, cum_My)
-                            sr["eta_path_2D"] = round(ep2, 4)
-                            all_etas.append(ep2)
-                        else:
-                            sr["eta_path_2D"] = None
-                            sr["warning"] = (
-                                "Mx-My contour degenerate at "
-                                f"N={cum_N/1e3:.1f} kN, "
-                                "eta_path_2D skipped"
-                            )
-                    else:
-                        sr["eta_path_2D"] = None
-                        sr["warning"] = (
-                            f"delta_N={delta_N_ratio*100:.1f}% "
-                            f"> tol={self.delta_N_tol*100:.1f}%, "
-                            f"eta_path_2D skipped"
-                        )
-
-                # Also report the four point metrics of the
-                # cumulative point.  All enabled metrics contribute
-                # to the governing eta_max.
-                cum_etas = self._compute_etas(cum_N, cum_Mx, cum_My)
-                if "eta_norm" in cum_etas:
-                    sr["eta_norm"] = cum_etas["eta_norm"]
-                    all_etas.append(cum_etas["eta_norm"])
-                if "eta_norm_beta" in cum_etas:
-                    sr["eta_norm_beta"] = cum_etas["eta_norm_beta"]
-                    all_etas.append(cum_etas["eta_norm_beta"])
-                if "eta_norm_ray" in cum_etas:
-                    sr["eta_norm_ray"] = cum_etas["eta_norm_ray"]
-                    all_etas.append(cum_etas["eta_norm_ray"])
-                if "eta_2D" in cum_etas and cum_etas["eta_2D"] is not None:
-                    sr["eta_2D"] = cum_etas["eta_2D"]
-                    all_etas.append(cum_etas["eta_2D"])
+            # Evaluate metrics on this stage's domain.  The context
+            # manager is a no-op when ``bundle is None`` (static), so the
+            # legacy single-domain path is untouched.
+            with self._active_domain(bundle):
+                if k == 0:
+                    # Stage 0: base is origin → point metrics only, all
+                    # enabled metrics contribute to the governing eta.
+                    etas_dict = self._compute_etas(cum_N, cum_Mx, cum_My)
+                    sr.update(etas_dict)
+                    for key in ("eta_norm", "eta_norm_beta",
+                                "eta_norm_ray", "eta_2D"):
+                        if key in sr and sr[key] is not None:
+                            all_etas.append(sr[key])
+                else:
+                    # Stage k>0: path metric (carried cumulative ->
+                    # current cumulative) on the active domain, plus the
+                    # cumulative point metrics.  At a hash boundary the
+                    # only change is which domain is active — the base is
+                    # still the carried cumulative, because the demand is
+                    # continuous across the section change.
+                    self._stage_path_and_point(
+                        sr,
+                        (prev_N, prev_Mx, prev_My),
+                        (cum_N, cum_Mx, cum_My),
+                        all_etas,
+                    )
 
             stage_results.append(sr)
 
@@ -1489,7 +1689,9 @@ class VerificationEngine:
                         if e is not None and np.isfinite(e)]
         eta_gov = max(numeric_etas) if numeric_etas else float("inf")
 
-        inside = self.domain.is_inside(cum_N, cum_Mx, cum_My)
+        # ``inside`` is evaluated on the final stage's domain.
+        final_domain = self.domain if static else bundles[-1].domain
+        inside = final_domain.is_inside(cum_N, cum_Mx, cum_My)
         return {
             "name": name,
             "type": "staged",

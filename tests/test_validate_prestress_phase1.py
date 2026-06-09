@@ -287,8 +287,13 @@ def test_tendon_guards():
     """Phase 1 construction-time guards on the ``Tendon`` dataclass."""
     ps = PrestressingSteel(f_p01d=1391.3)
 
-    # bonded=False is out of Phase 1 scope.
-    with pytest.raises(NotImplementedError):
+    # bonded=False is not a section element: an unbonded/external
+    # prestressing force on hardened concrete is a load and must be
+    # modelled as a PrestressAction in the demand layer, never as a
+    # Tendon.  (A post-tension tendon that will be grouted is declared
+    # bonded=True; its not-yet-grouted state is a per-stage mask in
+    # SectionState, not a Tendon(bonded=False).)
+    with pytest.raises(ValueError):
         Tendon(y=100.0, material=ps, Ap=1400.0, bonded=False)
 
     # Zero/absent area is an error.
@@ -298,4 +303,8 @@ def test_tendon_guards():
     # Area from strand count.
     t = Tendon(y=100.0, material=ps, n_strands=10, area_strand=140.0)
     assert t.Ap == pytest.approx(1400.0)
-    assert t.eps_init == t.eps_pe
+    # The element carries the effective prestrain as ``eps_pe`` (here the
+    # default, since none was passed).  ``eps_init`` is the engine/bulk
+    # generic-offset name (the section array ``eps_init_tendons``), not an
+    # attribute of the element — the asymmetric naming is deliberate.
+    assert t.eps_pe == pytest.approx(0.0)

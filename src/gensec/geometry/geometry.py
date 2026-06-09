@@ -611,11 +611,16 @@ class GenericSection:
         """
         return self._bounds
 
-    ### TODO: we should add support for multi-staged sections,
-    ### where the ideal_gross properties are dependent from the time
-    ### of construction or load application. At the moment, the property
-    ### is computed lazily and cached, but it assumes a immutable section. 
-    ### If the section geometry or materials change, the cache should be invalidated.
+    # ``GenericSection`` is immutable by contract: the bulk mesh and the
+    # element set are fixed for the object's lifetime, so the lazily
+    # cached homogenized properties below are valid for as long as the
+    # object exists.  Section-state evolution (staged construction,
+    # prestress losses, de-stressing) is handled *without* mutating the
+    # base section: ``gensec.solver.section_state.materialize_view``
+    # produces a shallow copy per state with the point-element arrays
+    # re-sliced and ``eps_init`` overridden, and sets that copy's
+    # ``_ideal_gross_props_cache`` to ``None`` so it recomputes for the
+    # state.  The base section's cache is therefore never stale.
     @property
     def ideal_gross_properties(self):
         """Lazy, cached homogenized section properties (elastic only).
