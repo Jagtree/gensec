@@ -124,6 +124,29 @@ class GenericSection:
         ``mesh_size``).
     n_grid_y : int or None, optional
         Explicit number of grid rows.  Default ``None``.
+    bulk_eps_init : float, optional
+        Uniform locked-in pre-strain of the bulk material [-], tension
+        positive (e.g. an imposed shrinkage/thermal field).  Default
+        ``0.0``.  This is the bulk counterpart of a tendon's
+        ``eps_pe``: a *resistance*-side imposed-strain offset (it
+        belongs to the capacity hash, not to the demand path).  It is
+        carried by :class:`~gensec.solver.section_state.SectionState`
+        and quantized into
+        :meth:`~gensec.solver.section_state.SectionState.capacity_hash`.
+
+        .. note::
+           As of this phase the value is parsed, stored, hashed and
+           propagated to every materialized view, but the integrator
+           does **not yet** evaluate the bulk constitutive law at the
+           offset argument :math:`\varepsilon_{\text{sec}} +
+           \varepsilon_{b,0}`.  A non-zero ``bulk_eps_init`` therefore
+           shifts the domain *identity* (cache key) without yet shifting
+           the domain *geometry*.  Wiring the offset into
+           :meth:`~gensec.solver.integrator.FiberSolver.strain_field`
+           and the displaced-bulk subtractions is a deliberate,
+           separately-validated kernel change (losses/creep phase); see
+           the deliverable note.  Sections that never set this field are
+           unaffected.
 
     Attributes
     ----------
@@ -174,6 +197,7 @@ class GenericSection:
     n_grid_x: Optional[int] = None
     n_grid_y: Optional[int] = None
     tendons: List["Tendon"] = field(default_factory=list)
+    bulk_eps_init: float = 0.0
 
     def __post_init__(self):
         # ---- Validate polygon ----

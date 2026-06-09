@@ -490,6 +490,99 @@ class PrestressAction:
         """Return ``(N, Mx, My)`` in [N, N·mm, N·mm]."""
         return self.N, self.Mx, self.My
 
+    @classmethod
+    def from_force(cls, P, x, y, x_ref=0.0, y_ref=0.0,
+                   label="", origin="prestress") -> "PrestressAction":
+        r"""
+        Build the section action of a prestressing force.
+
+        Turns a tendon force :math:`P` (tension positive) applied at
+        the point :math:`(x, y)` into the resultant **action on the
+        section**, expressed about the reference point
+        :math:`(x_{\text{ref}}, y_{\text{ref}})` and in the **exact
+        sign convention of the fiber integrator**.
+
+        Sign convention
+        ---------------
+        The integrator forms the resultant of an internal element force
+        of value :math:`F = \sigma A` at a lever
+        :math:`(\ell_x, \ell_y) = (x - x_{\text{ref}},\,
+        y - y_{\text{ref}})` as
+
+        .. math::
+
+            N = F, \qquad
+            M_x = F\,\ell_y, \qquad
+            M_y = -F\,\ell_x
+
+        (see :func:`_element_net_force`, whose tendon/rebar loop this
+        mirrors).  A jacked tendon under tension :math:`P>0` pulls its
+        anchorages inward, so the action it transmits to the section is
+        a **compression** of magnitude :math:`P`; in the integrator's
+        tension-positive convention this is the element force
+        :math:`F = -P`.  Substituting :math:`F = -P`:
+
+        .. math::
+
+            N_p = -P, \qquad
+            M_x = -P\,(y - y_{\text{ref}}), \qquad
+            M_y = +P\,(x - x_{\text{ref}}).
+
+        Routing this action onto the demand path therefore reproduces,
+        for a tendon on hardened concrete (post-tension / external /
+        jacking), exactly the equivalent :math:`(N, M)` couple a hand
+        calculation about the same reference point would give.
+
+        This is the **load** counterpart of a bonded tendon's
+        ``eps_pe``: the bonded prestrain shifts the *resistance* (it is
+        baked into the fibers and enters :meth:`capacity_hash`), whereas
+        a :class:`PrestressAction` produced here is a pure *action* that
+        moves the demand point and is excluded from the hash by
+        construction.
+
+        Parameters
+        ----------
+        P : float
+            Tendon force [N], tension positive.  (Resolve a
+            ``sigma_p0 * Ap`` product to this value upstream.)
+        x, y : float
+            Tendon position [mm], in the same frame as the section
+            geometry.
+        x_ref, y_ref : float, optional
+            Reference point the action is taken about [mm].  Must be the
+            **same point the demand path uses** — the section centroid
+            (``solver.x_ref`` / ``solver.y_ref``), constant across
+            materialized views in Phase 3.  Default ``0.0``.
+        label : str, optional
+            Human-readable tag.
+        origin : str, optional
+            Provenance tag.  Default ``"prestress"``.
+
+        Returns
+        -------
+        PrestressAction
+
+        Examples
+        --------
+        A strand jacked to :math:`P = 1.4\,\text{MN}` at
+        :math:`(x, y) = (200, 80)` mm about a centroid at
+        :math:`(150, 300)` mm:
+
+        >>> a = PrestressAction.from_force(1.4e6, 200.0, 80.0,
+        ...                                x_ref=150.0, y_ref=300.0)
+        >>> a.N
+        -1400000.0
+        >>> a.Mx          # -P (y - y_ref) = -1.4e6 * (80 - 300)
+        308000000.0
+        >>> a.My          # +P (x - x_ref) = +1.4e6 * (200 - 150)
+        70000000.0
+        """
+        F = -float(P)
+        ly = float(y) - float(y_ref)
+        lx = float(x) - float(x_ref)
+        return cls(N=F, Mx=F * ly, My=-F * lx,
+                   label=label, origin=origin)
+
 
 def released_force_action(prev_bundle, element_index, x_ref, y_ref,
                           cum_N, cum_Mx, cum_My,
@@ -674,6 +767,15 @@ def materialize_view(base_section, state: SectionState):
         [int(i) for i in reb_keep]
         + [int(n_reb + i) for i in ten_keep]
     )
+    # Carry the state's bulk pre-strain onto the view.  This is the
+    # offset *carrier*: the value is now attached to the section the
+    # solver is built on (and already participates in the capacity
+    # hash via :meth:`SectionState.capacity_hash`).  Making it bite on
+    # the resistance requires the integrator to evaluate the bulk law
+    # at ``eps_section + bulk_eps_init`` — a separate, kernel-level
+    # change (see the Phase-5 note in the deliverable).  Until then the
+    # view faithfully advertises the offset without it being consumed.
+    view.bulk_eps_init = float(state.bulk_eps_init)
     view._ideal_gross_props_cache = None
     return view
 
@@ -790,7 +892,12 @@ class StagedDomainManager:
             active=np.ones(n, bool),
             bonded=np.ones(n, bool),
             eps_init=eps,
-            bulk_eps_init=0.0,
+            # Seed the bulk pre-strain from the section so a YAML
+            # ``prestrain`` / ``eps_init`` field is the stage-0 baseline
+            # and enters the capacity hash.  Defaults to 0.0 for every
+            # section that does not declare one, so all pre-existing
+            # (non-prestress) runs are byte-identical.
+            bulk_eps_init=float(getattr(sec, "bulk_eps_init", 0.0)),
             label="stage0",
         )
 

@@ -94,6 +94,7 @@ from .geometry.fiber import RebarLayer, Tendon
 from .geometry.section import RectSection
 from .geometry.geometry import GenericSection
 from .geometry import primitives as prim
+from .solver.section_state import PrestressAction
 from .materials.ec2_bridge import (
     concrete_from_class, concrete_from_ec2,
     prestress_from_ec2, prestress_from_class,
@@ -382,12 +383,26 @@ def load_yaml(filepath):
             tendons=tendons,
         )
 
+    # ---- Bulk pre-strain (resistance-side imposed-strain offset) ----
+    # Accept ``prestrain`` (canonical) or ``eps_init`` (alias).  Stored
+    # on the section; defaults to 0.0 so sections without the field are
+    # unaffected.  See ``GenericSection.bulk_eps_init``.
+    section.bulk_eps_init = _parse_bulk_prestrain(sec_spec)
+
     # ---- Demands ----
     demands = [_parse_demand(d) for d in data.get("demands", [])]
 
     # ---- Combinations (v2.1: components / stages) ----
     combinations = [_parse_combination(c)
                     for c in data.get("combinations", [])]
+
+    # ---- Prestress actions (demand-side loads) ----
+    # Resolve each stage's raw ``prestress_actions`` specs into
+    # ``PrestressAction`` objects now that the section (hence its
+    # reference point and tendon geometry) is known, and attach them as
+    # ``_prestress_actions`` for the staged engines to sum into the
+    # demand.  A no-op for combinations that declare none.
+    _resolve_prestress_actions(combinations, section, sec_spec)
 
     # ---- Envelopes ----
     envelopes = [_parse_envelope(e)
@@ -565,6 +580,29 @@ def _parse_combination(c_spec):
               components:
                 - {ref: Ex, factor: 1.0}
 
+    A stage may additionally carry a ``prestress_actions`` block of
+    demand-side prestressing loads (post-tension / external / jacking
+    on hardened concrete).  Each entry gives a force — ``P`` [N],
+    ``P_kN`` [kN], or ``sigma_p0`` [MPa] ``+`` ``Ap`` [mm²] — and a
+    position — ``x`` / ``y`` [mm] or a ``ref`` to a declared tendon's
+    geometry (index or ``name``):
+
+    .. code-block:: yaml
+
+        - name: PT_jacking
+          stages:
+            - name: peso_proprio
+              components: [{ref: G, factor: 1.0}]
+            - name: tesatura
+              components: []
+              prestress_actions:
+                - {P_kN: 1400, x: 200, y: 80}
+                - {sigma_p0: 1000, Ap: 1400, ref: 0}
+
+    The raw specs are carried unresolved here (the section reference
+    point is not yet known) and resolved by
+    :func:`_resolve_prestress_actions` in :func:`load_yaml`.
+
     Parameters
     ----------
     c_spec : dict
@@ -597,19 +635,37 @@ def _parse_combination(c_spec):
         )
 
     if has_components:
+        if "prestress_actions" in c_spec:
+            raise ValueError(
+                f"Combination '{name}': 'prestress_actions' is only "
+                f"valid on a stage of a staged combination, not on a "
+                f"simple (components-only) combination."
+            )
         return {
             "name": name,
             "components": _parse_component_list(c_spec["components"]),
         }
 
     # Staged.
+    if "prestress_actions" in c_spec:
+        raise ValueError(
+            f"Combination '{name}': place 'prestress_actions' on an "
+            f"individual stage, not at the combination level."
+        )
     stages = []
     for i, s_spec in enumerate(c_spec["stages"]):
-        stages.append({
+        stage = {
             "name": s_spec.get("name", f"stage_{i}"),
             "components": _parse_component_list(
                 s_spec.get("components", [])),
-        })
+        }
+        # Carry the raw prestress-action specs forward unresolved; the
+        # main loader resolves them against the built section (it needs
+        # the reference point and any tendon geometry referenced).
+        if "prestress_actions" in s_spec:
+            stage["_prestress_action_specs"] = list(
+                s_spec["prestress_actions"])
+        stages.append(stage)
     return {"name": name, "stages": stages}
 
 
@@ -635,6 +691,230 @@ def _parse_component_list(comp_list):
             "factor": float(c.get("factor", 1.0)),
         })
     return parsed
+
+
+# ---- Bulk pre-strain + prestress-action resolution ----
+
+def _parse_bulk_prestrain(sec_spec):
+    r"""
+    Read the section bulk pre-strain from a ``section`` YAML block.
+
+    Accepts ``prestrain`` (canonical) or ``eps_init`` (alias) as a
+    uniform locked-in bulk strain [-], tension positive.  Returns
+    ``0.0`` when neither key is present, so a section that does not
+    declare one is unaffected.
+
+    Parameters
+    ----------
+    sec_spec : dict
+        The ``section`` block from YAML.
+
+    Returns
+    -------
+    float
+        Bulk pre-strain [-].
+
+    Raises
+    ------
+    ValueError
+        If both ``prestrain`` and ``eps_init`` are present with
+        different values (ambiguous).
+    """
+    has_p = "prestrain" in sec_spec
+    has_e = "eps_init" in sec_spec
+    if has_p and has_e:
+        if float(sec_spec["prestrain"]) != float(sec_spec["eps_init"]):
+            raise ValueError(
+                "section: 'prestrain' and 'eps_init' both given with "
+                "different values; they are aliases — set only one."
+            )
+    if has_p:
+        return float(sec_spec["prestrain"])
+    if has_e:
+        return float(sec_spec["eps_init"])
+    return 0.0
+
+
+def _resolve_prestress_actions(combinations, section, sec_spec):
+    r"""
+    Resolve raw ``prestress_actions`` specs into
+    :class:`~gensec.solver.section_state.PrestressAction` objects.
+
+    Walks every staged combination and replaces each stage's deferred
+    ``_prestress_action_specs`` (carried by :func:`_parse_combination`)
+    with a list of resolved actions under the key ``_prestress_actions``
+    — the key the staged engines
+    (:meth:`~gensec.solver.check.VerificationEngine._check_staged`,
+    :meth:`~gensec.solver.analysis.AnalysisEngine._analyze_staged`)
+    consume and sum into the demand.
+
+    Each action is taken about the section reference point
+    (``x_centroid`` / ``y_centroid``), which is the point the demand
+    path and the integrator both use, so the resolved triple is
+    directly additive to the cumulative demand.
+
+    Mutates *combinations* in place.
+
+    Parameters
+    ----------
+    combinations : list of dict
+        Parsed combinations (output of :func:`_parse_combination`).
+    section : GenericSection
+        Built section (supplies the reference point and tendon
+        geometry for ``ref`` resolution).
+    sec_spec : dict
+        Raw ``section`` block; its ``tendons`` list is used to resolve
+        a string ``ref`` against an optional tendon ``name``.
+
+    Raises
+    ------
+    ValueError
+        If a ``prestress_actions`` block is declared on a simple
+        (non-staged) combination, or an entry is malformed.
+
+    Notes
+    -----
+    Prestress actions are routed **per stage**.  A jacking event on
+    hardened concrete (post-tension / external / unbonded) is therefore
+    expressed as a stage carrying the action — physically a construction
+    step — and never as a section element (a bonded ``Tendon``); this
+    keeps the resistance/demand separation intact (the action never
+    reaches the capacity hash).
+    """
+    x_ref = float(section.x_centroid)
+    y_ref = float(section.y_centroid)
+    name_map = _tendon_name_map(sec_spec)
+
+    for combo in combinations:
+        if "stages" not in combo:
+            continue
+        for stage in combo["stages"]:
+            specs = stage.pop("_prestress_action_specs", None)
+            if not specs:
+                continue
+            stage["_prestress_actions"] = [
+                _resolve_single_prestress_action(
+                    spec, section, x_ref, y_ref, name_map)
+                for spec in specs
+            ]
+
+
+def _tendon_name_map(sec_spec):
+    r"""
+    Map a tendon ``name`` (if declared in YAML) to its list index.
+
+    Tendons are referenced by integer index by default; this allows an
+    optional human-readable ``name`` key on a tendon spec to be used as
+    a ``ref`` instead.
+
+    Parameters
+    ----------
+    sec_spec : dict
+        Raw ``section`` block.
+
+    Returns
+    -------
+    dict
+        ``{name: index}`` for every tendon spec that declares a
+        ``name``.
+    """
+    out = {}
+    for i, t in enumerate(sec_spec.get("tendons", [])):
+        nm = t.get("name") if isinstance(t, dict) else None
+        if nm is not None:
+            out[str(nm)] = i
+    return out
+
+
+def _resolve_single_prestress_action(spec, section, x_ref, y_ref,
+                                     name_map):
+    r"""
+    Resolve one ``prestress_actions`` entry into a
+    :class:`~gensec.solver.section_state.PrestressAction`.
+
+    Force magnitude (tension positive [N]) comes from **either**
+
+    - ``P`` [N] or ``P_kN`` [kN] (explicit force), **or**
+    - ``sigma_p0`` [MPa] :math:`\times` ``Ap`` [mm²] (stress
+      :math:`\times` area).
+
+    Position comes from **either** explicit ``x`` / ``y`` [mm] **or** a
+    ``ref`` to a declared tendon's geometry — an integer index or a
+    string matching a tendon ``name`` — in which case the section's
+    resolved tendon coordinates are used.
+
+    Parameters
+    ----------
+    spec : dict
+        One raw entry from a stage's ``prestress_actions`` list.
+    section : GenericSection
+        Built section (tendon coordinate arrays for ``ref``).
+    x_ref, y_ref : float
+        Section reference point [mm].
+    name_map : dict
+        ``{tendon_name: index}`` from :func:`_tendon_name_map`.
+
+    Returns
+    -------
+    PrestressAction
+
+    Raises
+    ------
+    ValueError
+        If the force or the position cannot be resolved, or a ``ref``
+        is out of range / unknown.
+    """
+    # ---- Force [N], tension positive ----
+    if "P" in spec:
+        P = float(spec["P"])
+    elif "P_kN" in spec:
+        P = float(spec["P_kN"]) * 1e3
+    elif "sigma_p0" in spec and "Ap" in spec:
+        P = float(spec["sigma_p0"]) * float(spec["Ap"])
+    else:
+        raise ValueError(
+            "prestress_actions entry: provide 'P' [N], 'P_kN' [kN], "
+            "or both 'sigma_p0' [MPa] and 'Ap' [mm^2]. "
+            f"Got keys: {sorted(spec)}."
+        )
+
+    # ---- Position [mm] ----
+    if "ref" in spec:
+        ref = spec["ref"]
+        if isinstance(ref, str):
+            if ref not in name_map:
+                raise ValueError(
+                    f"prestress_actions entry: ref '{ref}' does not "
+                    f"match any tendon 'name'. Known: {sorted(name_map)}."
+                )
+            idx = name_map[ref]
+        else:
+            idx = int(ref)
+        n_ten = int(getattr(section, "x_tendons", np.empty(0)).size)
+        if not (0 <= idx < n_ten):
+            raise ValueError(
+                f"prestress_actions entry: tendon ref index {idx} out "
+                f"of range (section has {n_ten} tendon(s))."
+            )
+        x = float(section.x_tendons[idx])
+        y = float(section.y_tendons[idx])
+        # Explicit x/y, if also given, override the referenced geometry.
+        x = float(spec.get("x", x))
+        y = float(spec.get("y", y))
+    elif "x" in spec and "y" in spec:
+        x = float(spec["x"])
+        y = float(spec["y"])
+    else:
+        raise ValueError(
+            "prestress_actions entry: provide 'x' and 'y' [mm], or a "
+            f"'ref' to a declared tendon. Got keys: {sorted(spec)}."
+        )
+
+    return PrestressAction.from_force(
+        P, x, y, x_ref=x_ref, y_ref=y_ref,
+        label=str(spec.get("label", "")),
+        origin="prestress",
+    )
 
 
 # ---- Envelope parser ----
