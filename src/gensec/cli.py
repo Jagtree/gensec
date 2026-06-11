@@ -34,7 +34,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .io_yaml import load_yaml
+from .io_yaml import load_yaml, staged_ops_present
 from .solver import FiberSolver, NMDiagram
 from .solver.check import VerificationEngine
 from .output import (
@@ -67,6 +67,17 @@ from .output.summary import (
 
 
 # Legacy table printers removed — now in output.summary module.
+
+
+#: Resolution [points] of the uniaxial N-Mx domain generated as a
+#: by-product when ``gensec analyze`` builds per-stage
+#: :class:`~gensec.solver.section_state.DomainBundle` objects for a
+#: ``section_ops``-carrying combination.  The analyze path consumes
+#: only each bundle's *solver* (force decomposition, force-release
+#: equilibrium); the domain is generated but never queried, so this is
+#: a pure construction-cost knob with **zero effect on results** — kept
+#: coarse and hardcoded (self-documenting constant over a YAML flag).
+_ANALYZE_DOMAIN_N_POINTS = 60
 
 
 # ==================================================================
@@ -258,9 +269,36 @@ def _run(args):
     #  VERIFICATION ENGINE (v2.1)
     # ==============================================================
     domain_data = nm_3d if nm_3d is not None else nm_data
+
+    # Phase-3 staged section-state evolution: build a manager only when
+    # at least one staged combination carries ``section_ops`` (the
+    # single gate is :func:`gensec.io_yaml.staged_ops_present`).
+    # Without ops the construction below is byte-identical to the
+    # legacy capacity-frozen run (``staged_manager=None`` is the
+    # constructor default).  The manager's domain generator settings
+    # mirror the main-domain build above, so the bundle of the
+    # all-active state reproduces ``domain_data`` at the same
+    # resolution and the per-stage metrics are commensurable with the
+    # single-domain ones.
+    staged_mgr = None
+    if staged_ops_present(combinations):
+        from .solver.section_state import StagedDomainManager
+        if nm_3d is not None:
+            staged_gen_kwargs = {"n_angles": 36,
+                                 "n_points_per_angle": args.n_points}
+        else:
+            staged_gen_kwargs = {"n_points": args.n_points}
+        staged_mgr = StagedDomainManager(
+            section, biaxial=(nm_3d is not None),
+            gen_kwargs=staged_gen_kwargs)
+        print("\n  Staged section-state evolution active "
+              "(section_ops present): per-stage resistance domains "
+              "will be built/reused by capacity hash.")
+
     engine = VerificationEngine(
         domain_data, nm_gen, output_opts,
-        n_points=args.n_points)
+        n_points=args.n_points,
+        staged_manager=staged_mgr)
 
     # Build demand database for combination / envelope resolution.
     demand_db = {d["name"]: d for d in demands}
@@ -640,7 +678,26 @@ def _analyze(args):
 
     solver = FiberSolver(section)
     from .solver.analysis import AnalysisEngine
-    engine = AnalysisEngine(solver)
+
+    # Phase-3 staged section-state evolution (same gate as ``_run``).
+    # ``analyze`` never consults the resistance domain — it only uses
+    # each bundle's *solver* (force decomposition on the stage's
+    # materialized view, force-release equilibrium on deactivation) —
+    # but ``StagedDomainManager._build_bundle`` generates a domain per
+    # state by design.  A coarse uniaxial generator keeps that
+    # by-product cheap without touching the decomposition numbers,
+    # which depend on the solver alone.
+    staged_mgr = None
+    if staged_ops_present(combinations):
+        from .solver.section_state import StagedDomainManager
+        staged_mgr = StagedDomainManager(
+            section, biaxial=False,
+            gen_kwargs={"n_points": _ANALYZE_DOMAIN_N_POINTS})
+        print("\n  Staged section-state evolution active "
+              "(section_ops present): per-stage decomposition on the "
+              "materialized section views.")
+
+    engine = AnalysisEngine(solver, staged_manager=staged_mgr)
 
     demand_db = {d["name"]: d for d in demands}
 

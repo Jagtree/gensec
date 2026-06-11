@@ -72,6 +72,7 @@
 │   │   │   ├── 📄 ec2_bridge.py
 │   │   │   ├── 📄 ec2_properties.py
 │   │   │   ├── 📄 en10025_properties.py
+│   │   │   ├── 📄 prestress_properties.py
 │   │   │   ├── 📄 steel.py
 │   │   │   └── 📄 tabulated.py
 │   │   ├── 📁 output
@@ -87,7 +88,9 @@
 │   │   │   ├── 📄 analysis.py
 │   │   │   ├── 📄 capacity.py
 │   │   │   ├── 📄 check.py
-│   │   │   └── 📄 integrator.py
+│   │   │   ├── 📄 integrator.py
+│   │   │   ├── 📄 prestress_transfer.py
+│   │   │   └── 📄 section_state.py
 │   │   ├── 📄 __init__.py
 │   │   ├── 📄 __main__.py
 │   │   ├── 📄 _about.py
@@ -114,11 +117,14 @@
 │   ├── 📄 test_check.py
 │   ├── 📄 test_infrastructure.py
 │   ├── 📄 test_materials.py
+│   ├── 📄 test_prestress_transfer.py
 │   ├── 📄 test_properties.py
+│   ├── 📄 test_section_state.py
 │   ├── 📄 test_server.py
 │   ├── 📄 test_solver_biaxial.py
 │   ├── 📄 test_solver_uniaxial.py
-│   └── 📄 test_v030_regressions.py
+│   ├── 📄 test_v030_regressions.py
+│   └── 📄 test_validate_prestress_phase1.py
 ├── 📁 validazione
 │   └── 📄 Dati_AS.docx
 ├── 📁 web
@@ -132,6 +138,7 @@
 │   │   ├── 📄 plots.jsx
 │   │   └── 📄 tweaks.jsx
 │   └── 📄 index.html
+├── 📄 .coverage
 ├── 📄 .coveragerc
 ├── 📄 .gitignore
 ├── 📄 benchmark_numba_lazy_all_examples.ps1
@@ -152,5 +159,9 @@
 ├── 📄 profile_gensec.py
 ├── 📄 pyproject.toml
 ├── 📄 README.md
+├── 📄 run_phase3_validation.py
+├── 📄 run_phase4_yaml_validation.py
+├── 📄 run_prestress_action_validation.py
 ├── 📄 setup_licensing.py
+├── 📄 tree_output.txt
 └── 📄 uv.lock

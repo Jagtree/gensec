@@ -452,9 +452,27 @@ class _Session:
         nm_data_y = nm_gen.generate(n_points=n_points, direction="y") if is_biaxial else None
 
         domain_data = nm_data   # use uniaxial diagram for verification
+
+        # Phase-3 staged section-state evolution: same gate as the CLI
+        # (``io_yaml.staged_ops_present``).  The manager mirrors the
+        # engine's domain kind — uniaxial here, because the session
+        # verifies against ``nm_data`` — so per-stage bundle domains
+        # are commensurable with the single-domain path.  Without
+        # ``section_ops`` anywhere, ``staged_mgr`` stays ``None`` and
+        # the construction is byte-identical to the legacy
+        # capacity-frozen session.
+        from .io_yaml import staged_ops_present
+        staged_mgr = None
+        if staged_ops_present(combinations):
+            from .solver.section_state import StagedDomainManager
+            staged_mgr = StagedDomainManager(
+                section, biaxial=False,
+                gen_kwargs={"n_points": n_points})
+
         engine = VerificationEngine(
             domain_data, nm_gen, opts,
             n_points=n_points // 2,
+            staged_manager=staged_mgr,
         )
         
         demand_db = {d["name"]: d for d in demands}

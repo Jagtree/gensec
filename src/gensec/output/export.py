@@ -202,6 +202,15 @@ def _clean_stages(stages):
                      "eta_path_norm_beta", "eta_path_2D", "warning"):
             if key in s:
                 entry[key] = s[key]
+        # Staged section-state provenance (Phase 3/4) and the opaque
+        # per-stage ``report`` payload.  Conditional on presence, so
+        # capacity-frozen (legacy) exports are byte-identical; under a
+        # staged manager these are exactly the keys the reporting
+        # layer needs (which domain verified the stage, whether the
+        # path base was reset, and the user's stage annotation).
+        for key in ("domain_hash", "domain_reset", "report"):
+            if key in s:
+                entry[key] = s[key]
         out.append(entry)
     return out
 

@@ -944,7 +944,13 @@ class StagedDomainManager:
             ``activate`` / ``deactivate`` (lists of union element
             indices), ``eps_override`` (``{idx: eps}``), ``bulk_eps``
             (float) and ``release`` (bool; whether deactivations are
-            force-released vs cleanly removed).
+            force-released vs cleanly removed).  A stage may also carry
+            ``time`` (cumulative days since stage 0), copied onto
+            :attr:`SectionState.time_days` — **carry-through only**: it
+            never enters :meth:`SectionState.capacity_hash` (time acts
+            on the capacity only through the ``eps_override`` values a
+            losses model derives from it).  Omitted → the previous
+            stage's value carries forward.
 
         Returns
         -------
@@ -970,6 +976,11 @@ class StagedDomainManager:
                 cur = cur.with_eps_override(ops["eps_override"])
             if "bulk_eps" in ops:
                 cur = cur.with_bulk_eps(ops["bulk_eps"])
+            # Informational time stamp [days], cumulative since stage 0.
+            # Deliberately outside the ops dict (it is not a capacity
+            # operation) and deliberately not hashed.
+            if "time" in stage:
+                cur.time_days = float(stage["time"])
             cur.stage_index = k
 
             h, bundle, _built = self.get_bundle(cur)

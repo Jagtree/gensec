@@ -1547,6 +1547,13 @@ class VerificationEngine:
             manager it may also carry ``section_ops`` (see
             :meth:`_resolve_stage_states`) and ``_prestress_actions``
             (a list of :class:`~gensec.solver.section_state.PrestressAction`).
+            A stage carrying ``section_ops`` **requires** a staged
+            manager (a static run raises rather than silently freezing
+            the capacity).  An optional ``report`` payload is echoed
+            verbatim into the per-stage result; an optional ``time`` is
+            consumed by
+            :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`
+            (informational, never hashed).
         demand_db : dict
 
         Returns
@@ -1562,6 +1569,24 @@ class VerificationEngine:
         # States/hashes/bundles depend only on the section, never on
         # loads, so they are resolved before the demand walk.
         if static:
+            # No-silent-no-op guard: a stage carrying ``section_ops``
+            # demands section-state evolution.  Running it against the
+            # single frozen domain would silently drop the ops — the
+            # capacity would not reflect the declared construction
+            # sequence.  The wiring layers (cli/api) build a manager
+            # whenever ``io_yaml.staged_ops_present`` is true, so this
+            # fires only on a mis-wired programmatic call.
+            for stage in stages:
+                if "section_ops" in stage:
+                    raise RuntimeError(
+                        f"Staged combination '{name}': stage "
+                        f"'{stage.get('name', '?')}' carries "
+                        f"'section_ops' but the engine has no "
+                        f"staged_manager — the ops would be silently "
+                        f"ignored. Construct the engine with "
+                        f"VerificationEngine(..., staged_manager="
+                        f"StagedDomainManager(section, ...))."
+                    )
             hashes = ["__STATIC__"] * len(stages)
             bundles = [None] * len(stages)         # None => self.domain
             deact = [([], False)] * len(stages)
@@ -1654,6 +1679,12 @@ class VerificationEngine:
             if not static:
                 sr["domain_hash"] = hashes[k]
                 sr["domain_reset"] = sched[k]["reset"]
+
+            # Opaque per-stage reporting payload from YAML (``report``):
+            # echoed verbatim for the reporting layer.  Inert when the
+            # stage declares none, so legacy output is unchanged.
+            if "report" in stage:
+                sr["report"] = stage["report"]
 
             # Evaluate metrics on this stage's domain.  The context
             # manager is a no-op when ``bundle is None`` (static), so the

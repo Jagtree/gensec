@@ -87,6 +87,63 @@ def _section_axis_limits(ax, sec):
     ax.set_ylabel('y [mm]')
 
 
+def _legend_if_any(ax, **kwargs):
+    r"""
+    Call ``ax.legend(**kwargs)`` only if the axes hold at least one
+    labelled artist.
+
+    Several section-state panels carry a **single, conditional**
+    labelled artist — the neutral-axis line, which exists only when
+    the strain field actually crosses zero.  For a state of
+    uniform-sign strain (e.g. a fully compressed section: small
+    eccentricity, demand inside the kern) the panel has no labelled
+    artist and a bare ``ax.legend()`` emits Matplotlib's
+    *"No artists with labels found"* ``UserWarning``.  This guard
+    keeps the call site declarative while staying silent — the
+    informative companion is the explicit no-crossing annotation
+    placed by :func:`_draw_neutral_axis`, so the absence of the
+    legend is never an absence of information.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    **kwargs
+        Forwarded verbatim to :meth:`matplotlib.axes.Axes.legend`.
+    """
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(**kwargs)
+
+
+def _annotate_no_neutral_axis(ax, eps):
+    r"""
+    Annotate a panel whose strain field does not cross zero.
+
+    GenSec's reporting philosophy is to expose information, not to
+    suppress it: when the neutral axis lies outside the section
+    (uniform-sign strain field), saying so explicitly is the
+    informative counterpart of drawing it.  The sign tells the regime:
+
+    - all :math:`\varepsilon < 0` — fully compressed (demand inside
+      the kern for the axial-dominated case);
+    - all :math:`\varepsilon > 0` — fully in tension.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    eps : numpy.ndarray
+        Bulk strain field [-].
+    """
+    regime = ("fully compressed" if float(np.max(eps)) <= 0.0
+              else "fully in tension")
+    ax.annotate(f"N.A. outside section ({regime})",
+                xy=(0.02, 0.02), xycoords='axes fraction',
+                fontsize=8, color='#990000', style='italic',
+                bbox=dict(boxstyle='round,pad=0.25',
+                          facecolor='white', alpha=0.8,
+                          edgecolor='#990000'))
+
+
 def _draw_neutral_axis(ax, sec, fiber_results):
     r"""
     Draw the neutral axis line, extending symmetrically beyond the
@@ -95,11 +152,23 @@ def _draw_neutral_axis(ax, sec, fiber_results):
     For uniaxial sections, draws a horizontal line. For biaxial,
     fits the strain plane and draws the :math:`\varepsilon = 0` line.
 
+    When the strain field does **not** cross zero (uniform-sign
+    state: fully compressed / fully in tension), no axis exists
+    inside the section; the panel is annotated explicitly via
+    :func:`_annotate_no_neutral_axis` instead of being left blank.
+
     Parameters
     ----------
     ax : matplotlib.axes.Axes
     sec : GenericSection or RectSection
     fiber_results : dict
+
+    Returns
+    -------
+    bool
+        ``True`` if a (labelled) neutral-axis line was drawn,
+        ``False`` if the field has uniform sign and only the
+        annotation was placed.
     """
     b = fiber_results["bulk"]
     bx, by, be = b["x"], b["y"], b["eps"]
@@ -108,6 +177,12 @@ def _draw_neutral_axis(ax, sec, fiber_results):
 
     # Extension beyond bounding box for visual clarity
     ext = max(maxx - minx, maxy - miny) * 0.15
+
+    # Uniform-sign field: no zero crossing anywhere in the bulk —
+    # the neutral axis lies outside the section.  Annotate and exit.
+    if be.min() >= 0.0 or be.max() <= 0.0:
+        _annotate_no_neutral_axis(ax, be)
+        return False
 
     is_2d = len(np.unique(bx)) > 1
 
@@ -140,6 +215,10 @@ def _draw_neutral_axis(ax, sec, fiber_results):
             ax.plot([na_pts[0][0], na_pts[-1][0]],
                     [na_pts[0][1], na_pts[-1][1]],
                     'r--', lw=2.5, label='Neutral axis', zorder=10)
+            return True
+        # Degenerate fit (e.g. near-uniform plane): nothing drawable.
+        _annotate_no_neutral_axis(ax, be)
+        return False
     else:
         # Uniaxial: find y where eps crosses zero
         y_sorted = np.argsort(by)
@@ -152,6 +231,9 @@ def _draw_neutral_axis(ax, sec, fiber_results):
             ax.plot([minx - ext, maxx + ext], [y_na, y_na],
                     'r--', lw=2.5, label=f'NA y={y_na:.1f} mm',
                     zorder=10)
+            return True
+        _annotate_no_neutral_axis(ax, be)
+        return False
 
 
 def _make_color_norm_and_cmap(values):
@@ -327,7 +409,7 @@ def plot_section_state(sec, fiber_results, field='eps', title=""):
     _draw_reference_axes(ax, sec)
 
     _section_axis_limits(ax, sec)
-    ax.legend(fontsize=9, loc='best')
+    _legend_if_any(ax, fontsize=9, loc='best')
     ax.grid(True, alpha=0.15)
     ax.set_title(title or f"Section — {unit}")
     fig.tight_layout()
@@ -394,7 +476,7 @@ def _draw_geometry_panel(ax, sec, fiber_results=None):
 
     if fiber_results is not None:
         _draw_neutral_axis(ax, sec, fiber_results)
-        ax.legend(fontsize=9, loc='best')
+        _legend_if_any(ax, fontsize=9, loc='best')
         ax.set_title('Geometry + Neutral Axis')
     else:
         ax.set_title('Geometry')
@@ -1553,7 +1635,7 @@ def plot_stress_profile(results, sec, title=""):
     _draw_neutral_axis(ax1, sec, results)
     _draw_reference_axes(ax1, sec)
     _section_axis_limits(ax1, sec)
-    ax1.legend(fontsize=9, loc='best')
+    _legend_if_any(ax1, fontsize=9, loc='best')
     ax1.set_title("Strain ε [‰]")
     ax1.grid(True, alpha=0.15)
 
@@ -1586,7 +1668,7 @@ def plot_stress_profile(results, sec, title=""):
     _draw_neutral_axis(ax2, sec, results)
     _draw_reference_axes(ax2, sec)
     _section_axis_limits(ax2, sec)
-    ax2.legend(fontsize=9, loc='best')
+    _legend_if_any(ax2, fontsize=9, loc='best')
     ax2.set_title("Stress σ [MPa]")
     ax2.grid(True, alpha=0.15)
 

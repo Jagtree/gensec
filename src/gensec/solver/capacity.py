@@ -1491,7 +1491,26 @@ class NMDiagram:
                 chi_max = (abs(self._emb) / (d_max * 0.3) * 1.5
                            if d_max > 0 else 1e-4)
 
-        # Cracking strain from EC2 properties (if available).
+        # Cracking strain: the first-cracking event is detected when
+        # the extreme bulk tensile strain reaches :math:`\varepsilon_{cr}`.
+        # Sourcing chain (first hit wins):
+        #
+        # 1. EC2 properties object (``bulk.ec2``, attached by the
+        #    ``concrete_ec2_gen1`` builders): :math:`f_{ctm}/E_{cm}`.
+        #    Kept first because the **mean** values are the appropriate
+        #    model for the first-cracking serviceability event on the
+        #    uncracked section — independently of whether the *design*
+        #    constitutive law models tension (``enable_tension``).
+        # 2. The bulk material's own declared tensile law: a custom
+        #    :class:`~gensec.materials.concrete.Concrete` with
+        #    ``fct > 0`` and ``Ec > 0`` exposes
+        #    ``eps_ct = fct / Ec``.  By definition this is the cracking
+        #    model the user intends (whether they fed mean or design
+        #    values is their declaration).
+        # 3. Neither available (e.g. ``fct = 0``): there is genuinely
+        #    no cracking information — detection is skipped and the
+        #    ``cracking_*`` outputs stay ``None`` (no marker), which is
+        #    honest rather than a silent guess.
         eps_cr = None
         bulk = sec.bulk_material
         ec2_obj = getattr(bulk, 'ec2', None)
@@ -1500,6 +1519,10 @@ class NMDiagram:
             ecm = getattr(ec2_obj, 'ecm', None)
             if fctm is not None and ecm is not None and ecm > 0:
                 eps_cr = fctm / ecm
+        if eps_cr is None:
+            eps_ct = getattr(bulk, 'eps_ct', None)
+            if eps_ct is not None and eps_ct > 0:
+                eps_cr = float(eps_ct)
 
         # Scan both positive and negative curvature
         results_pos = self._scan_chi_vectorized(

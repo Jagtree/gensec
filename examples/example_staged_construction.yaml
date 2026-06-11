@@ -1,0 +1,39 @@
+
+materials:
+  conc:  {type: concrete_ec2_gen1, class: 'C25/30'}
+  steel: {type: steel, fyk: 450, gamma_s: 1.15}
+
+section:
+  shape: rect
+  params: {B: 300, H: 500}
+  bulk_material: conc
+  mesh_size: 20
+  rebars:
+    - {x: 40,  y: 40,  As: 400, material: steel, name: A1}
+    - {x: 260, y: 40,  As: 400, material: steel, name: A2}
+    - {x: 40,  y: 460, As: 400, material: steel, name: B1}
+    - {x: 260, y: 460, As: 400, material: steel, name: B2}
+
+demands:
+  - {name: G, N_kN: -500, Mx_kNm: 20}
+  - {name: E, Mx_kNm: 70}
+
+combinations:
+  - name: staged-build
+    stages:
+      - name: build-A
+        components: [{ref: G, factor: 1.0}]
+        section_ops: {deactivate: [B1, B2]}
+        time: 0
+      - name: add-B
+        components: [{ref: E, factor: 1.0}]
+        section_ops: {activate: [2, 3]}
+        time: 28
+        report: {note: "B grouted"}
+      - name: service
+        components: [{ref: E, factor: 0.5}]
+
+output:
+  eta_norm: true
+  eta_norm_beta: true
+  eta_path_norm_ray: true

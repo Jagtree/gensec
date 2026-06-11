@@ -399,10 +399,17 @@ def load_yaml(filepath):
     # ---- Prestress actions (demand-side loads) ----
     # Resolve each stage's raw ``prestress_actions`` specs into
     # ``PrestressAction`` objects now that the section (hence its
-    # reference point and tendon geometry) is known, and attach them as
-    # ``_prestress_actions`` for the staged engines to sum into the
-    # demand.  A no-op for combinations that declare none.
-    _resolve_prestress_actions(combinations, section, sec_spec)
+    # reference point and tendon geometry/names) is known, and attach
+    # them as ``_prestress_actions`` for the staged engines to sum into
+    # the demand.  A no-op for combinations that declare none.
+    _resolve_prestress_actions(combinations, section)
+
+    # ---- Section ops (capacity-side stage operations, Phase 3) ----
+    # Resolve each stage's raw ``section_ops`` specs (element names ->
+    # union indices) into the form ``StagedDomainManager.resolve_stages``
+    # consumes, attached under ``section_ops``.  A no-op for
+    # combinations that declare none.
+    _resolve_section_ops(combinations, section)
 
     # ---- Envelopes ----
     envelopes = [_parse_envelope(e)
@@ -430,6 +437,10 @@ def _parse_rebars(sec_spec, materials):
     :math:`A_s = n_{\\text{bars}} \\cdot \\pi/4 \\cdot d^2`.
     If both are given, ``As`` takes precedence.
 
+    An optional ``name`` (symmetric to the tendon ``name``) makes the
+    layer referenceable by name from a stage's ``section_ops`` block;
+    see :func:`_union_name_map`.
+
     Parameters
     ----------
     sec_spec : dict
@@ -456,6 +467,7 @@ def _parse_rebars(sec_spec, materials):
             embedded=bool(rb_spec.get("embedded", True)),
             n_bars=int(rb_spec.get("n_bars", 1)),
             diameter=float(rb_spec.get("diameter", 0)),
+            name=rb_spec.get("name"),
         ))
     return rebars
 
@@ -479,6 +491,7 @@ def _parse_tendons(sec_spec, materials):
             eps_pe: 0.0065
             system: post
             bonded: true
+            name: T_bottom     # optional; usable as prestress_actions ref
 
     Parameters
     ----------
@@ -509,6 +522,7 @@ def _parse_tendons(sec_spec, materials):
             embedded=bool(t_spec.get("embedded", True)),
             n_strands=int(t_spec.get("n_strands", 1)),
             area_strand=float(t_spec.get("area_strand", 0)),
+            name=t_spec.get("name"),
         ))
     return tendons
 
@@ -603,6 +617,53 @@ def _parse_combination(c_spec):
     point is not yet known) and resolved by
     :func:`_resolve_prestress_actions` in :func:`load_yaml`.
 
+    A stage may also carry (Phase-3 unified stage model):
+
+    - ``section_ops`` — capacity-state operations applied *at* the
+      stage, consumed by
+      :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`:
+      ``activate`` / ``deactivate`` (lists of element references),
+      ``eps_override`` (``{element_ref: eps}``, prestrain override [-]),
+      ``bulk_eps`` (float [-]; **non-zero raises** — see
+      :func:`_parse_section_ops_spec`), ``release`` (bool, default
+      ``True``; whether deactivations are force-released).  An element
+      reference is a **union index** (integer position in the canonical
+      ``rebars + tendons`` order of the section) or an element ``name``
+      (:attr:`~gensec.geometry.fiber.RebarLayer.name` /
+      :attr:`~gensec.geometry.fiber.Tendon.name`); names resolve to
+      union indices in :func:`_resolve_section_ops`.
+    - ``time`` — cumulative time since stage 0 [days], carried onto
+      :attr:`~gensec.solver.section_state.SectionState.time_days`.
+      Informational only: it never enters the capacity hash (losses act
+      through ``eps_override``, never through time itself).  Omitted →
+      the previous stage's value carries forward.
+    - ``report`` — opaque per-stage reporting payload, echoed verbatim
+      into the stage's result dict by the engines for the reporting
+      layer.  No solver-side effect.
+
+    .. code-block:: yaml
+
+        - name: costruzione
+          stages:
+            - name: fase_1
+              components: [{ref: G1, factor: 1.0}]
+              section_ops:
+                deactivate: [B_top, 3]     # names and union indices mix
+              time: 0
+            - name: fase_2
+              components: [{ref: G2, factor: 1.0}]
+              section_ops:
+                activate: [B_top, 3]
+                eps_override: {T_bottom: 0.0058}
+              time: 28
+              report: {note: "getto completato"}
+
+    Like ``prestress_actions``, the raw ``section_ops`` spec is carried
+    unresolved (``_section_ops_spec``) and resolved against the built
+    section by :func:`_resolve_section_ops` in :func:`load_yaml`;
+    value-level validation that needs no section (structure, unknown
+    keys, the ``bulk_eps`` guard, ``time`` monotonicity) happens here.
+
     Parameters
     ----------
     c_spec : dict
@@ -617,7 +678,12 @@ def _parse_combination(c_spec):
     Raises
     ------
     ValueError
-        If both ``components`` and ``stages`` are present, or neither.
+        If both ``components`` and ``stages`` are present, or neither;
+        if a stage-only key (``prestress_actions``, ``section_ops``,
+        ``time``, ``report``) is misplaced on a simple combination or
+        at the staged-combination level; if a ``section_ops`` block is
+        malformed (see :func:`_parse_section_ops_spec`); if ``time``
+        is negative or decreases across stages.
     """
     name = c_spec.get("name", "unnamed")
     has_components = "components" in c_spec
@@ -641,6 +707,13 @@ def _parse_combination(c_spec):
                 f"valid on a stage of a staged combination, not on a "
                 f"simple (components-only) combination."
             )
+        for key in ("section_ops", "time", "report"):
+            if key in c_spec:
+                raise ValueError(
+                    f"Combination '{name}': '{key}' is only valid on "
+                    f"a stage of a staged combination, not on a simple "
+                    f"(components-only) combination."
+                )
         return {
             "name": name,
             "components": _parse_component_list(c_spec["components"]),
@@ -652,7 +725,14 @@ def _parse_combination(c_spec):
             f"Combination '{name}': place 'prestress_actions' on an "
             f"individual stage, not at the combination level."
         )
+    for key in ("section_ops", "time", "report"):
+        if key in c_spec:
+            raise ValueError(
+                f"Combination '{name}': place '{key}' on an "
+                f"individual stage, not at the combination level."
+            )
     stages = []
+    prev_time = None
     for i, s_spec in enumerate(c_spec["stages"]):
         stage = {
             "name": s_spec.get("name", f"stage_{i}"),
@@ -665,6 +745,42 @@ def _parse_combination(c_spec):
         if "prestress_actions" in s_spec:
             stage["_prestress_action_specs"] = list(
                 s_spec["prestress_actions"])
+        # Carry the raw section-ops spec forward unresolved (element
+        # names need the built section); value-level validation that
+        # needs no section happens now, in _parse_section_ops_spec.
+        if "section_ops" in s_spec:
+            stage["_section_ops_spec"] = _parse_section_ops_spec(
+                name, stage["name"], s_spec["section_ops"])
+        # Cumulative time at this stage [days].  Carry-through only:
+        # it lands on SectionState.time_days and never enters the
+        # capacity hash.  Guarded for sign and monotonicity here.
+        if "time" in s_spec:
+            t = s_spec["time"]
+            try:
+                t = float(t)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Combination '{name}', stage '{stage['name']}': "
+                    f"'time' must be a number [days], got {t!r}."
+                )
+            if t < 0.0:
+                raise ValueError(
+                    f"Combination '{name}', stage '{stage['name']}': "
+                    f"'time' must be non-negative, got {t:g}."
+                )
+            if prev_time is not None and t < prev_time:
+                raise ValueError(
+                    f"Combination '{name}', stage '{stage['name']}': "
+                    f"'time' decreases ({prev_time:g} -> {t:g} days); "
+                    f"stage times are cumulative since stage 0 and "
+                    f"must be non-decreasing."
+                )
+            prev_time = t
+            stage["time"] = t
+        # Opaque per-stage reporting payload, echoed verbatim into the
+        # per-stage result by the engines.  No solver-side effect.
+        if "report" in s_spec:
+            stage["report"] = s_spec["report"]
         stages.append(stage)
     return {"name": name, "stages": stages}
 
@@ -718,7 +834,15 @@ def _parse_bulk_prestrain(sec_spec):
     ------
     ValueError
         If both ``prestrain`` and ``eps_init`` are present with
-        different values (ambiguous).
+        different values (ambiguous), **or if the value is non-zero**.
+        The latter is a deliberate *no-silent-no-op* guard: the field is
+        parsed, hashed and propagated by the section-state machinery,
+        but the fiber integrator does not yet evaluate the bulk
+        constitutive law at the offset argument, so a non-zero value
+        would change the domain cache identity **without changing the
+        resistance domain itself** — the worst kind of silent error for
+        an analysis tool.  The guard is removed when the kernel consumes
+        the offset (shrinkage/losses phase).
     """
     has_p = "prestrain" in sec_spec
     has_e = "eps_init" in sec_spec
@@ -729,13 +853,24 @@ def _parse_bulk_prestrain(sec_spec):
                 "different values; they are aliases — set only one."
             )
     if has_p:
-        return float(sec_spec["prestrain"])
-    if has_e:
-        return float(sec_spec["eps_init"])
-    return 0.0
+        value = float(sec_spec["prestrain"])
+    elif has_e:
+        value = float(sec_spec["eps_init"])
+    else:
+        return 0.0
+
+    if value != 0.0:
+        raise ValueError(
+            f"section: bulk 'prestrain'/'eps_init' = {value:g} is not "
+            f"yet consumed by the fiber solver — the resistance domain "
+            f"would NOT reflect it. To avoid a silent no-op, non-zero "
+            f"values are rejected until the solver-side support lands "
+            f"(shrinkage/losses phase). Remove the field for now."
+        )
+    return value
 
 
-def _resolve_prestress_actions(combinations, section, sec_spec):
+def _resolve_prestress_actions(combinations, section):
     r"""
     Resolve raw ``prestress_actions`` specs into
     :class:`~gensec.solver.section_state.PrestressAction` objects.
@@ -760,17 +895,16 @@ def _resolve_prestress_actions(combinations, section, sec_spec):
     combinations : list of dict
         Parsed combinations (output of :func:`_parse_combination`).
     section : GenericSection
-        Built section (supplies the reference point and tendon
-        geometry for ``ref`` resolution).
-    sec_spec : dict
-        Raw ``section`` block; its ``tendons`` list is used to resolve
-        a string ``ref`` against an optional tendon ``name``.
+        Built section (supplies the reference point, the tendon
+        coordinate arrays, and the tendon names for ``ref``
+        resolution).
 
     Raises
     ------
     ValueError
-        If a ``prestress_actions`` block is declared on a simple
-        (non-staged) combination, or an entry is malformed.
+        If an entry is malformed (see
+        :func:`_resolve_single_prestress_action`) or tendon names are
+        ambiguous (see :func:`_tendon_name_map`).
 
     Notes
     -----
@@ -783,7 +917,7 @@ def _resolve_prestress_actions(combinations, section, sec_spec):
     """
     x_ref = float(section.x_centroid)
     y_ref = float(section.y_centroid)
-    name_map = _tendon_name_map(sec_spec)
+    name_map = _tendon_name_map(section)
 
     for combo in combinations:
         if "stages" not in combo:
@@ -799,30 +933,46 @@ def _resolve_prestress_actions(combinations, section, sec_spec):
             ]
 
 
-def _tendon_name_map(sec_spec):
+def _tendon_name_map(section):
     r"""
-    Map a tendon ``name`` (if declared in YAML) to its list index.
+    Map a tendon ``name`` (if set) to its index in the section's
+    tendon list.
 
-    Tendons are referenced by integer index by default; this allows an
-    optional human-readable ``name`` key on a tendon spec to be used as
-    a ``ref`` instead.
+    Tendons are referenced by integer index by default; this allows the
+    optional :attr:`~gensec.geometry.fiber.Tendon.name` to be used as a
+    ``ref`` instead.  Reading from the **built** :class:`Tendon` objects
+    (rather than the raw YAML spec) makes name resolution work
+    identically for API-constructed sections.
 
     Parameters
     ----------
-    sec_spec : dict
-        Raw ``section`` block.
+    section : GenericSection
+        Built section.
 
     Returns
     -------
     dict
-        ``{name: index}`` for every tendon spec that declares a
-        ``name``.
+        ``{name: index}`` for every tendon with a non-``None`` name.
+
+    Raises
+    ------
+    ValueError
+        If two tendons share the same name (the reference would be
+        ambiguous).
     """
     out = {}
-    for i, t in enumerate(sec_spec.get("tendons", [])):
-        nm = t.get("name") if isinstance(t, dict) else None
-        if nm is not None:
-            out[str(nm)] = i
+    for i, t in enumerate(getattr(section, "tendons", [])):
+        nm = getattr(t, "name", None)
+        if nm is None:
+            continue
+        nm = str(nm)
+        if nm in out:
+            raise ValueError(
+                f"section: duplicate tendon name '{nm}' (tendons "
+                f"{out[nm]} and {i}) — names used as refs must be "
+                f"unique."
+            )
+        out[nm] = i
     return out
 
 
@@ -915,6 +1065,317 @@ def _resolve_single_prestress_action(spec, section, x_ref, y_ref,
         label=str(spec.get("label", "")),
         origin="prestress",
     )
+
+
+# ---- Section-ops parsing + resolution (Phase-3 staged YAML) ----
+
+#: Keys accepted in a stage's ``section_ops`` block.  Anything else is
+#: a typo and raises (no-silent policy: a misspelled op must never be
+#: silently dropped — it would change the model without telling).
+_SECTION_OPS_KEYS = ("activate", "deactivate", "eps_override",
+                     "bulk_eps", "release")
+
+
+def _parse_section_ops_spec(combo_name, stage_name, ops):
+    r"""
+    Value-level validation of one stage's ``section_ops`` block.
+
+    Runs at parse time (no section needed): structure, unknown keys,
+    the ``bulk_eps`` no-silent-no-op guard, type checks.  Element
+    references (union indices or names) are **not** resolved here —
+    that needs the built section and happens in
+    :func:`_resolve_section_ops`.
+
+    Parameters
+    ----------
+    combo_name, stage_name : str
+        For error messages.
+    ops : dict
+        Raw ``section_ops`` block: any of ``activate`` / ``deactivate``
+        (lists of int index or str name), ``eps_override``
+        (``{ref: eps}``), ``bulk_eps`` (float), ``release`` (bool).
+
+    Returns
+    -------
+    dict
+        The validated raw spec (same keys, lists/dicts shallow-copied).
+
+    Raises
+    ------
+    ValueError
+        Malformed block, unknown key, or non-zero ``bulk_eps``.
+
+    Notes
+    -----
+    **``bulk_eps`` is hash-effective but kernel-inert until Phase 5**,
+    exactly like the section-level ``prestrain`` / ``eps_init`` field
+    (see :func:`_parse_bulk_prestrain`): the value is parsed, hashed and
+    propagated onto the materialized view, but the fiber integrator does
+    not yet evaluate the bulk constitutive law at the offset argument.
+    A non-zero value would therefore change the domain cache identity
+    **without changing the resistance domain itself** — the worst kind
+    of silent error for an analysis tool.  The same *no-silent-no-op*
+    policy applies: non-zero values are rejected until the kernel
+    consumes the offset (Phase 5, the five documented sites in
+    ``integrator.py``).
+    """
+    where = f"Combination '{combo_name}', stage '{stage_name}'"
+    if not isinstance(ops, dict):
+        raise ValueError(
+            f"{where}: 'section_ops' must be a mapping, "
+            f"got {type(ops).__name__}."
+        )
+    unknown = sorted(set(ops) - set(_SECTION_OPS_KEYS))
+    if unknown:
+        raise ValueError(
+            f"{where}: unknown section_ops key(s) {unknown}. "
+            f"Valid: {list(_SECTION_OPS_KEYS)}."
+        )
+
+    out = {}
+    for key in ("activate", "deactivate"):
+        if key in ops:
+            val = ops[key]
+            if not isinstance(val, list):
+                raise ValueError(
+                    f"{where}: section_ops '{key}' must be a list of "
+                    f"element references (union index or name), got "
+                    f"{type(val).__name__}."
+                )
+            out[key] = list(val)
+    if "eps_override" in ops:
+        val = ops["eps_override"]
+        if not isinstance(val, dict):
+            raise ValueError(
+                f"{where}: section_ops 'eps_override' must be a "
+                f"mapping {{element_ref: eps}}, got "
+                f"{type(val).__name__}."
+            )
+        out["eps_override"] = dict(val)
+    if "release" in ops:
+        val = ops["release"]
+        if not isinstance(val, bool):
+            raise ValueError(
+                f"{where}: section_ops 'release' must be a boolean, "
+                f"got {val!r}."
+            )
+        out["release"] = val
+    if "bulk_eps" in ops:
+        val = float(ops["bulk_eps"])
+        if val != 0.0:
+            raise ValueError(
+                f"{where}: section_ops 'bulk_eps' = {val:g} is not yet "
+                f"consumed by the fiber solver — the resistance domain "
+                f"would NOT reflect it. To avoid a silent no-op, "
+                f"non-zero values are rejected until the solver-side "
+                f"support lands (Phase 5: bulk prestrain kernel change "
+                f"in integrator.py). Remove the field for now."
+            )
+        out["bulk_eps"] = val
+    return out
+
+
+def _union_name_map(section):
+    r"""
+    Map an element ``name`` to its **union index** in the canonical
+    ``rebars + tendons`` order of the section.
+
+    This is the one reference mechanism of the staged YAML schema:
+    the union index is the primitive (it is the index every
+    :class:`~gensec.solver.section_state.SectionState` array is defined
+    over), and a name — :attr:`~gensec.geometry.fiber.RebarLayer.name`
+    or :attr:`~gensec.geometry.fiber.Tendon.name` — is an optional
+    alias for it.  Same semantics and guards as the Step-A
+    ``prestress_actions`` ``ref`` (:func:`_tendon_name_map`): reading
+    from the **built** element objects makes resolution identical for
+    API-constructed sections, and a duplicate name raises because the
+    reference would be ambiguous.  The uniqueness scope here is the
+    whole union set (a rebar and a tendon may not share a name), which
+    is strictly wider than the tendon-only scope of
+    :func:`_tendon_name_map` — necessarily so, since a ``section_ops``
+    name may target either population.
+
+    Parameters
+    ----------
+    section : GenericSection
+        Built section.
+
+    Returns
+    -------
+    dict
+        ``{name: union_index}`` for every named element.
+
+    Raises
+    ------
+    ValueError
+        If two elements share the same name.
+    """
+    out = {}
+    elements = list(getattr(section, "rebars", []))
+    elements += list(getattr(section, "tendons", []))
+    for i, el in enumerate(elements):
+        nm = getattr(el, "name", None)
+        if nm is None:
+            continue
+        nm = str(nm)
+        if nm in out:
+            raise ValueError(
+                f"section: duplicate element name '{nm}' (union "
+                f"elements {out[nm]} and {i}) — names used as refs "
+                f"must be unique across the rebars + tendons union set."
+            )
+        out[nm] = i
+    return out
+
+
+def _resolve_element_id(eid, n_union, name_map, where):
+    r"""
+    Resolve one element reference to a union index.
+
+    Parameters
+    ----------
+    eid : int or str
+        Union index (integer position in the canonical
+        ``rebars + tendons`` order) or element name.
+    n_union : int
+        Size of the union element set.
+    name_map : dict
+        ``{name: union_index}`` from :func:`_union_name_map`.
+    where : str
+        Context prefix for error messages.
+
+    Returns
+    -------
+    int
+        Union index in ``[0, n_union)``.
+
+    Raises
+    ------
+    ValueError
+        Unknown name, index out of range, or unsupported type
+        (booleans are rejected explicitly: YAML ``true`` is a
+        :class:`bool`, which is an :class:`int` subclass — accepting it
+        as index 1 would mask an input error).
+    """
+    if isinstance(eid, str):
+        if eid not in name_map:
+            raise ValueError(
+                f"{where}: element ref '{eid}' does not match any "
+                f"rebar/tendon 'name'. Known: {sorted(name_map)}."
+            )
+        return name_map[eid]
+    if isinstance(eid, bool) or not isinstance(eid, int):
+        raise ValueError(
+            f"{where}: element ref must be a union index (int) or an "
+            f"element name (str), got {eid!r}."
+        )
+    if not (0 <= eid < n_union):
+        raise ValueError(
+            f"{where}: element ref index {eid} out of range (section "
+            f"has {n_union} union element(s): rebars + tendons)."
+        )
+    return eid
+
+
+def _resolve_section_ops(combinations, section):
+    r"""
+    Resolve raw ``section_ops`` specs into the form consumed by
+    :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`.
+
+    The exact counterpart of :func:`_resolve_prestress_actions` for the
+    capacity side: walks every staged combination and replaces each
+    stage's deferred ``_section_ops_spec`` (carried by
+    :func:`_parse_combination`) with a resolved dict under the key
+    ``section_ops`` — element names replaced by union indices,
+    ``eps_override`` values coerced to float.  Mutates *combinations*
+    in place; a no-op for combinations that declare none.
+
+    Parameters
+    ----------
+    combinations : list of dict
+        Parsed combinations (output of :func:`_parse_combination`).
+    section : GenericSection
+        Built section (supplies the union element count and the
+        element names).
+
+    Raises
+    ------
+    ValueError
+        Unknown name, duplicate name, or out-of-range index (see
+        :func:`_resolve_element_id` / :func:`_union_name_map`).
+
+    Notes
+    -----
+    The union name map is built (and its duplicate guard enforced)
+    **unconditionally**, mirroring the Step-A behaviour of
+    :func:`_resolve_prestress_actions` /
+    :func:`_tendon_name_map`: an ambiguous reference name is an input
+    error at declaration, whether or not the current file happens to
+    dereference it.
+    """
+    name_map = _union_name_map(section)
+    n_union = (int(getattr(section, "x_rebars", np.empty(0)).size)
+               + int(getattr(section, "x_tendons", np.empty(0)).size))
+
+    for combo in combinations:
+        if "stages" not in combo:
+            continue
+        for stage in combo["stages"]:
+            spec = stage.pop("_section_ops_spec", None)
+            if spec is None:
+                continue
+            where = (f"Combination '{combo['name']}', stage "
+                     f"'{stage['name']}', section_ops")
+            ops = {}
+            for key in ("activate", "deactivate"):
+                if key in spec:
+                    ops[key] = [
+                        _resolve_element_id(e, n_union, name_map,
+                                            f"{where}.{key}")
+                        for e in spec[key]
+                    ]
+            if "eps_override" in spec:
+                ops["eps_override"] = {
+                    _resolve_element_id(e, n_union, name_map,
+                                        f"{where}.eps_override"):
+                        float(v)
+                    for e, v in spec["eps_override"].items()
+                }
+            if "release" in spec:
+                ops["release"] = spec["release"]
+            if "bulk_eps" in spec:
+                ops["bulk_eps"] = spec["bulk_eps"]
+            stage["section_ops"] = ops
+
+
+def staged_ops_present(combinations):
+    r"""
+    Whether any staged combination carries ``section_ops``.
+
+    This is the single gate the engine-wiring layers (``cli``, ``api``)
+    use to decide whether to build a
+    :class:`~gensec.solver.section_state.StagedDomainManager`: when it
+    returns ``False`` the engines are constructed exactly as before
+    Phase 3 (no manager — the legacy capacity-frozen run is byte-
+    identical); when ``True``, a manager is mandatory, because the
+    engines refuse to run a ``section_ops``-carrying combination
+    without one (no-silent-no-op: the ops would otherwise be dropped
+    and the capacity silently frozen).
+
+    Parameters
+    ----------
+    combinations : list of dict
+        Parsed combinations (after :func:`_resolve_section_ops`).
+
+    Returns
+    -------
+    bool
+    """
+    for combo in combinations:
+        for stage in combo.get("stages", []):
+            if "section_ops" in stage:
+                return True
+    return False
 
 
 # ---- Envelope parser ----

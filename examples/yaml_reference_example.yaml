@@ -1,15 +1,32 @@
 # ================================================================
-#  GenSec v0.3.0 — YAML Reference Input File
+#  GenSec — YAML Reference Input File
+#  (full schema: v0.3.x core + prestress Phase 1 tendons +
+#   Step-A prestress_actions + Phase-4 staged section_ops)
 # ================================================================
 #
-#  This file documents every supported key with inline comments.
-#  It is a valid input file and can be run as-is.
+#  This file documents EVERY supported key with inline comments.
+#  It is a valid input file and can be run as-is:
 #
-#  Usage:
 #    uv run gensec run yaml_reference_example.yaml --output-dir results/
+#    uv run gensec analyze yaml_reference_example.yaml --output-dir results/
 #
 #  Regenerate a plot from exported data:
+#
 #    uv run gensec plot results/mx_chi_N0.json
+#
+#  Conventions (everywhere in this file):
+#    forces  N_kN   [kN]      tension positive
+#    moments M*_kNm [kN*m]    right-hand rule, eps = eps0 + chix*ly - chiy*lx
+#    lengths        [mm]
+#    stresses       [MPa]
+#    strains        [-]       tension positive
+#
+#  Note on runtime: the active blocks below include one staged
+#  combination carrying ``section_ops``, which switches on the
+#  Phase-3 staged section-state evolution (per-stage resistance
+#  domains, built/reused by capacity hash).  Expect 2-3 domain
+#  builds instead of 1.  Remove/disable that combination for the
+#  fastest possible reference run.
 #
 # ================================================================
 
@@ -18,51 +35,94 @@
 #  MATERIALS
 # ================================================================
 #  Named material definitions.  Each key becomes the identifier
-#  used in the section block.
+#  used in the section / rebars / tendons blocks.  ``Material.name``
+#  is set to the key automatically.
 
 materials:
 
-  # --- Concrete: direct parameters ---
-  # Use when full control over the constitutive parameters is needed.
-  # Type: ``concrete_ec2_gen1_custom``  (legacy alias: ``concrete``)
+  # ----------------------------------------------------------------
+  # (1) Concrete, direct parameters
+  #     Type: concrete_ec2_gen1_custom   (legacy alias: concrete)
+  #     Full control over the constitutive parameters.
+  # ----------------------------------------------------------------
   concrete_direct:
     type: concrete_ec2_gen1_custom
     fck: 49.8             # characteristic cylinder strength [MPa] (required)
-    gamma_c: 1.4          # partial safety factor (default 1.5)
-    alpha_cc: 0.85        # long-term coefficient (default 0.85)
-    n_parabola: 2.0       # parabolic exponent (default 2.0)
-    eps_c2: -0.002        # peak-stress strain (default -0.002)
-    eps_cu2: -0.0035      # ultimate strain (default -0.0035)
-    # fct: 0.0            # tensile strength [MPa] (default 0 = no tension)
-    # Ec: 0.0             # elastic modulus [MPa] for tension (default 0)
+    gamma_c: 1.4          # partial safety factor          (default 1.5)
+    alpha_cc: 0.85        # long-term coefficient          (default 0.85)
+    n_parabola: 2.0       # parabolic exponent             (default 2.0)
+    eps_c2: -0.002        # peak-stress strain             (default -0.002)
+    eps_cu2: -0.0035      # ultimate strain                (default -0.0035)
+    # fct: 0.0            # tensile strength [MPa]         (default 0 = no tension)
+    # Ec: 0.0             # tension-branch modulus [MPa]   (default 0)
+    #
+    # First-cracking note: the M-chi "First cracking" marker is
+    # detected from a cracking strain eps_cr sourced as
+    #   1) fctm/Ecm of the EC2 properties object (class-based
+    #      concrete below) -- MEAN values, the correct model for the
+    #      serviceability cracking event, independent of whether the
+    #      design law models tension;
+    #   2) otherwise fct/Ec declared here (eps_ct), if positive;
+    #   3) otherwise no cracking info -> no marker (honest None).
 
-  # --- Concrete: EC2/NTC class-based ---
-  # Alternative, EC2-bridged form (``type: concrete_ec2_gen1`` with
-  # a strength ``class``).  All time-dependent and code-prescribed
-  # parameters (fck, fcm, fctm, Ecm, etc.) are derived from EC2
-  # Table 3.1.  Sample:
-  #
-  #   C25:
-  #     type: concrete_ec2_gen1
-  #     class: C25/30
-  #     ls: F            # long/short loading regime
-  #     loadtype: slow   # slow/fast loading
-  #     TypeConc: R      # cement class (R/N/S)
-  #     NA: French       # National Annex
-  #     time: 28         # concrete age [days]
+  # ----------------------------------------------------------------
+  # (2) Concrete, EC2/NTC class-based
+  #     Type: concrete_ec2_gen1   (legacy alias: concrete_ec2)
+  #     All code-prescribed parameters (fck, fcm, fctm, Ecm, ...)
+  #     derived from EC2 Table 3.1 via the fben2 bridge.
+  #     Give EITHER ``class`` OR ``fck``.
+  # ----------------------------------------------------------------
+  C25:
+    type: concrete_ec2_gen1
+    class: C25/30          # strength class (alternative: fck: 25)
+    ls: F                  # limit state / loading regime   (default F)
+    loadtype: slow         # slow / fast loading            (default slow)
+    TypeConc: R            # cement class R / N / S         (default R)
+    NA: French             # National Annex                 (default French)
+    time: 28               # concrete age [days]            (default 28)
+    enable_tension: false  # tension branch in the DESIGN constitutive
+                           # law (default false).  Independent of the
+                           # first-cracking marker, which always uses
+                           # the mean fctm/Ecm of this class.
+    # tension_fct: fctd    # which fct the tension branch uses (default fctd)
 
-  # --- Reinforcing steel ---
+  # ----------------------------------------------------------------
+  # (3) Reinforcing steel
+  # ----------------------------------------------------------------
   B450C:
     type: steel
     fyk: 450.0             # characteristic yield strength [MPa] (required)
-    gamma_s: 1.15          # partial safety factor (default 1.15)
-    Es: 200000             # Young's modulus [MPa] (default 200000)
-    k_hardening: 1.0       # ft/fy ratio; 1.0 = perfectly plastic (default 1.0)
-    eps_su: 0.075          # ultimate strain (default 0.01)
-    works_in_compression: true  # set false for FRP or tension-only materials
+    gamma_s: 1.15          # partial safety factor          (default 1.15)
+    Es: 200000             # Young's modulus [MPa]          (default 200000)
+    k_hardening: 1.0       # ft/fy ratio; 1.0 = elastic-perfectly-plastic
+    eps_su: 0.075          # ultimate strain                (default 0.01)
+    works_in_compression: true   # false for FRP / tension-only materials
 
-  # --- Tabulated material (any sigma-epsilon curve) ---
-  # Piecewise-linear.  Strain outside the range => sigma = 0.
+  # ----------------------------------------------------------------
+  # (4) Prestressing steel, EC2 sect. 3.3
+  #     Type: prestressing_steel_ec2
+  #     Give EITHER a standard designation ``class`` (e.g. Y1860S7)
+  #     OR all of f_p01k / f_pk / eps_uk.
+  #     Used by the ``tendons`` block (bonded prestress elements).
+  # ----------------------------------------------------------------
+  Y1860:
+    type: prestressing_steel_ec2
+    class: Y1860S7         # designation (alt.: f_p01k/f_pk/eps_uk explicit)
+    # f_p01k: 1674         # 0.1% proof stress [MPa]    | explicit
+    # f_pk: 1860           # tensile strength [MPa]     | alternative
+    # eps_uk: 0.035        # char. ultimate strain [-]  | to ``class``
+    # Ep: 195000           # modulus [MPa] (default 195000; explicit form only)
+    ls: F                  # limit state                    (default F)
+    NA: EC2                # National Annex                 (default EC2)
+    eps_ud_factor: 0.9     # eps_ud = factor * eps_uk       (default 0.9)
+    # gamma_s_override: 1.15   # force gamma_s instead of the LS/NA-derived one
+    diagram: horizontal    # 'horizontal' or 'inclined' post-yield branch
+    works_in_compression: true
+
+  # ----------------------------------------------------------------
+  # (5) Tabulated material -- any piecewise-linear sigma-eps curve.
+  #     Strain outside the tabulated range => sigma = 0.
+  # ----------------------------------------------------------------
   # cfrp_sheet:
   #   type: tabulated
   #   name: CFRP_200GPa
@@ -73,22 +133,37 @@ materials:
 # ================================================================
 #  SECTION
 # ================================================================
-#  Two formats supported: legacy rectangular (``B`` + ``H``) or
-#  generic (``shape`` + ``params``).
+#  Two formats:
 #
-#  Legacy rectangular:
-#    ``n_fibers_y`` controls the mesh resolution along H.  When
-#    ``n_fibers_x`` is omitted or set to 1, an isotropic grid is
-#    used (same cell size in both directions).  Set
-#    ``n_fibers_x > 1`` for explicit control.
+#  (a) LEGACY RECTANGULAR -- ``B`` + ``H`` (no ``shape`` key):
+#
+#        section:
+#          B: 300                # width  [mm]
+#          H: 600                # depth  [mm]
+#          bulk_material: C25
+#          n_fibers_y: 100       # mesh rows along H (alias: n_fibers)
+#          n_fibers_x: 1         # 1 => isotropic grid; >1 => explicit biaxial
+#          rebars: [...]
+#          tendons: [...]
+#
+#  (b) GENERIC -- ``shape`` + ``params`` (this file).  Shapes and
+#      their params:
+#        rect         B, H
+#        circle       D, resolution (default 64)
+#        annulus      D_ext, D_int, resolution
+#        tee          bf, hf, bw, hw
+#        inv_tee      bf, hf, bw, hw
+#        h            bf, hf_top, hf_bot, bw, hw
+#        box          B, H, tw, tf_top, tf_bot (optional)
+#        single_tee   b_top, h_top, bw, hw
+#        double_tee   b_top, h_top, bw, hw, stem_spacing
+#        custom       exterior (vertex list), holes (list of rings)
 
 section:
 
-  # --- Generic format ---
-  shape: custom            # rect, circle, annulus, tee, inv_tee, h,
-                           # box, single_tee, double_tee, custom
+  shape: custom
   params:
-    exterior:
+    exterior:              # octagonal column, vertices CCW [mm]
       - [95, 505]
       - [-95, 505]
       - [-505, 95]
@@ -97,18 +172,44 @@ section:
       - [95, -505]
       - [505, -95]
       - [505, 95]
+    # holes:               # optional list of interior rings
+    #   - [[-100,-100], [100,-100], [100,100], [-100,100]]
+
   bulk_material: concrete_direct
   mesh_size: 15            # target fiber edge length [mm]
   mesh_method: grid        # 'grid' (default) or 'triangle'
 
+  # --- Optional multi-material zones --------------------------------
+  # Polygonal sub-zones overriding the bulk material inside them
+  # (e.g. a jacketing layer, a higher-class core).  Same shape
+  # grammar as the section itself.
+  # material_zones:
+  #   - shape: rect
+  #     params: {B: 400, H: 400}
+  #     material: C25
+
+  # --- Bulk pre-strain (resistance side) -----------------------------
+  # Uniform locked-in bulk strain [-] (shrinkage/thermal), tension
+  # positive.  Canonical key ``prestrain`` (alias ``eps_init``).
+  # PHASE-5 GUARD: the field is parsed, hashed and propagated, but
+  # the fiber kernel does not consume it yet -- a NON-ZERO value
+  # RAISES (no-silent-no-op) until the kernel change lands.
+  # prestrain: 0.0
+
+  # --- Rebars ---------------------------------------------------------
+  # Each layer needs: y, material, and EITHER As OR diameter.
+  #   As [mm2] takes precedence; otherwise As = n_bars * pi/4 * d^2.
+  #   x [mm] is required for biaxial sections.
+  #   embedded: true (default) subtracts the displaced bulk at the
+  #             fiber (net contribution [sig_s(eps) - sig_bulk(eps)]*As);
+  #             set false for external elements (FRP, truss chords).
+  #   name:     optional stable identifier; referenceable from a
+  #             stage's ``section_ops`` (activate/deactivate/
+  #             eps_override) instead of the union index.  Names
+  #             must be unique across the rebars+tendons union set.
   rebars:
-    # Each rebar needs: y, material, and EITHER As OR diameter.
-    # If both As and diameter are given, As takes precedence.
-    # If only diameter is given, As = n_bars * pi/4 * d^2
-    # (n_bars defaults to 1).
-    # x is required for biaxial sections.
-    - {y: 445,    x: 70.1,   diameter: 30, material: B450C}
-    - {y: 70.1,   x: 445,    diameter: 30, material: B450C}
+    - {y: 445,    x: 70.1,   diameter: 30, material: B450C, name: N1}
+    - {y: 70.1,   x: 445,    diameter: 30, material: B450C, name: E1}
     - {y: 331.2,  x: 176.4,  diameter: 26, material: B450C}
     - {y: 186.8,  x: 328.3,  diameter: 26, material: B450C}
     - {y: 186.8,  x: -328.3, diameter: 26, material: B450C}
@@ -123,17 +224,53 @@ section:
     - {y: -331.2, x: 176.4,  diameter: 26, material: B450C}
     - {y: -70.1,  x: 445,    diameter: 30, material: B450C}
     - {y: -445,   x: 70.1,   diameter: 30, material: B450C}
+    # n_bars demo: 3 phi 16 lumped in one layer (As computed):
+    # - {y: 0, x: 0, diameter: 16, n_bars: 3, material: B450C}
+
+  # --- Tendons (BONDED prestress elements, Phase 1) -------------------
+  # A Tendon is a strain-compatible section element: it enters the
+  # RESISTANCE domain (and the capacity hash) through its effective
+  # prestrain eps_pe.  Element taxonomy:
+  #   bonded tendon            -> ``tendons`` entry here;
+  #   unbonded / external /    -> NOT an element: a demand-side LOAD,
+  #   jacking on hardened conc.   modelled as ``prestress_actions``
+  #                               on a stage (see combinations).
+  # ``bonded: false`` is therefore rejected by construction.
+  #
+  # Area: Ap [mm2] directly, or Ap = n_strands * area_strand.
+  # eps_pe [-]: effective prestrain referenced to the
+  #   unstrained-concrete (casting) state, tension positive -- the
+  #   jacking strain sigma_p0/Ep for pre-tensioning.  The immediate
+  #   elastic-shortening loss is NOT stored here: it emerges from
+  #   section equilibrium (see solver/prestress_transfer.py).
+  # system: 'pre'/'post' -- stored only, no behavioural effect.
+  # name:   optional; referenceable both from ``prestress_actions``
+  #         (ref -> tendon geometry) and from ``section_ops``.
+  #
+  # tendons:
+  #   - y: -420
+  #     x: 0
+  #     material: Y1860
+  #     n_strands: 7
+  #     area_strand: 150      # => Ap = 1050 mm2
+  #     eps_pe: 0.00715       # ~= 1395 MPa / 195000 MPa
+  #     system: pre
+  #     bonded: true          # (default; false raises by design)
+  #     embedded: true
+  #     name: T_bottom
 
 
 # ================================================================
-#  DEMANDS — individual load cases
+#  DEMANDS -- individual load cases
 # ================================================================
-#  Units: N_kN [kN], Mx_kNm [kN·m], My_kNm [kN·m].
-#  Sign convention: N > 0 = tension; M per right-hand rule.
+#  Units: N_kN [kN], Mx_kNm / My_kNm [kN*m].
+#  N > 0 = tension; moments per right-hand rule.
+#  Legacy key ``M_kNm`` == Mx only (My = 0).
 
 demands:
-  - {name: 1,  N_kN: -2771.69, Mx_kNm: 110.48, My_kNm: 161.42}
-  - {name: 2,  N_kN: -2771.69, Mx_kNm:  78.02, My_kNm: 144.64}
+  - {name: G,  N_kN: -2771.69, Mx_kNm: 110.48, My_kNm: 161.42}
+  - {name: Q1, N_kN: -2771.69, Mx_kNm:  78.02, My_kNm: 144.64}
+  - {name: Ex, N_kN:  -381.87, Mx_kNm: 183.66, My_kNm: 164.78}
   - {name: 3,  N_kN: -7103.53, Mx_kNm: 134.22, My_kNm: 179.04}
   - {name: 4,  N_kN: -7103.53, Mx_kNm:  95.32, My_kNm: 163.08}
   - {name: 5,  N_kN: -2928.74, Mx_kNm:  68.19, My_kNm: 265.90}
@@ -148,7 +285,6 @@ demands:
   - {name: 14, N_kN: -2562.84, Mx_kNm:  92.90, My_kNm: 617.28}
   - {name: 15, N_kN: -5376.20, Mx_kNm:  98.86, My_kNm: 1156.02}
   - {name: 16, N_kN: -5376.20, Mx_kNm: 110.11, My_kNm: 1181.85}
-  - {name: 17, N_kN:  -381.87, Mx_kNm: 183.66, My_kNm: 164.78}
   - {name: 18, N_kN:  -381.87, Mx_kNm: 196.03, My_kNm: 188.25}
   - {name: 19, N_kN:  -558.70, Mx_kNm: 205.25, My_kNm: 175.08}
   - {name: 20, N_kN:  -558.70, Mx_kNm: 216.05, My_kNm: 201.03}
@@ -165,120 +301,210 @@ demands:
 
 
 # ================================================================
-#  OUTPUT — flags and options (v0.3.0)
+#  COMBINATIONS  (v2.1)
+# ================================================================
+#  A combination has EITHER ``components`` (simple factored sum)
+#  OR ``stages`` (sequential accumulation) -- never both.
+#
+#  The keys ``prestress_actions``, ``section_ops``, ``time`` and
+#  ``report`` are STAGE-ONLY: placing them on a simple combination
+#  or at the staged-combination level raises.
+
+combinations:
+
+  # ----------------------------------------------------------------
+  # (1) Simple: flat factored sum  S = sum f_i * d_i
+  # ----------------------------------------------------------------
+  - name: SLU_1
+    components:
+      - {ref: G,  factor: 1.3}     # factor defaults to 1.0
+      - {ref: Q1, factor: 1.5}
+
+  # ----------------------------------------------------------------
+  # (2) Staged, capacity-frozen (no section_ops anywhere):
+  #     classic seismic-on-the-in-service-section.  Demand
+  #     accumulates; ONE fixed resistance domain.  Path metrics
+  #     (eta_path_*) measure each stage segment B->T.
+  # ----------------------------------------------------------------
+  - name: SLU_sismico_Ex
+    stages:
+      - name: gravitazionale
+        components:
+          - {ref: G, factor: 1.0}
+      - name: sisma
+        components:
+          - {ref: Ex, factor: 1.0}
+
+  # ----------------------------------------------------------------
+  # (3) Staged with SECTION-STATE EVOLUTION (Phase 3/4).
+  #     The presence of ``section_ops`` on any stage switches the
+  #     engines to per-stage resistance domains, built/reused by
+  #     capacity hash; a hash change resets the demand-path base.
+  #
+  #     section_ops keys (all optional; unknown keys raise):
+  #       activate / deactivate : lists of element refs -- union
+  #           index (integer position in the canonical
+  #           rebars+tendons order) or element ``name``.
+  #           Deactivating a stressed bonded element force-releases
+  #           it: its net internal force at the carried demand is
+  #           re-applied opposite-sign to the demand (equilibrium
+  #           across the cut).
+  #       release : bool (default true) -- false = clean removal
+  #           (unstressed/hypothetical element), no released force.
+  #       eps_override : {ref: eps} -- per-element locked-in strain
+  #           override [-]; THE carrier for time-dependent losses
+  #           (relaxation/creep/shrinkage advance eps_pe here).
+  #       bulk_eps : float [-] -- PHASE-5 GUARD: non-zero RAISES
+  #           (hash-effective but kernel-inert; same policy as the
+  #           section-level ``prestrain``).
+  #
+  #     time   : cumulative days since stage 0 -> SectionState.
+  #              time_days.  Informational carry-through ONLY --
+  #              never hashed (losses act through eps_override).
+  #              Omitted => previous stage's value carries forward.
+  #              Must be non-negative and non-decreasing.
+  #     report : opaque payload echoed verbatim into the per-stage
+  #              result for the reporting layer.  No solver effect.
+  # ----------------------------------------------------------------
+  - name: costruzione_per_fasi
+    stages:
+      - name: fase_iniziale          # bars N1/E1 not yet installed
+        components:
+          - {ref: G, factor: 1.0}
+        section_ops:
+          deactivate: [N1, E1]       # by name (equivalently: [0, 1])
+          release: false             # clean removal: never stressed
+        time: 0
+      - name: completamento          # bars installed, live load
+        components:
+          - {ref: Q1, factor: 1.0}
+        section_ops:
+          activate: [0, 1]           # by union index (== [N1, E1])
+          # eps_override: {T_bottom: 0.0058}   # losses step (tendon)
+          # bulk_eps: 0.0                      # non-zero raises (Phase 5)
+        time: 28
+        report: {note: "barre N1/E1 installate e inghisate"}
+      - name: esercizio
+        components:
+          - {ref: Ex, factor: 0.3}
+        time: 365                    # capacity hash unchanged => same domain
+
+  # ----------------------------------------------------------------
+  # (4) Staged with PRESTRESS ACTIONS (Step A): demand-side loads
+  #     from jacking on hardened concrete / unbonded / external
+  #     tendons.  An action NEVER enters the capacity hash -- it
+  #     moves the demand point only:
+  #       N_p = -P,  Mx = -P*(y - y_ref),  My = +P*(x - x_ref)
+  #     about the section reference point (centroid).
+  #
+  #     Force (one of):    P [N] | P_kN [kN] | sigma_p0 [MPa] + Ap [mm2]
+  #     Position (one of): x + y [mm] | ref (tendon index or name --
+  #                        uses that tendon's geometry; explicit x/y
+  #                        override it if also given)
+  #     label: optional tag.
+  # ----------------------------------------------------------------
+  - name: tesatura_su_indurito
+    stages:
+      - name: peso_proprio
+        components: [{ref: G, factor: 1.0}]
+      - name: tesatura
+        components: []
+        prestress_actions:
+          - {P_kN: 1400, x: 0, y: -420, label: cavo_esterno}
+          - {sigma_p0: 1000, Ap: 1050, x: 0, y: -380}
+          # - {P_kN: 1400, ref: T_bottom}   # geometry from a declared tendon
+
+
+# ================================================================
+#  ENVELOPES -- worst-of verification across members
+# ================================================================
+#  Members are refs to demands/combinations (a staged combination
+#  contributes its final resultant) or inline demand points.
+#  ``factor`` scales the resolved triple.
+
+envelopes:
+  - name: inviluppo_SLU
+    members:
+      - {ref: SLU_1}
+      - {ref: SLU_sismico_Ex, factor: 1.0}
+      - {ref: G, factor: 1.2}
+      - {N_kN: -2500, Mx_kNm: 100, My_kNm: 50, name: punto_extra}
+
+
+# ================================================================
+#  OUTPUT -- flags and options
 # ================================================================
 
 output:
-  # ── Utilization ratio flags ──
+  # -- Utilization ratio flags --
   #
-  # v0.3.0 redesigns the metric architecture.  GenSec computes up
-  # to seven utilization metrics, organised in two geometric
-  # families plus path-aware variants for staged loading.  Each
-  # metric answers a different geometric question: they are
-  # complementary, not redundant.  All share the convention
-  # η ≤ 1 safe / η > 1 unsafe; pass/fail (``verified``) is decided
-  # by the worst of the enabled metrics.
+  # GenSec computes up to seven utilization metrics, in two
+  # geometric families plus path-aware variants for staged loading.
+  # Each answers a DIFFERENT geometric question: complementary, not
+  # redundant.  eta <= 1 safe / eta > 1 unsafe; ``verified`` is
+  # decided by the WORST of the enabled metrics.  Legacy ``eta_3D``
+  # / ``eta_cv`` are no longer recognised (silently ignored).
   #
-  # The legacy ``eta_3D`` and ``eta_cv`` flags are no longer
-  # recognised and are silently ignored.
+  # 3-D family (anisotropy-corrected normalised space):
+  #   eta_norm        linear distance to the nearest boundary face
+  #                   as a fraction of the Chebyshev radius D_max.
+  #                   Recommended principal 3-D metric.
+  #   eta_norm_beta   composite ratio F_SU/(F_SU + d_min) --
+  #                   "sensitivity to perturbation"; useful for
+  #                   cross-software comparison.
+  #   eta_norm_ray    ray-cast from the origin: proportional load
+  #                   amplification.  (Hull-based: systematically
+  #                   overestimates by ~2-3% vs the exact value.)
   #
-  # ── 3-D family ──
+  # 2-D family ((Mx, My) plane at the demand's N; biaxial only):
+  #   eta_2D          ray-cast to the Mx-My contour at fixed N.
   #
-  # Operates in anisotropy-corrected normalised space (axial axis
-  # rescaled by u_x = ΔMx/ΔN, My axis by v_y = ΔMx/ΔMy, so the
-  # domain bounding box has the same numeric extent on every axis).
-  # Euclidean distances are physically meaningful even for strongly
-  # anisotropic sections (walls, slabs, T-beams).
-  #
-  #   eta_norm        Linear distance from the demand to the
-  #                   nearest boundary face, expressed as a
-  #                   fraction of the Chebyshev radius D_max:
-  #                     η = 1 - d_min / D_max  (interior)
-  #                     η = 1 + d_min / D_max  (exterior)
-  #                   A true geometric distance.  Reaches 0 at the
-  #                   Chebyshev centre, 1 on the boundary.
-  #                   *Recommended principal 3-D metric.*
-  #
-  #   eta_norm_beta   Composite ratio  F_SU / (F_SU + d_min).
-  #                   Mixes the demand norm and the face-distance.
-  #                   Not a pure distance: depends on position
-  #                   relative to the coordinate origin.  Reads as
-  #                   "sensitivity to perturbation in proportion to
-  #                   the demand magnitude".  Useful for
-  #                   cross-software validation since equivalent
-  #                   formulations are reported by some commercial
-  #                   RC software.
-  #
-  #   eta_norm_ray    Ray-cast from the origin in normalised space:
-  #                     η = |S_u| / |R_u|.
-  #                   Answers "if I scale all three force
-  #                   components proportionally, when does the
-  #                   demand exit the domain?".  Linear in demand
-  #                   magnitude along any fixed ray.
-  #
-  # ── 2-D family ──
-  #
-  # Operates in the (Mx, My) plane at the demand's N.  Both axes
-  # share physical units, no normalisation needed.
-  #
-  #   eta_2D          Ray-cast from the origin in the (Mx, My)
-  #                   plane to the contour at the demand's N.
-  #                   Useful for fixed-N flexural verifications.
-  #                   Requires a biaxial section.
-  #
-  # ── Path metrics ──
-  #
-  # For staged combinations only.  Defined on the segment B→T from
-  # the previous-stage cumulative demand B to the current-stage
-  # cumulative demand T.  When a multi-stage combination is
-  # processed without ANY path metric enabled, GenSec emits an
-  # informational warning (the report would only contain point
-  # metrics at each cumulative state, without characterising the
-  # load history).
-  #
-  #   eta_path_norm_ray   3-D ray-cast in normalised space, B→T.
-  #                       Path-direction-aware analogue of
-  #                       eta_norm_ray.  Stored under the same key
-  #                       in the CSV/JSON output.
-  #
-  #   eta_path_norm_beta  Composite ratio L / (L + d_seg) along
-  #                       the stage segment, with L = |T - B| and
-  #                       d_seg the minimum signed distance of the
-  #                       segment from the boundary.  Path analogue
-  #                       of eta_norm_beta.  Particularly
-  #                       informative in seismic verification with
-  #                       staged gravity: flags "structure already
-  #                       at the limit before the increment"
-  #                       distinctly from eta_path_norm_ray.
-  #
-  #   eta_path_2D         2-D variant on the Mx-My contour at
-  #                       cumulative N.  Skipped if the axial-force
-  #                       change between stages exceeds
-  #                       ``delta_N_tol``.
-  eta_norm: true               # default: true  — principal 3-D linear distance
-  eta_norm_beta: true          # default: true  — composite ratio (cross-software comparison)
-  eta_norm_ray: false          # default: false — proportional load amplification
-  eta_2D: false                # default: false — Mx-My ray-cast (biaxial only)
-  eta_path_norm_ray: false     # default: false — staged 3-D ray
-  eta_path_norm_beta: false    # default: false — staged composite ratio (informative under seismic + gravity)
-  eta_path_2D: false           # default: false — staged Mx-My ray
-  delta_N_tol: 0.03            # tolerance on ΔN/N_range for eta_path_2D
+  # Path metrics (staged combinations; segment B->T from the
+  # previous to the current cumulative demand).  Under section-state
+  # evolution they are measured on the CURRENT stage's domain; a
+  # capacity-hash change resets the path base to the carried demand.
+  # A multi-stage run with NO path metric enabled emits an
+  # informational warning (load history not characterised):
+  #   eta_path_norm_ray    3-D ray-cast B->T
+  #   eta_path_norm_beta   L/(L + d_seg) along the segment -- flags
+  #                        "already at the limit before the
+  #                        increment" distinctly from the ray
+  #   eta_path_2D          2-D variant at cumulative N; skipped when
+  #                        |dN|/N_range > delta_N_tol
+  eta_norm: true               # default true
+  eta_norm_beta: true          # default true
+  eta_norm_ray: false          # default false
+  eta_2D: false                # default false
+  eta_path_norm_ray: true      # default false -- enabled: staged combos above
+  eta_path_norm_beta: true     # default false
+  eta_path_2D: false           # default false
+  delta_N_tol: 0.03            # dN/N_range tolerance for eta_path_2D
 
-  # ── Domain generation ──
-  generate_mx_my: false        # Mx-My contour plots (default: false)
-  generate_3d_surface: false   # 3D surface CSV/JSON/plot (default: false)
-  n_angles_mx_my: 144          # angular resolution for Mx-My (default: 144)
+  # -- Tiered reporting --
+  verification_top_k: 10       # rows in the ranked verification tables
+  fiber_details_top_k: 5       # demands selected for fiber-level detail
 
-  # ── Moment-curvature and ductility ──
-  generate_moment_curvature: false     # M-χ diagrams per N level (default: true)
-  generate_polar_ductility: false      # polar ductility plot (default: true)
-  generate_3d_moment_curvature: false  # 3D M-χ-N surface (default: true)
+  # -- Domain generation --
+  generate_mx_my: false        # Mx-My contour exports/plots
+  generate_3d_surface: false   # 3-D (N,Mx,My) surface CSV/JSON/plot
+  n_angles_mx_my: 144          # angular resolution of Mx-My contours
+  n_scan_mx_my: 120            # internal scan directions per contour
+  n_chi_mx_my: 14              # curvature samples per scan direction
 
-  # ── N-level strategy ──
-  # "demands" → use the N-values appearing in the ``demands`` block.
-  # "auto"    → linspace between N_min and N_max of the resistance
-  #             domain, ``n_levels_count`` levels.
-  # "explicit"→ user-supplied list ``n_levels_values``.
+  # -- Moment-curvature and ductility --
+  generate_moment_curvature: false     # M-chi per N level (default true)
+  generate_polar_ductility: false      # polar ductility plot (default true)
+  generate_3d_moment_curvature: false  # 3-D M-chi-N surface (default true)
+
+  # -- N-level strategy (for M-chi / Mx-My families) --
+  # demands  -> N values appearing in the ``demands`` block
+  # auto     -> linspace over [N_min, N_max] of the domain,
+  #             ``n_levels_count`` levels
+  # explicit -> user list ``n_levels_values`` [kN]
   n_levels_mode: demands
   # n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]
+
+  # -- API-session knobs (consumed by the api/server layer) --
+  # n_points: 400              # uniaxial N-M resolution of the session
+  # n_angles_3d_surface: 72    # lazy 3-D surface resolution

@@ -582,6 +582,20 @@ class AnalysisEngine:
         static = mgr is None
 
         if static:
+            # No-silent-no-op guard, mirroring
+            # :meth:`VerificationEngine._check_staged`: ``section_ops``
+            # without a manager would be silently dropped.
+            for stage in stages:
+                if "section_ops" in stage:
+                    raise RuntimeError(
+                        f"Staged combination '{name}': stage "
+                        f"'{stage.get('name', '?')}' carries "
+                        f"'section_ops' but the engine has no "
+                        f"staged_manager — the ops would be silently "
+                        f"ignored. Construct the engine with "
+                        f"AnalysisEngine(solver, staged_manager="
+                        f"StagedDomainManager(section, ...))."
+                    )
             bundles = [None] * len(stages)
             deact = [([], False)] * len(stages)
         else:
@@ -632,6 +646,11 @@ class AnalysisEngine:
             }
             if not static:
                 ar["domain_hash"] = _hashes[k]
+            # Opaque per-stage reporting payload from YAML (``report``):
+            # echoed verbatim for the reporting layer.  Inert when the
+            # stage declares none, so legacy output is unchanged.
+            if "report" in stage:
+                ar["report"] = stage["report"]
             stage_results.append(ar)
 
         return {

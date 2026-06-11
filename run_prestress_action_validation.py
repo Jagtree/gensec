@@ -135,11 +135,15 @@ def test_consistency_with_element_net_force():
 def test_jacking_demand_point():
     print("[3] jacking-on-hardened-concrete demand point == equivalent (N,M)")
 
+    class _T:
+        name = None
+
     class FakeSec:
         x_centroid = 150.0
         y_centroid = 300.0
         x_tendons = np.array([200.0])
         y_tendons = np.array([80.0])
+        tendons = [_T()]
 
     sec = FakeSec()
     xr, yr = sec.x_centroid, sec.y_centroid
@@ -152,7 +156,7 @@ def test_jacking_demand_point():
              "prestress_actions": [{"P": P, "x": x, "y": y}]},
         ],
     })
-    _resolve_prestress_actions([combo], sec, {"tendons": []})
+    _resolve_prestress_actions([combo], sec)
     Ncum, Mxcum, Mycum = demand_walk(combo["stages"], {})[-1]
     assert approx(Ncum, -P)
     assert approx(Mxcum, -P * (y - yr))
@@ -167,7 +171,7 @@ def test_jacking_demand_point():
              "prestress_actions": [{"P": P, "x": x, "y": y}]},
         ],
     })
-    _resolve_prestress_actions([combo2], sec, {"tendons": []})
+    _resolve_prestress_actions([combo2], sec)
     dd = {"G": {"N": -300e3, "Mx": 50e6, "My": 0.0}}
     last = demand_walk(combo2["stages"], dd)[-1]
     assert approx(last[0], -300e3 - P)
@@ -179,18 +183,20 @@ def test_jacking_demand_point():
 def test_yaml_round_trip():
     print("[4] YAML round-trip (text -> parse -> resolve)")
 
+    class _T:
+        name = None
+
     class FakeSec:
         x_centroid = 150.0
         y_centroid = 300.0
         x_tendons = np.array([200.0])
         y_tendons = np.array([80.0])
+        tendons = [_T()]
 
     sec = FakeSec()
     xr, yr = sec.x_centroid, sec.y_centroid
 
     txt = """
-section:
-  prestrain: -0.00018
 combinations:
   - name: PT_rt
     stages:
@@ -203,10 +209,9 @@ combinations:
           - {sigma_p0: 950, Ap: 1200, x: 100, y: 540}
 """
     data = yaml.safe_load(txt)
-    assert approx(_parse_bulk_prestrain(data["section"]), -0.00018)
 
     combos = [_parse_combination(c) for c in data["combinations"]]
-    _resolve_prestress_actions(combos, sec, {"tendons": [{"y": 80, "x": 200}]})
+    _resolve_prestress_actions(combos, sec)
     acts = combos[0]["stages"][1]["_prestress_actions"]
     assert len(acts) == 2
     e0 = PrestressAction.from_force(1.4e6, 200, 80, xr, yr)
@@ -239,10 +244,32 @@ def test_placement_guards():
     print("    OK")
 
 
+
+
+def test_bulk_prestrain_guard():
+    r"""
+    *No-silent-no-op* guard: a non-zero bulk ``prestrain`` /
+    ``eps_init`` must raise until the fiber solver consumes the offset
+    (the resistance domain would otherwise NOT reflect it).
+    """
+    print("[6] non-zero bulk prestrain raises (no-silent-no-op guard)")
+    assert _parse_bulk_prestrain({}) == 0.0
+    assert _parse_bulk_prestrain({"prestrain": 0.0}) == 0.0
+    for spec in ({"prestrain": -2e-4}, {"eps_init": 1e-4}):
+        raised = False
+        try:
+            _parse_bulk_prestrain(spec)
+        except ValueError:
+            raised = True
+        assert raised, f"guard did not fire for {spec}"
+    print("    OK")
+
+
 if __name__ == "__main__":
     test_couple_sign_and_magnitude()
     test_consistency_with_element_net_force()
     test_jacking_demand_point()
     test_yaml_round_trip()
     test_placement_guards()
+    test_bulk_prestrain_guard()
     print("\nALL PRESTRESS-ACTION VALIDATIONS PASSED")

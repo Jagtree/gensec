@@ -80,19 +80,28 @@ def governing_eta(result, result_type="demand"):
     - For **demands**, the governing :math:`\eta` is
       :math:`\max(\eta_{\text{norm}}, \eta_{\beta}, \eta_{\text{ray}},
       \eta_{\text{2D}})` across whichever metrics are present.
-    - For **combinations**, the ``eta_governing`` field is already
-      computed by the verification engine (it accounts for both
-      point and path metrics across all stages).
+    - For **combinations**, the ``eta_governing`` field — computed by
+      the verification engine for **staged** results, where it folds
+      point and path metrics across all stages — is used when present.
+      **Simple** combinations carry per-metric values only, so the
+      governing value falls back to the same point-metric maximum used
+      for demands.  (Returning ``inf`` for the missing key, as done
+      before, poisoned the ranking, the summary statistics — ``inf``
+      mean, ``nan`` percentiles — and the Verified/Failed counts of
+      every file containing a simple combination.)
     - For **envelopes**, the ``eta_max`` field gives the worst
       :math:`\eta` across all members.
     """
     if result_type == "combination":
-        return float(result.get(_COMBINATION_ETA_KEY, float("inf")))
+        v = result.get(_COMBINATION_ETA_KEY)
+        if v is not None:
+            return float(v)
+        # Simple combination: fall through to the point-metric max.
 
-    if result_type == "envelope":
+    elif result_type == "envelope":
         return float(result.get(_ENVELOPE_ETA_KEY, float("inf")))
 
-    # demand: max across enabled point metrics.
+    # demand / simple combination: max across enabled point metrics.
     vals = []
     for key in _DEMAND_ETA_KEYS:
         v = result.get(key)

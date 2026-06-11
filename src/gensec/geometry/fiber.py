@@ -93,6 +93,15 @@ class RebarLayer:
         Bar diameter [mm]. Default 0.  When positive and ``As`` is
         0, ``As`` is computed as
         :math:`n_{\text{bars}} \cdot \pi/4 \cdot d^2`.
+    name : str or None, optional
+        Human-readable identifier (e.g. ``"B_top"``).  Default
+        ``None``.  Symmetric to :attr:`Tendon.name`: a stable reference
+        for the element across the I/O and reporting layers.  A YAML
+        ``section_ops`` entry (``activate`` / ``deactivate`` /
+        ``eps_override``) may target the element via its name instead of
+        its union index; names used as references must be unique across
+        the whole ``rebars + tendons`` union set.  Purely descriptive —
+        no behavioural effect in the solver.
     """
 
     y: float
@@ -102,6 +111,7 @@ class RebarLayer:
     embedded: bool = True
     n_bars: int = 1
     diameter: float = 0.0
+    name: Optional[str] = None
 
     def __post_init__(self):
         """Compute As from diameter if not provided explicitly."""
@@ -200,6 +210,13 @@ class Tendon:
     area_strand : float, optional
         Single-strand area [mm²].  Default 0.  When positive and ``Ap``
         is 0, ``Ap = n_strands * area_strand``.
+    name : str or None, optional
+        Human-readable identifier (e.g. ``"T_bottom"``).  Default
+        ``None``.  Used as a stable reference for the tendon across the
+        I/O and reporting layers: a YAML ``prestress_actions`` entry may
+        target a tendon's geometry via ``ref: <name>``, and per-tendon
+        outputs (losses, stressing sequence) will report it.  Purely
+        descriptive — no behavioural effect in the solver.
 
     Raises
     ------
@@ -237,6 +254,7 @@ class Tendon:
     system: str = "pre"
     n_strands: int = 1
     area_strand: float = 0.0
+    name: Optional[str] = None
 
     def __post_init__(self):
         """Resolve ``Ap`` and enforce the bonded-element invariant."""
