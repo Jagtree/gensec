@@ -384,3 +384,266 @@ def elastic_shortening_loss(Ec, Ep, Ac, Ic, Ap, e, sigma_p0):
         "chi": (-Fp_net * e / (Ec * Ic)) if e != 0.0 else 0.0,
         "Fp_net": Fp_net,
     }
+
+
+# ---------------------------------------------------------------------------
+#  Closed-form validator — sequential post-tension elastic shortening
+#  (general: N tendons, arbitrary eccentricities, arbitrary order)
+# ---------------------------------------------------------------------------
+
+
+def sequential_posttension_loss(
+    Ec, Es, Ep, *,
+    Ac, Sc, Ic,
+    tendons,
+    rebars=(),
+    order=None,
+    base_N=0.0, base_M=0.0,
+    y_ref=0.0,
+    scheme="one_pass",
+    coupled_tol=1e-12, coupled_max_iter=50,
+):
+    r"""
+    Exact immediate elastic-shortening losses for **sequential**
+    bonded post-tensioning, in closed transformed-section form.
+
+    Independent reference for the Phase-4 fiber-method driver
+    (``solve_posttension_sequence``): pure planar transformed-section
+    elasticity, no fiber model.  It is the multi-tendon, sequential
+    generalisation of :func:`elastic_shortening_loss`, and like that
+    function it is the value a **linear-elastic** fiber model
+    reproduces exactly (same linear algebra), hence the right
+    regression anchor.
+
+    Physics encoded (the post-tension / pre-tension asymmetry)
+    ----------------------------------------------------------
+    A post-tensioned tendon is **not** a section element while it is
+    being stressed — it is a free cable, so it is jacked to its target
+    stress exactly and the jack reacts against the section as the
+    external action :math:`(N_j, M_j) = (-P_j,\,-P_j e_j)`.  Therefore:
+
+    - the tendon being stressed at step *j* suffers **no** loss from
+      its own stressing (it is not strain-compatible with the
+      concrete at that instant);
+    - every tendon *i* stressed **before** *j* and already anchored
+      takes the concrete strain increment at its level produced by
+      stressing *j*, and is debited
+      :math:`\Delta\sigma_i = E_p\,\Delta\varepsilon_{c,i}`.
+
+    Contrast with pre-tensioning, where all tendons are strain-
+    compatible from the start and lose **simultaneously** at release
+    (the loss *emerges* from one equilibrium solve — the coupling term
+    :math:`(E_p-E_c)A_p k` in :func:`elastic_shortening_loss`).  Here
+    the loss cannot emerge; it must be read and debited step by step.
+
+    Transformed section per step
+    ----------------------------
+    The strain-plane increment from stressing tendon *j* is found on
+    the section **homogenised to the current state** — concrete +
+    passive rebars + tendons **already grouted/bonded**, but **not**
+    the free tendons (incl. *j* itself).  With axial/coupling/flexural
+    rigidities :math:`(EA, ES, EI)` about ``y_ref`` (tension positive,
+    :math:`M` about the reference, sagging convention inherited from
+    the caller):
+
+    .. math::
+
+        \begin{bmatrix} EA & ES \\ ES & EI \end{bmatrix}
+        \begin{bmatrix} \Delta\varepsilon_0 \\ \Delta\chi \end{bmatrix}
+        = \begin{bmatrix} N_j \\ M_j \end{bmatrix},
+        \qquad
+        \Delta\varepsilon_{c,i} = \Delta\varepsilon_0 + \Delta\chi\,
+        (y_i - y_{\mathrm{ref}}) .
+
+    ``ES`` is non-zero in general (the homogenised centroid differs
+    from ``y_ref`` and shifts as tendons are bonded); the 2×2 solve is
+    exact for arbitrary eccentricities, so no symmetry is assumed.
+
+    In this **post-tension** model grouting is deferred to the
+    *grouting stage* (the engine's action→element transition), so by
+    default no tendon is bonded during stressing and the homogenised
+    section is concrete + rebars throughout.  The ``bonded_before``
+    hook on each tendon entry lets a caller model "stress, grout, then
+    stress the next" — a freshly grouted tendon then participates in
+    the transformed section for subsequent steps.
+
+    Parameters
+    ----------
+    Ec, Es, Ep : float
+        Concrete, passive-steel, prestressing-steel moduli [MPa].
+    Ac : float
+        Gross concrete area [mm²].
+    Sc : float
+        Gross concrete first moment of area about ``y_ref``
+        (:math:`\int (y-y_{\mathrm{ref}})\,dA`) [mm³].  Zero iff
+        ``y_ref`` is the concrete centroid.
+    Ic : float
+        Gross concrete second moment of area about ``y_ref`` [mm⁴].
+    tendons : sequence of dict
+        One entry per tendon: ``{"y": float, "Ap": float,
+        "sigma_p0": float, "bonded_before": int or None}``.  ``y`` is
+        the tendon level [mm]; ``sigma_p0`` the jacking stress at this
+        tendon [MPa] (already net of friction / anchorage draw-in —
+        member-level losses are inputs); ``bonded_before`` optionally
+        names the step index at and after which this tendon counts as
+        bonded in the transformed section (default: never during the
+        sequence — grouting is a later stage).
+    rebars : sequence of dict, optional
+        Passive bars ``{"y": float, "As": float}`` [mm, mm²]; always
+        part of the transformed section.
+    order : sequence of int or None, optional
+        Stressing order as indices into ``tendons``.  Default
+        ``range(len(tendons))`` (declaration order).
+    base_N, base_M : float, optional
+        Sollecitazione present at transfer (e.g. self-weight) [N, N·mm
+        about ``y_ref``].  Applied once, before the sequence, on the
+        bare transformed section; it does **not** debit any tendon
+        (no tendon is anchored yet) but it sets the concrete strain
+        datum used by the grouting-reference computation.
+    y_ref : float, optional
+        Reference level for moments and eccentricities [mm].
+        Default 0.
+    scheme : {"one_pass", "coupled"}, optional
+        ``"one_pass"`` (default): each step debits once, no
+        re-iteration (EC2 §5.10.5.1 level).  ``"coupled"``:
+        fixed-point iteration capturing the second-order feedback
+        (a debit reduces the action, which reduces the shortening).
+    coupled_tol, coupled_max_iter : float, int, optional
+        Convergence control for ``scheme="coupled"`` (max ‖Δσ‖
+        change between sweeps [MPa]).
+
+    Returns
+    -------
+    dict
+        ``loss`` : ndarray, per-tendon cumulative Δσ [MPa] (debit > 0
+        means a stress reduction);
+        ``sigma_p_after`` : ndarray, effective stress after the whole
+        sequence [MPa];
+        ``eps_ref_grout`` : ndarray, concrete strain at each tendon at
+        the END of the sequence (the datum the engine's grouting
+        reconciliation must use);
+        ``order`` : the order actually applied;
+        ``scheme`` : the scheme used.
+
+    Notes
+    -----
+    Sign convention is the caller's: pass ``Sc, Ic, y, base_M`` in one
+    consistent frame about ``y_ref``.  For a check against the meshed
+    fiber model, pass the **meshed** ``Ac, Sc, Ic`` (summed from the
+    fiber arrays) to remove the :math:`\mathcal{O}(1/n_y^2)` strip
+    discretization from the comparison, exactly as advised for
+    :func:`elastic_shortening_loss`.
+    """
+    tendons = [dict(t) for t in tendons]
+    nt = len(tendons)
+    if order is None:
+        order = list(range(nt))
+    order = list(order)
+
+    yv = np.array([t["y"] for t in tendons], dtype=float)
+    Ap = np.array([t["Ap"] for t in tendons], dtype=float)
+    sp0 = np.array([t["sigma_p0"] for t in tendons], dtype=float)
+    bonded_before = [t.get("bonded_before", None) for t in tendons]
+
+    rb_y = np.array([r["y"] for r in rebars], dtype=float)
+    rb_A = np.array([r["As"] for r in rebars], dtype=float)
+
+    def _transformed(bonded_mask):
+        r"""(EA, ES, EI) about y_ref for the current bonded set."""
+        EA = Ec * Ac
+        ES = Ec * Sc
+        EI = Ec * Ic
+        # passive rebars (always present)
+        for yi, Ai in zip(rb_y, rb_A):
+            d = yi - y_ref
+            EA += Es * Ai
+            ES += Es * Ai * d
+            EI += Es * Ai * d * d
+        # bonded tendons (transformed with (Ep - Ec): they displace
+        # concrete already counted in Ac/Sc/Ic)
+        for k in range(nt):
+            if not bonded_mask[k]:
+                continue
+            d = yv[k] - y_ref
+            dE = Ep - Ec
+            EA += dE * Ap[k]
+            ES += dE * Ap[k] * d
+            EI += dE * Ap[k] * d * d
+        return EA, ES, EI
+
+    def _solve_plane(EA, ES, EI, N, M):
+        det = EA * EI - ES * ES
+        de0 = (EI * N - ES * M) / det
+        dchi = (-ES * N + EA * M) / det
+        return de0, dchi
+
+    def _run_sequence(sigma_eff):
+        r"""
+        One forward sweep.  ``sigma_eff`` is the current best estimate
+        of each tendon's effective stress (used only by the coupled
+        scheme to reduce the action by the accrued debit).  Returns
+        the per-tendon debit array and the final concrete strain at
+        each tendon.
+        """
+        debit = np.zeros(nt)
+        anchored = np.zeros(nt, dtype=bool)   # stressed & locked
+        bonded = np.zeros(nt, dtype=bool)     # grouted -> in section
+        # concrete strain at each tendon level, accumulated
+        eps_c = np.zeros(nt)
+
+        # base sollecitazione on the bare transformed section
+        EA, ES, EI = _transformed(bonded)
+        if base_N != 0.0 or base_M != 0.0:
+            de0, dchi = _solve_plane(EA, ES, EI, base_N, base_M)
+            eps_c += de0 + dchi * (yv - y_ref)
+
+        for step, j in enumerate(order):
+            # bond any tendon whose grouting precedes this step
+            for k in range(nt):
+                if (bonded_before[k] is not None
+                        and bonded_before[k] <= step):
+                    bonded[k] = True
+            EA, ES, EI = _transformed(bonded)
+
+            # action of stressing tendon j (reduced by its own accrued
+            # debit only in the coupled scheme; one_pass uses sp0)
+            Pj = sigma_eff[j] * Ap[j]
+            Nj = -Pj
+            Mj = -Pj * (yv[j] - y_ref)
+            de0, dchi = _solve_plane(EA, ES, EI, Nj, Mj)
+            d_eps = de0 + dchi * (yv - y_ref)
+            eps_c += d_eps
+
+            # debit every already-anchored tendon (NOT j itself)
+            for i in range(nt):
+                if anchored[i] and i != j:
+                    debit[i] += -Ep * d_eps[i]   # shortening<0 -> debit>0
+
+            anchored[j] = True
+
+        return debit, eps_c
+
+    if scheme == "one_pass":
+        debit, eps_c = _run_sequence(sp0.copy())
+    elif scheme == "coupled":
+        sigma_eff = sp0.copy()
+        prev = None
+        for _ in range(coupled_max_iter):
+            debit, eps_c = _run_sequence(sigma_eff)
+            sigma_eff = sp0 - debit
+            if prev is not None and np.max(np.abs(sigma_eff - prev)) < coupled_tol:
+                break
+            prev = sigma_eff.copy()
+    else:
+        raise ValueError(
+            f"sequential_posttension_loss: unknown scheme {scheme!r}; "
+            f"use 'one_pass' or 'coupled'."
+        )
+
+    return {
+        "loss": debit,
+        "sigma_p_after": sp0 - debit,
+        "eps_ref_grout": eps_c,
+        "order": order,
+        "scheme": scheme,
+    }
