@@ -44,6 +44,13 @@ CSV and JSON export
    :show-inheritance:
 
 
+Summary report
+-------------------
+
+.. automodule:: gensec.output.summary
+   :members:
+   :show-inheritance:
+
 Terminal reporting
 -------------------
 

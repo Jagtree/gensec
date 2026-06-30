@@ -29,4 +29,10 @@ from .capacity import NMDiagram
 from .check import DomainChecker, MxMyContour, VerificationEngine
 from .analysis import AnalysisEngine
 
-__all__ = ["FiberSolver", "NMDiagram", "DomainChecker", "MxMyContour", "VerificationEngine", "AnalysisEngine"]
+__all__ = ["FiberSolver", "NMDiagram", "DomainChecker", "MxMyContour", "VerificationEngine", "AnalysisEngine",
+    "solve_posttension_sequence",
+    "grout",
+    "PosttensionSequenceResult",
+    "PosttensionStageResult",
+    "GroutResult",
+]

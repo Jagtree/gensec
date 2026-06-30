@@ -452,6 +452,87 @@ class SectionState:
         s.bulk_eps_init = float(value)
         return s
 
+    def with_grouted(self, indices, eps_init_map) -> "SectionState":
+        r"""
+        New state with *indices* **grouted**: made active and bonded with
+        their reconciled post-loss ``eps_init`` set, **atomically**.
+
+        Grouting is the post-tensioning injection event.  Before it, a
+        post-tension tendon is a demand-side :class:`PrestressAction` (a
+        load on hardened concrete); after it, it is a bonded section
+        element contributing ULS resistance.  This method performs that
+        whole transition in a single state derivation: it flips ``active``
+        and ``bonded`` to ``True`` **and** writes the locked-in strain in
+        one copy, so the resulting state can never be "in the domain but
+        also a load" or "neither".
+
+        Composing :meth:`with_activated` + :meth:`with_eps_override` would
+        produce the same arrays but leaves *atomicity* — and therefore the
+        single-side prestress invariant — to the caller.  The dedicated
+        method makes the invariant a property of construction, not of
+        caller discipline.
+
+        Every grouted index **must** carry a reconciled ``eps_init`` in
+        *eps_init_map*.  Grouting reconciles the locked-in strain to the
+        concrete strain datum at the injection stage, so that
+
+        .. math::
+
+            \sigma_p\!\left(\varepsilon_{\mathrm{sec}}^{\,\mathrm{grout}}
+            + \varepsilon_{\mathrm{init}}\right)
+
+        reproduces the effective post-loss tendon stress.  Activating a
+        tendon while leaving whatever stale value the ``eps_init`` array
+        happened to hold would be a *silent* reconciliation — precisely
+        the failure mode the prestress driver forbids.  A missing entry
+        therefore raises rather than defaulting.
+
+        Parameters
+        ----------
+        indices : sequence of int
+            Union element indices (canonical ``rebars + tendons`` order)
+            to grout.
+        eps_init_map : dict
+            ``{union_index: eps_init}`` — the reconciled post-loss strain
+            datum for **every** index in *indices*.
+
+        Returns
+        -------
+        SectionState
+            A new state; the hash changes (a bonded element enters the
+            domain), triggering an automatic domain rebuild.
+
+        Raises
+        ------
+        KeyError
+            If any index in *indices* has no entry in *eps_init_map*
+            (atomicity guard: a tendon never enters the domain without an
+            explicit reconciled prestrain).
+
+        See Also
+        --------
+        with_activated : activate an element without setting strain.
+        with_eps_override : advance ``eps_init`` without changing bondedness.
+        gensec.solver.posttension.grout : the driver-level grouting that
+            produces the reconciled *eps_init_map* and drops the matching
+            demand actions in the same step.
+        """
+        idx = np.asarray(indices, dtype=int)
+        missing = [int(i) for i in idx if int(i) not in eps_init_map]
+        if missing:
+            raise KeyError(
+                f"with_grouted: no reconciled eps_init for grouted "
+                f"index/indices {missing}. Grouting requires an explicit "
+                f"locked-in strain for every grouted element (single-side "
+                f"invariant: a tendon enters the resistance domain with its "
+                f"reconciled post-loss prestrain, never a stale array value)."
+            )
+        s = self.copy_advanced(self.stage_index, self.label)
+        s.active[idx] = True
+        s.bonded[idx] = True
+        for i in idx:
+            s.eps_init[int(i)] = float(eps_init_map[int(i)])
+        return s
 
 # ==================================================================
 #  PrestressAction (Phase-3 interface; fleshed out in prestress v1)

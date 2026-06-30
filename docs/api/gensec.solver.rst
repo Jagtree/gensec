@@ -51,6 +51,27 @@ Analysis engine
    :show-inheritance:
 
 
+Section state
+-------------
+
+.. automodule:: gensec.solver.section_state
+   :members:
+   :show-inheritance:
+
+Prestress transfer
+-------------------
+
+.. automodule:: gensec.solver.prestress_transfer
+   :members:
+   :show-inheritance:
+
+Post-Tension sequence solver
+-----------------------------
+
+.. automodule:: gensec.solver.posttension
+   :members:
+   :show-inheritance:
+
 Package-level exports
 ----------------------
 
