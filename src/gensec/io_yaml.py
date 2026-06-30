@@ -859,14 +859,6 @@ def _parse_bulk_prestrain(sec_spec):
     else:
         return 0.0
 
-    if value != 0.0:
-        raise ValueError(
-            f"section: bulk 'prestrain'/'eps_init' = {value:g} is not "
-            f"yet consumed by the fiber solver — the resistance domain "
-            f"would NOT reflect it. To avoid a silent no-op, non-zero "
-            f"values are rejected until the solver-side support lands "
-            f"(shrinkage/losses phase). Remove the field for now."
-        )
     return value
 
 
@@ -1161,17 +1153,7 @@ def _parse_section_ops_spec(combo_name, stage_name, ops):
             )
         out["release"] = val
     if "bulk_eps" in ops:
-        val = float(ops["bulk_eps"])
-        if val != 0.0:
-            raise ValueError(
-                f"{where}: section_ops 'bulk_eps' = {val:g} is not yet "
-                f"consumed by the fiber solver — the resistance domain "
-                f"would NOT reflect it. To avoid a silent no-op, "
-                f"non-zero values are rejected until the solver-side "
-                f"support lands (Phase 5: bulk prestrain kernel change "
-                f"in integrator.py). Remove the field for now."
-            )
-        out["bulk_eps"] = val
+        out["bulk_eps"] = float(ops["bulk_eps"])
     return out
 
 
