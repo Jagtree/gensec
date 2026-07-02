@@ -248,20 +248,23 @@ def test_placement_guards():
 
 def test_bulk_prestrain_guard():
     r"""
-    *No-silent-no-op* guard: a non-zero bulk ``prestrain`` /
-    ``eps_init`` must raise until the fiber solver consumes the offset
-    (the resistance domain would otherwise NOT reflect it).
+    As of Phase 5 the fiber integrator **consumes** the bulk offset
+    (validated by ``run_bulk_prestrain_validation_new.py``), so a
+    non-zero ``prestrain`` / ``eps_init`` is parsed and returned
+    verbatim -- the old *no-silent-no-op* rejection is retired.  The
+    only remaining guard is the alias-conflict check.
     """
-    print("[6] non-zero bulk prestrain raises (no-silent-no-op guard)")
+    print("[6] bulk prestrain: value round-trips; conflicting aliases raise")
     assert _parse_bulk_prestrain({}) == 0.0
     assert _parse_bulk_prestrain({"prestrain": 0.0}) == 0.0
-    for spec in ({"prestrain": -2e-4}, {"eps_init": 1e-4}):
-        raised = False
-        try:
-            _parse_bulk_prestrain(spec)
-        except ValueError:
-            raised = True
-        assert raised, f"guard did not fire for {spec}"
+    assert _parse_bulk_prestrain({"prestrain": -2e-4}) == -2e-4
+    assert _parse_bulk_prestrain({"eps_init": 1e-4}) == 1e-4
+    raised = False
+    try:
+        _parse_bulk_prestrain({"prestrain": 1e-4, "eps_init": 2e-4})
+    except ValueError:
+        raised = True
+    assert raised, "alias-conflict guard did not fire"
     print("    OK")
 
 

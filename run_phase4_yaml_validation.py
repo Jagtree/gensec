@@ -168,12 +168,15 @@ def test_parser_guards():
     assert _raises(_parse_section_ops_spec, "C", "s",
                    {"release": "yes"}), "release not a bool"
 
-    # bulk_eps: zero passes (inert), non-zero raises (Phase-5 guard).
+    # bulk_eps: parsed and returned verbatim (the fiber integrator
+    # consumes the offset as of Phase 5; the old non-zero guard is
+    # retired, validated by run_bulk_prestrain_validation_new.py).
     assert _parse_section_ops_spec("C", "s",
                                    {"bulk_eps": 0.0}) == {"bulk_eps": 0.0}
     for v in (1e-4, -2e-4):
-        assert _raises(_parse_section_ops_spec, "C", "s",
-                       {"bulk_eps": v}), f"bulk_eps={v} must raise"
+        assert _parse_section_ops_spec("C", "s",
+                                       {"bulk_eps": v}) == {"bulk_eps": v}, \
+            f"bulk_eps={v} must round-trip"
 
     # Misplacement: stage-only keys on a simple combination ...
     for key, val in (("section_ops", {"activate": [0]}),

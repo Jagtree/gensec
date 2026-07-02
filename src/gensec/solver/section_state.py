@@ -567,6 +567,16 @@ class PrestressAction:
     label: str = ""
     origin: str = ""
 
+    def __post_init__(self):
+        r"""Reject non-finite resultants (they poison the demand walk)."""
+        for _nm, _v in (("N", self.N), ("Mx", self.Mx), ("My", self.My)):
+            if not np.isfinite(_v):
+                raise ValueError(
+                    f"PrestressAction.{_nm} is not finite ({_v!r}). A "
+                    "non-finite action would silently corrupt the "
+                    "cumulative demand."
+                )
+
     def triple(self) -> Tuple[float, float, float]:
         """Return ``(N, Mx, My)`` in [N, N·mm, N·mm]."""
         return self.N, self.Mx, self.My
@@ -664,6 +674,215 @@ class PrestressAction:
         return cls(N=F, Mx=F * ly, My=-F * lx,
                    label=label, origin=origin)
 
+
+    # -- Hard boundary: a PrestressAction is demand-only ----------------
+    #    It carries a resultant (N, Mx, My); it is NOT a strain-compatible
+    #    element and has no sectional strain.  Any code that duck-types
+    #    "give me your prestrain / sectional strain" is mismodelling an
+    #    unbonded action as a bonded element -> fail loud.
+    @property
+    def eps_pe(self):
+        r"""
+        Guard: a :class:`PrestressAction` has **no** effective prestrain.
+
+        Raises
+        ------
+        TypeError
+            Always.  ``eps_pe`` is the datum of a *bonded*
+            :class:`~gensec.geometry.fiber.Tendon`, whose stress is read
+            off the sectional strain plane.  A :class:`PrestressAction`
+            is a demand-side load with a known resultant and no sectional
+            strain; asking it for a prestrain means an unbonded/external
+            action is being routed through the strain-compatibility path.
+        """
+        raise TypeError(
+            "PrestressAction has no eps_pe: it is a demand-side load "
+            "(unbonded/external prestress), not a strain-compatible "
+            "element. Model a bonded tendon with geometry.fiber.Tendon; "
+            "for the ULS force of an unbonded tendon use "
+            "PrestressAction.from_force_uls."
+        )
+
+    def sectional_strain(self, *args, **kwargs):
+        r"""
+        Guard: a :class:`PrestressAction` has **no** sectional strain.
+
+        Raises
+        ------
+        TypeError
+            Always -- see :attr:`eps_pe`.  The force is known a priori
+            (effective prestress + member-level
+            :math:`\Delta\sigma_p`), not obtained from the section strain
+            plane.
+        """
+        raise TypeError(
+            "PrestressAction has no sectional strain: requesting "
+            "sectional strain compatibility of a PrestressAction is a "
+            "modelling error (unbonded != bonded)."
+        )
+
+    @classmethod
+    def from_force_uls(cls, P_eff, x, y, *, Ap, delta_sigma_p,
+                       x_ref=0.0, y_ref=0.0, sigma_pd_cap=None,
+                       label="", origin="prestress_uls_unbonded"
+                       ) -> "PrestressAction":
+        r"""
+        ULS section action of an **unbonded / external** tendon.
+
+        For a bonded tendon the ULS stress comes out of *sectional*
+        strain compatibility (the
+        :class:`~gensec.geometry.fiber.Tendon` path inside the
+        integrator).  An unbonded/external tendon has **no** sectional
+        strain: between two contact points (anchorages / deviators) its
+        strain is the member-average, governed by the deformation of the
+        whole member (EN 1992-1-1 §5.10.8(2)).  The stress increment from
+        the effective prestress to the ULS stress is therefore a
+        **member quantity GenSec cannot derive sectionally** and is
+        supplied as input:
+
+        .. math::
+
+            \sigma_{pm,t} = \frac{P_{\text{eff}}}{A_p}, \qquad
+            \sigma_{p,\text{ULS}} = \sigma_{pm,t}
+                                    + \Delta\sigma_{p,\text{ULS}},
+
+        with :math:`\Delta\sigma_{p,\text{ULS}}` either the §5.10.8(3)
+        simplified value (recommended :math:`100\ \text{MPa}`, see
+        :func:`~gensec.materials.prestress_properties.delta_sigma_p_uls`)
+        or a member-level result computed **outside** the sectional
+        solver.  The ULS force
+
+        .. math::
+
+            P_{\text{ULS}} = \sigma_{p,\text{ULS}}\,A_p
+                           = P_{\text{eff}}
+                             + \Delta\sigma_{p,\text{ULS}}\,A_p
+
+        is turned into the demand couple by :meth:`from_force`, in the
+        integrator sign convention (a jacked tendon of force
+        :math:`P>0` transmits a compression :math:`-P`):
+
+        .. math::
+
+            N_p = -P_{\text{ULS}}, \quad
+            M_x = -P_{\text{ULS}}\,(y - y_{\text{ref}}), \quad
+            M_y = +P_{\text{ULS}}\,(x - x_{\text{ref}}).
+
+        A **pure action**: never in the capacity hash, never strain-
+        compatible.  That is the physical content of "unbonded" -- force
+        known a priori, applied to the section, not read off the strain
+        plane.
+
+        Parameters
+        ----------
+        P_eff : float
+            Effective prestress force after all losses [N], tension
+            positive: :math:`P_{\text{eff}} = \sigma_{pm,t}\,A_p`.
+        x, y : float
+            Tendon position at the verified section [mm] (for an external
+            tendon, the eccentricity set by the deviator layout), in the
+            section geometry frame.
+        Ap : float
+            Tendon area [mm²] (keyword-only): converts the increment to a
+            force and lets the optional cap be applied in stress units.
+        delta_sigma_p : float
+            ULS stress increment :math:`\Delta\sigma_{p,\text{ULS}}`
+            [MPa], tension positive, per EN 1992-1-1 §5.10.8.  **Input**
+            -- no member-level computation is performed here (see Notes).
+            Must be non-negative.
+        x_ref, y_ref : float, optional
+            Reference point [mm] -- the **same** the demand path uses
+            (the section centroid).  Default ``0.0``.
+        sigma_pd_cap : float or None, optional
+            Optional design-strength cap :math:`f_{pd}` [MPa].  If given
+            and :math:`\sigma_{pm,t}+\Delta\sigma_{p,\text{ULS}}` exceeds
+            it, the ULS stress is capped and a :class:`UserWarning` is
+            emitted -- **never** applied silently.  Default ``None`` (no
+            cap; keeping :math:`\sigma_{pm,t}+\Delta\sigma_p\le f_{pd}` is
+            the caller's responsibility, as §5.10.8 does not impose it).
+        label : str, optional
+        origin : str, optional
+            Default ``"prestress_uls_unbonded"``.
+
+        Returns
+        -------
+        PrestressAction
+
+        Raises
+        ------
+        ValueError
+            If ``Ap`` is not positive or ``delta_sigma_p`` is negative.
+
+        Warns
+        -----
+        UserWarning
+            If ``sigma_pd_cap`` is given and the composed ULS stress
+            exceeds it.
+
+        Notes
+        -----
+        **No member-level analysis here, by design.**
+        :math:`\Delta\sigma_{p,\text{ULS}}` depends on span, tendon
+        profile and deflected shape between contact points -- 1-D member
+        kinematics with no representation in a sectional fiber model.
+        Deriving it from a beam analysis is a member-level module, out of
+        scope for this tool.  The action carries the **representative**
+        ULS force; the partial factor :math:`\gamma_P` (§5.10.9,
+        favourable/unfavourable) is a combination-layer choice and is
+        **not** applied here.
+
+        References
+        ----------
+        - EN 1992-1-1:2004 §5.10.8, §5.10.9.
+
+        Examples
+        --------
+        External tendon, :math:`A_p = 1500\ \text{mm}^2`,
+        :math:`\sigma_{pm,t}=1000\ \text{MPa}`
+        (:math:`P_{\text{eff}}=1.5\ \text{MN}`),
+        :math:`\Delta\sigma_p=100\ \text{MPa}`, eccentricity
+        :math:`(200,80)` mm about a centroid at :math:`(150,300)` mm:
+
+        >>> a = PrestressAction.from_force_uls(
+        ...     1.5e6, 200.0, 80.0, Ap=1500.0, delta_sigma_p=100.0,
+        ...     x_ref=150.0, y_ref=300.0)
+        >>> a.N            # -(P_eff + dsp*Ap)
+        -1650000.0
+        >>> a.Mx           # -P_uls * (y - y_ref)
+        363000000.0
+        >>> a.My           # +P_uls * (x - x_ref)
+        82500000.0
+        """
+        Ap = float(Ap)
+        dsp = float(delta_sigma_p)
+        if Ap <= 0.0:
+            raise ValueError(
+                f"PrestressAction.from_force_uls: Ap must be positive "
+                f"(got {Ap})."
+            )
+        if dsp < 0.0:
+            raise ValueError(
+                "PrestressAction.from_force_uls: delta_sigma_p is the ULS "
+                f"stress *increase* and must be >= 0 (got {dsp}). A "
+                "relaxation/loss reduction belongs in P_eff, not here."
+            )
+        sigma_uls = float(P_eff) / Ap + dsp
+        if sigma_pd_cap is not None:
+            cap = float(sigma_pd_cap)
+            if sigma_uls > cap:
+                import warnings
+                warnings.warn(
+                    f"PrestressAction.from_force_uls: composed ULS stress "
+                    f"{sigma_uls:.1f} MPa exceeds the supplied cap "
+                    f"f_pd={cap:.1f} MPa; capping to f_pd. Check the "
+                    "effective prestress and the ULS increment.",
+                    UserWarning, stacklevel=2,
+                )
+                sigma_uls = cap
+        return cls.from_force(
+            sigma_uls * Ap, x, y, x_ref=x_ref, y_ref=y_ref,
+            label=label, origin=origin,
+        )
 
 def released_force_action(prev_bundle, element_index, x_ref, y_ref,
                           cum_N, cum_Mx, cum_My,
@@ -849,13 +1068,13 @@ def materialize_view(base_section, state: SectionState):
         + [int(n_reb + i) for i in ten_keep]
     )
     # Carry the state's bulk pre-strain onto the view.  This is the
-    # offset *carrier*: the value is now attached to the section the
-    # solver is built on (and already participates in the capacity
-    # hash via :meth:`SectionState.capacity_hash`).  Making it bite on
-    # the resistance requires the integrator to evaluate the bulk law
-    # at ``eps_section + bulk_eps_init`` — a separate, kernel-level
-    # change (see the Phase-5 note in the deliverable).  Until then the
-    # view faithfully advertises the offset without it being consumed.
+    # offset *carrier*: the value is attached to the section the
+    # solver is built on and participates in the capacity hash via
+    # :meth:`SectionState.capacity_hash`.  As of Phase 5 the fiber
+    # integrator **consumes** it -- it evaluates the bulk law at
+    # ``eps_section + bulk_eps_init`` at the batch, scalar and tangent
+    # sites -- so the offset moves the resistance domain, not only the
+    # cache identity (validated by run_bulk_prestrain_validation_new.py).
     view.bulk_eps_init = float(state.bulk_eps_init)
     view._ideal_gross_props_cache = None
     return view

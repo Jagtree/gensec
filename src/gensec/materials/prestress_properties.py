@@ -116,6 +116,75 @@ def gamma_s_prestress(ls='F', NA='EC2', gamma_s_override=None):
     return table.get(key, table['S'])
 
 
+
+def delta_sigma_p_uls(NA='EC2', delta_override=None):
+    r"""
+    Recommended ULS stress increment for unbonded / external tendons.
+
+    EN 1992-1-1 §5.10.8(3) allows, *as a simplification*, the increase of
+    stress in an unbonded tendon from the effective prestress to the
+    ultimate limit state to be taken as a fixed value; the recommended
+    value is
+
+    .. math::
+
+        \Delta\sigma_{p,\text{ULS}} = 100\ \text{MPa},
+
+    a Nationally Determined Parameter a National Annex may override.
+
+    Prestress counterpart of :func:`gamma_s_prestress`: the recommended
+    value is the default and an unimplemented annex raises, so coverage is
+    visible where it is used.  It returns a **stress increment only** and
+    performs **no** member-level analysis (span, tendon profile, deflected
+    shape) -- that has no home in a sectional model and is out of scope.
+    The value is the ``delta_sigma_p`` input of
+    :meth:`~gensec.solver.section_state.PrestressAction.from_force_uls`.
+
+    Parameters
+    ----------
+    NA : str, optional
+        National Annex selector.  Default ``'EC2'``.  Unknown values raise
+        :class:`ValueError`.
+    delta_override : float or None, optional
+        If given, bypasses the table and returns this value verbatim --
+        the hook for a member-level result or a national value not yet
+        tabulated.  Default ``None``.
+
+    Returns
+    -------
+    float
+        :math:`\Delta\sigma_{p,\text{ULS}}` [MPa].
+
+    Raises
+    ------
+    ValueError
+        If ``NA`` is not implemented and no override is given.
+
+    Notes
+    -----
+    Only the EN 1992-1-1 recommended value is tabulated.  NTC 2018 adopts
+    the Eurocode ULS prestress framework, but its national value is **not
+    asserted here**; supply it via ``delta_override`` (or register it)
+    rather than have this function return an unverified number.
+
+    References
+    ----------
+    - EN 1992-1-1:2004 §5.10.8(3).
+    """
+    if delta_override is not None:
+        return float(delta_override)
+    _NA_TABLES = {
+        'EC2': 100.0,
+    }
+    if NA not in _NA_TABLES:
+        raise ValueError(
+            f"National Annex '{NA}' has no tabulated Delta sigma_p,ULS. "
+            f"Available: {list(_NA_TABLES.keys())}. Pass delta_override "
+            f"to supply a value directly (member-level result or a "
+            f"national value)."
+        )
+    return _NA_TABLES[NA]
+
 # ---------------------------------------------------------------------------
 #  Prestressing-steel property class
 # ---------------------------------------------------------------------------

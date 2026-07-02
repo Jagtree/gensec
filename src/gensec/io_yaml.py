@@ -624,8 +624,8 @@ def _parse_combination(c_spec):
       :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`:
       ``activate`` / ``deactivate`` (lists of element references),
       ``eps_override`` (``{element_ref: eps}``, prestrain override [-]),
-      ``bulk_eps`` (float [-]; **non-zero raises** — see
-      :func:`_parse_section_ops_spec`), ``release`` (bool, default
+      ``bulk_eps`` (float [-]; consumed by the integrator as of
+      Phase 5, see :func:`_parse_section_ops_spec`), ``release`` (bool, default
       ``True``; whether deactivations are force-released).  An element
       reference is a **union index** (integer position in the canonical
       ``rebars + tendons`` order of the section) or an element ``name``
@@ -662,7 +662,7 @@ def _parse_combination(c_spec):
     unresolved (``_section_ops_spec``) and resolved against the built
     section by :func:`_resolve_section_ops` in :func:`load_yaml`;
     value-level validation that needs no section (structure, unknown
-    keys, the ``bulk_eps`` guard, ``time`` monotonicity) happens here.
+    keys, ``time`` monotonicity) happens here.
 
     Parameters
     ----------
@@ -834,15 +834,17 @@ def _parse_bulk_prestrain(sec_spec):
     ------
     ValueError
         If both ``prestrain`` and ``eps_init`` are present with
-        different values (ambiguous), **or if the value is non-zero**.
-        The latter is a deliberate *no-silent-no-op* guard: the field is
-        parsed, hashed and propagated by the section-state machinery,
-        but the fiber integrator does not yet evaluate the bulk
-        constitutive law at the offset argument, so a non-zero value
-        would change the domain cache identity **without changing the
-        resistance domain itself** — the worst kind of silent error for
-        an analysis tool.  The guard is removed when the kernel consumes
-        the offset (shrinkage/losses phase).
+        different values (they are aliases — set only one).
+
+    Notes
+    -----
+    A non-zero value is now **consumed** by the fiber integrator, which
+    evaluates the bulk constitutive law at ``eps_section + bulk_eps_init``
+    (batch, scalar and tangent sites), so the resistance domain reflects
+    the offset.  The earlier *no-silent-no-op* guard that rejected any
+    non-zero value — a stopgap for when the kernel ignored the offset —
+    has been retired; the kernel consumption is validated end-to-end by
+    ``run_bulk_prestrain_validation_new.py``.
     """
     has_p = "prestrain" in sec_spec
     has_e = "eps_init" in sec_spec
@@ -1073,7 +1075,7 @@ def _parse_section_ops_spec(combo_name, stage_name, ops):
     Value-level validation of one stage's ``section_ops`` block.
 
     Runs at parse time (no section needed): structure, unknown keys,
-    the ``bulk_eps`` no-silent-no-op guard, type checks.  Element
+    type checks.  Element
     references (union indices or names) are **not** resolved here —
     that needs the built section and happens in
     :func:`_resolve_section_ops`.
@@ -1095,21 +1097,18 @@ def _parse_section_ops_spec(combo_name, stage_name, ops):
     Raises
     ------
     ValueError
-        Malformed block, unknown key, or non-zero ``bulk_eps``.
+        Malformed block or unknown key.
 
     Notes
     -----
-    **``bulk_eps`` is hash-effective but kernel-inert until Phase 5**,
-    exactly like the section-level ``prestrain`` / ``eps_init`` field
-    (see :func:`_parse_bulk_prestrain`): the value is parsed, hashed and
-    propagated onto the materialized view, but the fiber integrator does
-    not yet evaluate the bulk constitutive law at the offset argument.
-    A non-zero value would therefore change the domain cache identity
-    **without changing the resistance domain itself** — the worst kind
-    of silent error for an analysis tool.  The same *no-silent-no-op*
-    policy applies: non-zero values are rejected until the kernel
-    consumes the offset (Phase 5, the five documented sites in
-    ``integrator.py``).
+    ``bulk_eps`` is parsed and returned verbatim.  As of Phase 5 the
+    fiber integrator **consumes** the offset (it evaluates the bulk
+    constitutive law at ``eps_section + bulk_eps_init`` at the batch,
+    scalar and tangent sites), so a non-zero value moves the resistance
+    domain, not only the cache identity — exactly like the section-level
+    ``prestrain`` / ``eps_init`` field (see :func:`_parse_bulk_prestrain`).
+    The earlier *no-silent-no-op* rejection has been retired; the kernel
+    consumption is validated by ``run_bulk_prestrain_validation_new.py``.
     """
     where = f"Combination '{combo_name}', stage '{stage_name}'"
     if not isinstance(ops, dict):

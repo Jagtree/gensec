@@ -1,0 +1,7 @@
+uv run run_bulk_prestrain_validation_new.py
+uv run run_phase3_validation.py
+uv run run_phase4_yaml_validation.py
+uv run run_posttension_sequence_validation.py
+uv run run_posttension_shortening_validation.py
+uv run run_prestress_action_validation.py
+uv run run_prestress_uls_unbonded_validation.py

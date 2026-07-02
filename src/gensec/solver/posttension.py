@@ -386,18 +386,15 @@ def _stressing_view(section):
     return materialize_view(section, state)
 
 
-def _grouted_state(section, grouted_local, eps_init_local,
-                   eps_ref_local, sigma_p_after_local):
+def _grouted_state(section, grouted_local, eps_init_local):
     r"""
     Build the post-grouting :class:`SectionState`.
 
-    Prefers the dedicated atomic primitive
-    :meth:`SectionState.with_grouted` if present; otherwise performs the
-    same atomic mutation inline via :meth:`SectionState.copy_advanced`
-    (so the driver is runnable before the ``section_state.py`` patch is
-    applied).  Either way, ``active``, ``bonded`` and ``eps_init`` for a
-    grouted tendon are set **together**, which is the construction-level
-    guarantee of the single-side invariant.
+    Constructs the base state (bulk + rebars active/bonded, every
+    tendon an inactive load) and hands the grouted tendons to the
+    atomic primitive :meth:`SectionState.with_grouted`, which flips
+    ``active``/``bonded`` and sets the reconciled ``eps_init``
+    together and enforces the single-side / no-re-grouting invariant.
 
     Parameters
     ----------
@@ -405,10 +402,8 @@ def _grouted_state(section, grouted_local, eps_init_local,
     grouted_local : sequence of int
         Tendon-local indices to grout.
     eps_init_local : sequence of float
-        Reconciled ``eps_init`` for each grouted tendon (aligned with
-        *grouted_local*).
-    eps_ref_local, sigma_p_after_local : sequence of float
-        Diagnostics carried into the report only.
+        Reconciled ``eps_init`` per grouted tendon (aligned with
+        *grouted_local*); see :func:`reconcile_grouting`.
 
     Returns
     -------
@@ -417,9 +412,6 @@ def _grouted_state(section, grouted_local, eps_init_local,
     n_reb = int(section.x_rebars.size)
     n_ten = int(section.x_tendons.size)
     n = n_reb + n_ten
-
-    # Base state: bulk + rebars active/bonded, every tendon inactive
-    # (ungrouted tendons stay loads; grouted ones are flipped below).
     base = SectionState(
         stage_index=0,
         active=np.concatenate([np.ones(n_reb, bool), np.zeros(n_ten, bool)]),
@@ -430,21 +422,7 @@ def _grouted_state(section, grouted_local, eps_init_local,
     )
     union_idx = [n_reb + int(j) for j in grouted_local]
     eps_map = {ui: float(e) for ui, e in zip(union_idx, eps_init_local)}
-
-    if hasattr(base, "with_grouted"):
-        return base.with_grouted(union_idx, eps_map)
-
-    # Inline atomic fallback (identical semantics to with_grouted).
-    s = base.copy_advanced(base.stage_index, base.label)
-    for ui in union_idx:
-        if ui not in eps_map:
-            raise ValueError(
-                "grout: missing reconciled eps_init for a grouted tendon "
-                "(atomicity requires bonded AND eps_init set together).")
-        s.active[ui] = True
-        s.bonded[ui] = True
-        s.eps_init[ui] = eps_map[ui]
-    return s
+    return base.with_grouted(union_idx, eps_map)
 
 
 # ===========================================================================
@@ -844,10 +822,7 @@ def grout(
                 f"(linear concrete at transfer) is violated.")
         eps_init.append(float(eps_pe[j]) - sj)
 
-    state = _grouted_state(
-        section, grouted, eps_init,
-        [float(eps_ref[j]) for j in grouted],
-        [float(result.sigma_p_after[j]) for j in grouted])
+    state = _grouted_state(section, grouted, eps_init)
 
     # Demand-side bookkeeping: drop grouted loads, keep ungrouted loads.
     eff = result.effective_actions()

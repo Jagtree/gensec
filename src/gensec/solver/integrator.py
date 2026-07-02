@@ -135,22 +135,6 @@ class FiberSolver:
         self._bulk_eps_by_group = [self._bulk_eps_init
                                    for _ in self._bulk_groups]
 
-        # ---- Bulk imposed-strain offset (coazione) ----
-        # Uniform locked-in bulk strain (shrinkage / differential
-        # thermal), read through getattr so sections built before the
-        # prestress phase are bit-identical (offset 0.0 -> argument
-        # unchanged everywhere).  The bulk law is evaluated at
-        # (eps + offset), exactly as a bonded tendon's law is
-        # evaluated at (eps_section + eps_pe).
-        self._bulk_eps_init = float(
-            getattr(self.sec, 'bulk_eps_init', 0.0))
-        # Per-group offsets, index-aligned with self._bulk_groups.
-        # Today every group carries the single section-level value;
-        # differential shrinkage per zone will populate distinct
-        # values here WITHOUT touching the kernel sites again.
-        self._bulk_eps_by_group = [self._bulk_eps_init
-                                   for _ in self._bulk_groups]
-
     def _build_rebar_groups(self):
         r"""
         Group rebar layers by the pair
