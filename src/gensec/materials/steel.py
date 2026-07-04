@@ -209,6 +209,21 @@ class Steel(Material):
     def eps_max(self):
         return self.eps_su
 
+    @property
+    def E(self):
+        r"""Elastic modulus :math:`E_s` [MPa].
+
+        Exposed under the common ``E`` name used by the
+        homogenization machinery
+        (:meth:`~gensec.geometry.geometry.GenericSection.compute_ideal_properties`)
+        and mirrored on every material family
+        (:class:`PrestressingSteel` exposes ``Ep`` as ``E``,
+        :class:`~gensec.materials.concrete.Concrete` exposes
+        ``Ec`` — fail-loud when unset).  Phase-7 hygiene edit
+        (finding F0).
+        """
+        return self.Es
+
     # ------------------------------------------------------------------
     #  Scalar interface
     # ------------------------------------------------------------------

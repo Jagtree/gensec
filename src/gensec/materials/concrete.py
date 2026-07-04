@@ -258,6 +258,40 @@ class Concrete(Material):
         """
         return self.eps_ct if self.tension_enabled else 0.0
 
+    @property
+    def E(self):
+        r"""Elastic modulus for homogenization [MPa] — fail-loud.
+
+        Returns ``Ec`` when a positive value was provided at
+        construction.  When ``Ec`` is unset (the default: the
+        design parabola-rectangle law needs no elastic modulus
+        unless the tension branch is enabled), accessing ``E``
+        **raises** instead of returning a silent zero stiffness
+        (Phase-7 hygiene edit, finding F0).
+
+        Note the role separation: ``Ec`` here is the modulus
+        attached to this constitutive object (it also scales the
+        tension branch).  The SLS verification layer never reads
+        it implicitly — SLS moduli (:math:`E_{cm}`,
+        :math:`E_{cm}(t)`, :math:`E_{c,\mathrm{eff}}`) are
+        normative, time-dependent choices supplied explicitly
+        through :func:`gensec.solver.sls.resolve_sls_moduli`
+        (Phase-7 D3).
+
+        Raises
+        ------
+        AttributeError
+            If ``Ec`` was not set to a positive value.
+        """
+        if self.Ec > 0.0:
+            return self.Ec
+        raise AttributeError(
+            "Concrete.E requested but Ec was not set at "
+            "construction.  Provide Ec explicitly, or — for SLS "
+            "verification — pass the modulus through the "
+            "explicit 'moduli' mapping (gensec.solver.sls)."
+        )
+
     # ------------------------------------------------------------------
     #  Scalar interface
     # ------------------------------------------------------------------

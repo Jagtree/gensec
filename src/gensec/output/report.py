@@ -156,3 +156,81 @@ def print_fiber_results(results, sec):
         print(f"    y={y_val:>7.1f}"
               f"  eps={eps_mean*1e3:>8.3f} permil"
               f"  sig={sig_mean:>8.2f} MPa")
+# ==================================================================
+#  SLS staged verification report (Phase 7)
+# ==================================================================
+
+
+def print_sls_results(res):
+    r"""
+    Console report for :func:`gensec.solver.sls.verify_sls_staged`.
+
+    One block per stage: cumulative demand, solved plane, concrete
+    stress extremes with locations, per-element accumulated stresses,
+    check table with :math:`\eta` utilizations and the
+    uncracked-basis flag (Phase-7 D4 semantics), then the global
+    verdict and the governing check.
+
+    Parameters
+    ----------
+    res : dict
+        Output of :func:`gensec.solver.sls.verify_sls_staged`.
+    """
+    print("=" * 66)
+    print("SLS STAGED STRESS VERIFICATION")
+    print(f"  reference point: x_ref={res['x_ref']:.1f} mm, "
+          f"y_ref={res['y_ref']:.1f} mm")
+    print("=" * 66)
+
+    for st in res["stages"]:
+        t = f", t={st['time']} d" if st.get("time") is not None else ""
+        print(f"\nStage: {st['name']}{t}")
+        cum = st["cumulative"]
+        print(f"  demand (cum): N={cum['N_kN']:.2f} kN, "
+              f"Mx={cum['Mx_kNm']:.2f} kNm, "
+              f"My={cum['My_kNm']:.2f} kNm")
+        c = st["concrete"]
+        print(f"  concrete: sigma_min={c['sigma_min_MPa']:.3f} MPa "
+              f"at {c['at_min']}, "
+              f"sigma_max={c['sigma_max_MPa']:.3f} MPa "
+              f"at {c['at_max']}")
+        for e in st["elements"]:
+            print(f"    {e['kind']:<6} u{e['union_index']} "
+                  f"(x={e['x']:.0f}, y={e['y']:.0f}): "
+                  f"sigma={e['sigma_MPa']:.3f} MPa")
+        if "checks" not in st:
+            print("  (no limits attached: accumulation only)")
+            continue
+        if st.get("basis_checked"):
+            flag = ("VIOLATED" if st["uncracked_basis_violated"]
+                    else "ok")
+            print(f"  uncracked basis: {flag}")
+        else:
+            print("  uncracked basis: not assessed (no fct_eff)")
+        for ck in st["checks"]:
+            if ck.get("skipped"):
+                print(f"    - {ck['name']:<28} SKIPPED "
+                      f"({ck['reason']})")
+                continue
+            verdict = "PASS" if ck["passed"] else "FAIL"
+            if ck.get("basis_valid") is False:
+                verdict += " [basis invalid]"
+            if "eta" in ck:
+                print(f"    - {ck['name']:<28} "
+                      f"{ck['value_MPa']:>9.3f} / "
+                      f"{ck['limit_MPa']:>8.3f} MPa  "
+                      f"eta={ck['eta']:.3f}  {verdict}")
+            else:
+                print(f"    - {ck['name']:<28} "
+                      f"sigma_probe={ck['sigma_probe_MPa']:>8.3f} "
+                      f"MPa at {ck['probe_at']}  {verdict}")
+        print(f"  stage verified: {st['verified']}")
+
+    print("-" * 66)
+    print(f"VERIFIED: {res['verified']}")
+    if res.get("governing"):
+        g = res["governing"]
+        print(f"governing: eta={g['eta']:.3f} — stage "
+              f"'{g['stage']}', check '{g['check']}'")
+    print("=" * 66)
+
