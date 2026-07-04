@@ -98,7 +98,7 @@ def circle_poly(D, resolution=64):
     -------
     shapely.geometry.Polygon
     """
-    return Point(D / 2, D / 2).buffer(D / 2, resolution=resolution)
+    return Point(D / 2, D / 2).buffer(D / 2, quad_segs=resolution)
 
 
 def annulus_poly(D_ext, D_int, resolution=64):
@@ -129,8 +129,8 @@ def annulus_poly(D_ext, D_int, resolution=64):
             f"outer diameter ({D_ext})."
         )
     cx, cy = D_ext / 2, D_ext / 2
-    outer = Point(cx, cy).buffer(D_ext / 2, resolution=resolution)
-    inner = Point(cx, cy).buffer(D_int / 2, resolution=resolution)
+    outer = Point(cx, cy).buffer(D_ext / 2, quad_segs=resolution)
+    inner = Point(cx, cy).buffer(D_int / 2, quad_segs=resolution)
     return outer.difference(inner)
 
 

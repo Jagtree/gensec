@@ -57,8 +57,10 @@ class TestOutlineHoleCarving(unittest.TestCase):
         from shapely.geometry import Point
         from gensec.output._polydraw import polygon_to_path
         cx = cy = 600.0
-        annulus = (Point(cx, cy).buffer(600.0, resolution=64)
-                   .difference(Point(cx, cy).buffer(400.0, resolution=64)))
+        # Shapely >= 2.0: ``quad_segs`` replaces the deprecated
+        # ``resolution`` keyword (identical quarter-circle segment count).
+        annulus = (Point(cx, cy).buffer(600.0, quad_segs=64)
+                   .difference(Point(cx, cy).buffer(400.0, quad_segs=64)))
         areas = self._ring_signed_areas(polygon_to_path(annulus))
         self.assertEqual(len(areas), 2)
         self.assertGreater(areas[0], 0.0)   # exterior CCW
@@ -902,11 +904,33 @@ class TestB4_AxialLimitRobustness(unittest.TestCase):
 
     # --- (i) Mx-My domain degeneracy -------------------------------
     def test_mx_my_degenerate_at_squash(self):
-        res = self.gen.generate_mx_my(self.N_squash, n_angles=72)
+        r"""
+        At the compressive axial limit the Mx-My domain must collapse.
+
+        As :math:`N \to N_{Rd,\max}` (squash) the whole section reaches
+        the ultimate compressive strain, the internal lever arm vanishes
+        and :math:`M_{Rd} \to 0`.  ``generate_mx_my`` must therefore both
+        flag ``degenerate=True`` *and* emit a ``RuntimeWarning`` (the
+        fail-loud signal).  Asserting the warning here also consumes it,
+        keeping pytest's warnings summary clean.
+        """
+        with self.assertWarns(RuntimeWarning):
+            res = self.gen.generate_mx_my(self.N_squash, n_angles=72)
         self.assertTrue(res.get("degenerate", False))
 
     def test_mx_my_degenerate_at_tension(self):
-        res = self.gen.generate_mx_my(self.N_tens, n_angles=72)
+        r"""
+        At the tensile axial limit the Mx-My domain must collapse.
+
+        As :math:`N \to N_{Rd,\min}` (pure tension) the reinforcement is
+        fully yielded in tension and the concrete is cracked; for a doubly
+        symmetric section the resultant acts through the steel centroid,
+        the lever arm vanishes and :math:`M_{Rd} \to 0`.  Same contract as
+        the squash case: ``degenerate=True`` plus a consumed
+        ``RuntimeWarning``.
+        """
+        with self.assertWarns(RuntimeWarning):
+            res = self.gen.generate_mx_my(self.N_tens, n_angles=72)
         self.assertTrue(res.get("degenerate", False))
 
     def test_mx_my_nondegenerate_interior(self):
