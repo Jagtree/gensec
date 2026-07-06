@@ -305,6 +305,29 @@ class SectionState:
         of losses, for tendons; usually 0 for passive rebars).
     bulk_eps_init : float, optional
         Uniform bulk pre-strain [-] (e.g. shrinkage), 0 by default.
+    bulk_active : numpy.ndarray of bool or None, optional
+        Per-zone activity mask over ``n_zones = 1 +
+        len(bulk_materials)`` (Phase 8 bulk staging).  Zone 0 (the
+        base ``bulk_material``) is always active.  ``None`` (default,
+        legacy direct construction) means "all zones active"; states
+        built by :meth:`StagedDomainManager.initial_state` always
+        carry the explicit array.  The per-fiber mask is always
+        *derived*, never stored:
+        ``fiber_active = bulk_active[mat_indices]``.
+    bulk_planes : numpy.ndarray or None, optional
+        Per-zone locked-in datum planes, shape ``(n_zones, 3)``:
+        :math:`(\varepsilon_{0,z}, \chi_{x,z}, \chi_{y,z})` per
+        zone, evaluated with the sign convention of
+        :meth:`~gensec.solver.integrator.FiberSolver.strain_field`
+        about the solver reference point (the full-polygon centroid,
+        pinned across stages).  The casting datum of a staged zone:
+        the zone is stress-free on the plane :math:`-\,
+        \mathrm{plane}_z` (linear-equivalence identity, master plan
+        §3).  The legacy scalar ``bulk_eps_init`` is *not* folded in
+        here — it remains a separate uniform term added to every
+        active zone by the integrator's offset field (one internal
+        mechanism, two inputs; ``with_bulk_eps`` keeps working
+        unchanged).
     time_days : float, optional
         Cumulative time since stage 0 [days].  Informational for the
         losses model; does **not** enter the hash directly — its
@@ -324,11 +347,14 @@ class SectionState:
     bonded: np.ndarray
     eps_init: np.ndarray
     bulk_eps_init: float = 0.0
+    bulk_active: Optional[np.ndarray] = None
+    bulk_planes: Optional[np.ndarray] = None
     time_days: float = 0.0
     label: str = ""
 
     def capacity_hash(self, geom_sig: Tuple[Any, ...],
-                      union_materials: List[int]) -> int:
+                      union_materials: List[int],
+                      chi_quantum: float = QUANT_EPS) -> int:
         r"""
         Capacity state hash: identity of the resistance domain.
 
@@ -338,11 +364,30 @@ class SectionState:
         2. for every **active and bonded** element, in ascending
            index order, the triple
            ``(material_id, quantize(eps_init), bonded)``;
-        3. the quantized bulk pre-strain.
+        3. the quantized bulk pre-strain;
+        4. (Phase 8, when :attr:`bulk_active` is set) the byte hash of
+           the zone activity mask, and — per **active** zone in index
+           order — the quantized locked-in plane triple
+
+           .. math::
+
+               \bigl(\,q(\varepsilon_{0,z}),\;
+               q_\chi(\chi_{x,z}),\; q_\chi(\chi_{y,z})\,\bigr)
+
+           with the curvature quantum
+           :math:`q_\chi = \texttt{QUANT\_EPS} / D`,
+           :math:`D = \max(H, B)` of the base section, so the
+           bucketing error on the extreme-fiber strain
+           :math:`\chi \cdot D` stays :math:`\le` ``QUANT_EPS`` —
+           coherent with the documented ``QUANT_EPS`` trap.
 
         Active-but-unbonded elements are excluded (they are not in the
         domain).  Applied loads / ``PrestressAction`` are excluded by
-        construction — they never reach this method.
+        construction — they never reach this method.  States without
+        zone arrays (``bulk_active is None``, legacy direct
+        construction) hash exactly as before Phase 8; a manager mixes
+        the two forms only in the *safe* direction (a missed cache
+        reuse, never a wrong one).
 
         Parameters
         ----------
@@ -351,6 +396,12 @@ class SectionState:
         union_materials : list of int
             ``id(material)`` for each element in the union set, in the
             canonical ``rebars + tendons`` order.
+        chi_quantum : float, optional
+            Curvature bucket width [1/mm].  Deterministic per manager:
+            :class:`StagedDomainManager` computes it once from the
+            base section and passes it down.  Default
+            :data:`QUANT_EPS` (dimensionally a fallback for direct
+            callers only).
 
         Returns
         -------
@@ -365,11 +416,28 @@ class SectionState:
                  _quantize(float(self.eps_init[int(i)])),
                  True)
             )
-        return hash((
+        terms = [
             geom_sig,
             tuple(elem_terms),
             _quantize(float(self.bulk_eps_init)),
-        ))
+        ]
+        if self.bulk_active is not None:
+            ba = np.ascontiguousarray(self.bulk_active, dtype=bool)
+            terms.append(hash(ba.tobytes()))
+            if self.bulk_planes is None:
+                planes = np.zeros((ba.size, 3), dtype=float)
+            else:
+                planes = np.asarray(self.bulk_planes, dtype=float)
+            zone_terms = []
+            for z in np.nonzero(ba)[0]:
+                e0, cx, cy = planes[int(z)]
+                zone_terms.append((
+                    _quantize(float(e0)),
+                    _quantize(float(cx), chi_quantum),
+                    _quantize(float(cy), chi_quantum),
+                ))
+            terms.append(tuple(zone_terms))
+        return hash(tuple(terms))
 
     def copy_advanced(self, stage_index: int,
                       label: str = "") -> "SectionState":
@@ -395,6 +463,10 @@ class SectionState:
             bonded=self.bonded.copy(),
             eps_init=self.eps_init.copy(),
             bulk_eps_init=self.bulk_eps_init,
+            bulk_active=(None if self.bulk_active is None
+                         else self.bulk_active.copy()),
+            bulk_planes=(None if self.bulk_planes is None
+                         else self.bulk_planes.copy()),
             time_days=self.time_days,
             label=label or self.label,
         )
@@ -532,6 +604,105 @@ class SectionState:
         s.bonded[idx] = True
         for i in idx:
             s.eps_init[int(i)] = float(eps_init_map[int(i)])
+        return s
+
+    def with_bulk_activated(self, zones, plane_map) -> "SectionState":
+        r"""
+        New state with the bulk *zones* **cast**: made active with
+        their locked-in datum planes set, **atomically**.
+
+        The bulk analog of :meth:`with_grouted` (same single-side
+        invariant): a zone enters the resistance domain only together
+        with an **explicit** casting datum plane.  Casting a zone
+        while leaving whatever plane the array happened to hold would
+        be a *silent* reconciliation — precisely the failure mode the
+        prestress driver forbids for tendons.  A missing entry
+        therefore raises rather than defaulting;
+        :math:`(0, 0, 0)` is legal but must be written.
+
+        The datum plane :math:`(\varepsilon_{0,z}, \chi_{x,z},
+        \chi_{y,z})` is expressed about the solver reference point
+        (full-polygon centroid) with the sign convention of
+        :meth:`~gensec.solver.integrator.FiberSolver.strain_field`.
+        Physically: the zone is **stress-free** on the section strain
+        plane :math:`-\,\mathrm{plane}_z`, so the datum of a zone
+        cast on a deformed substrate is the *negated* substrate plane
+        at casting (linear incremental ≡ one-shot equivalence, master
+        plan §3).  Producing that plane automatically (``auto``) is
+        the Task-2 timeline resolution walk; at engine level the datum
+        is an input (demand purity of ``resolve_stages``).
+
+        Parameters
+        ----------
+        zones : sequence of int
+            Zone indices to activate (1-based zone list positions;
+            zone 0 = ``'base'`` is always active and not activatable).
+        plane_map : dict
+            ``{zone_index: (eps0, chi_x, chi_y)}`` — the locked-in
+            datum plane for **every** index in *zones*.
+
+        Returns
+        -------
+        SectionState
+            A new state; the hash changes (mask flip + plane terms),
+            triggering an automatic domain rebuild.
+
+        Raises
+        ------
+        KeyError
+            If any zone in *zones* has no entry in *plane_map*
+            (atomicity guard, ``with_grouted``-style).
+        ValueError
+            Zone 0 targeted; zone index out of range; state built
+            without zone arrays; malformed or non-finite plane.
+        """
+        if self.bulk_active is None:
+            raise ValueError(
+                "with_bulk_activated: this state carries no zone "
+                "arrays (bulk_active is None — legacy direct "
+                "construction). Derive states from "
+                "StagedDomainManager.initial_state(), which sizes "
+                "bulk_active/bulk_planes on the section's zones."
+            )
+        zs = [int(z) for z in zones]
+        missing = [z for z in zs if z not in
+                   {int(k) for k in plane_map}]
+        if missing:
+            raise KeyError(
+                f"with_bulk_activated: no locked-in datum plane for "
+                f"zone(s) {missing}. Casting requires an explicit "
+                f"(eps0, chi_x, chi_y) for every activated zone "
+                f"(single-side invariant: a zone enters the "
+                f"resistance domain with its casting datum, never a "
+                f"stale array value; (0, 0, 0) is legal but must be "
+                f"written)."
+            )
+        n_zones = int(self.bulk_active.size)
+        s = self.copy_advanced(self.stage_index, self.label)
+        if s.bulk_planes is None:
+            s.bulk_planes = np.zeros((n_zones, 3), dtype=float)
+        plane_by_int = {int(k): v for k, v in plane_map.items()}
+        for z in zs:
+            if z == 0:
+                raise ValueError(
+                    "with_bulk_activated: zone 0 ('base') is always "
+                    "active and not activatable."
+                )
+            if not (0 < z < n_zones):
+                raise ValueError(
+                    f"with_bulk_activated: zone index {z} out of "
+                    f"range (state has {n_zones} zone(s))."
+                )
+            plane = np.asarray(plane_by_int[z], dtype=float).ravel()
+            if plane.size != 3 or not np.all(np.isfinite(plane)):
+                raise ValueError(
+                    f"with_bulk_activated: datum plane for zone {z} "
+                    f"must be three finite floats "
+                    f"(eps0, chi_x, chi_y), got "
+                    f"{plane_by_int[z]!r}."
+                )
+            s.bulk_active[z] = True
+            s.bulk_planes[z, :] = plane
         return s
 
 # ==================================================================
@@ -995,6 +1166,163 @@ def _element_net_force(solver, element_index, eps0, chi_x, chi_y):
 #  Materialized section view
 # ==================================================================
 
+def _staging_parents(section) -> np.ndarray:
+    r"""
+    Per-union-element staging-parent zone indices.
+
+    Concatenates, in the canonical ``rebars + tendons`` order, the
+    geometric containing zones (``mat_indices_rebar`` /
+    ``mat_indices_tendon``) with the tendon override already resolved
+    by the section (:attr:`staging_parent_tendon` — legal only for
+    non-embedded tendons, see
+    :meth:`~gensec.geometry.geometry.GenericSection._resolve_tendon_parents`).
+    Sections built before the zone machinery fall back to zone 0 for
+    every element.
+
+    Parameters
+    ----------
+    section : GenericSection
+
+    Returns
+    -------
+    numpy.ndarray of int
+        Shape ``(n_union,)``.
+    """
+    n_reb = int(getattr(section, "x_rebars", np.empty(0)).size)
+    n_ten = int(getattr(section, "x_tendons", np.empty(0)).size)
+    par_r = getattr(section, "mat_indices_rebar", None)
+    if par_r is None:
+        par_r = np.zeros(n_reb, dtype=int)
+    par_t = getattr(section, "staging_parent_tendon", None)
+    if par_t is None:
+        par_t = getattr(section, "mat_indices_tendon", None)
+        if par_t is None:
+            par_t = np.zeros(n_ten, dtype=int)
+    return np.concatenate([np.asarray(par_r, dtype=int),
+                           np.asarray(par_t, dtype=int)])
+
+
+def _apply_bulk_staging(base_section, state: SectionState, view):
+    r"""
+    Apply the Phase-8 bulk-staging state to a materialized *view*.
+
+    Three regimes (master plan §1 / primer §2, with the fast-path
+    condition corrected to *mask all-True **and** planes all-zero* —
+    an all-active state may still carry non-zero locked-in planes at
+    the final stage of a composite, and those must reach the solver):
+
+    1. **Trivial** (``bulk_active`` is ``None``, or all-True with
+       zero planes): return immediately — no attribute is set, the
+       single-bulk pipeline is byte-identical by construction.
+    2. **All-active, non-zero planes**: bulk arrays stay shared by
+       reference; only ``view.bulk_planes_active`` is attached.
+    3. **Masked**: re-slice the bulk fiber arrays to the active zones
+       (mask-in-kernel was rejected as a correctness bug — masked
+       fibers would still veto planes in ``strains_within_limits``),
+       enforce the containment invariant on the kept point elements,
+       override the stale geometry attributes from the **exact**
+       active polygon (base polygon minus the union of inactive zone
+       polygons), and attach the planes.
+
+    The reference point is **pinned**: ``x_centroid`` / ``y_centroid``
+    are properties of the *shared full polygon*, which this function
+    never replaces — the demand path requires a constant moment
+    reference across stages.  ``bbox`` reads the plain attribute
+    ``_bounds``, so the per-instance override takes effect without
+    touching the class.
+
+    Parameters
+    ----------
+    base_section : GenericSection
+    state : SectionState
+    view : GenericSection
+        The shallow copy being materialized (mutated in place).
+
+    Raises
+    ------
+    ValueError
+        Zone 0 inactive; a kept (active & bonded) point element whose
+        staging parent zone is inactive; empty active bulk.
+    """
+    ba = state.bulk_active
+    planes = state.bulk_planes
+    has_planes = planes is not None and bool(
+        np.any(np.asarray(planes, dtype=float)))
+    masked = ba is not None and not bool(np.all(ba))
+    if not masked and not has_planes:
+        return                                    # regime 1: fast path
+
+    if masked:                                    # regime 3
+        if not bool(ba[0]):
+            raise ValueError(
+                "materialize_view: zone 0 ('base') is inactive. The "
+                "base bulk zone is always active by contract; bulk "
+                "deactivation (demolition) is not supported."
+            )
+        mi = getattr(base_section, "mat_indices", None)
+        if mi is None:
+            mi = np.zeros(int(base_section.n_fibers), dtype=int)
+        mi = np.asarray(mi, dtype=int)
+        keep = np.nonzero(ba[mi])[0]
+        if keep.size == 0:
+            raise ValueError(
+                "materialize_view: the active bulk is empty (no fiber "
+                "belongs to an active zone). A stage with no bulk "
+                "material is meaningless."
+            )
+        view.x_fibers = base_section.x_fibers[keep]
+        view.y_fibers = base_section.y_fibers[keep]
+        view.A_fibers = base_section.A_fibers[keep]
+        view.mat_indices = mi[keep]
+        view.n_fibers = int(keep.size)
+
+        # Containment invariant on the elements kept in this view
+        # (resolve_stages enforces it for manager-built walks; this
+        # protects direct materialize_view callers too).
+        parents = _staging_parents(base_section)
+        resist = state.active & state.bonded
+        bad = np.nonzero(resist & ~ba[parents])[0]
+        if bad.size:
+            names = getattr(base_section, "zone_names", None)
+            i0 = int(bad[0])
+            z0 = int(parents[i0])
+            zlab = (names[z0] if names and z0 < len(names)
+                    else str(z0))
+            raise ValueError(
+                f"materialize_view: union element {i0} is active but "
+                f"its staging-parent bulk zone '{zlab}' (index {z0}) "
+                f"is inactive — an element cannot exist before the "
+                f"zone that carries it is cast."
+            )
+
+        # Exact active geometry: base polygon minus inactive zones.
+        from shapely.ops import unary_union
+        inactive_polys = [
+            base_section.bulk_materials[z - 1][0]
+            for z in np.nonzero(~ba)[0] if z > 0
+        ]
+        active_poly = base_section.polygon.difference(
+            unary_union(inactive_polys))
+        if active_poly.is_empty:
+            raise ValueError(
+                "materialize_view: the active geometry is empty "
+                "(inactive zones cover the whole section)."
+            )
+        minx, miny, maxx, maxy = active_poly.bounds
+        view._bounds = (float(minx), float(miny),
+                        float(maxx), float(maxy))
+        view.B = float(maxx - minx)
+        view.H = float(maxy - miny)
+        view.ideal_gross_area = float(active_poly.area)
+
+    # Regimes 2 and 3: the solver consumes the per-zone planes
+    # through this attribute (index-aligned with mat_indices values,
+    # which the re-slice above preserves).
+    view.bulk_planes_active = (
+        np.zeros((int(ba.size), 3), dtype=float) if planes is None
+        else np.array(planes, dtype=float, copy=True))
+
+
 def materialize_view(base_section, state: SectionState):
     r"""
     Build the section *view* for a state without re-meshing.
@@ -1076,6 +1404,12 @@ def materialize_view(base_section, state: SectionState):
     # sites -- so the offset moves the resistance domain, not only the
     # cache identity (validated by run_bulk_prestrain_validation_new.py).
     view.bulk_eps_init = float(state.bulk_eps_init)
+
+    # ---- Bulk staging (Phase 8, Task 1) ----
+    # Re-slice / plane attachment / geometry overrides, or a strict
+    # no-op on the trivial state (single-bulk byte-identity anchor).
+    _apply_bulk_staging(base_section, state, view)
+
     view._ideal_gross_props_cache = None
     return view
 
@@ -1155,6 +1489,19 @@ class StagedDomainManager:
             base_section)
         self._cache: Dict[int, DomainBundle] = {}
 
+        # ---- Phase 8: bulk staging bookkeeping ----
+        # Curvature quantum for the plane terms of the capacity hash:
+        # QUANT_EPS / max(H, B), so the bucketing error on the
+        # extreme-fiber strain chi * D stays <= QUANT_EPS.  Computed
+        # once per manager (deterministic cache identity).
+        _D = max(float(getattr(base_section, "H", 0.0)),
+                 float(getattr(base_section, "B", 0.0)))
+        self._chi_quantum = (QUANT_EPS / _D) if _D > 0 else QUANT_EPS
+        self._n_zones = 1 + len(getattr(base_section,
+                                        "bulk_materials", []) or [])
+        self._staging_parents = _staging_parents(base_section)
+        self._mat_indices = getattr(base_section, "mat_indices", None)
+
     @staticmethod
     def _collect_union_materials(section) -> List[int]:
         r"""``id(material)`` per union element, ``rebars + tendons``."""
@@ -1165,8 +1512,16 @@ class StagedDomainManager:
 
     def hash_of(self, state: SectionState) -> int:
         """Capacity state hash for *state* against the base geometry."""
-        return state.capacity_hash(self._geom_sig,
-                                   self._union_materials)
+        # The curvature quantum is a deterministic property of the
+        # manager (set in __init__).  ``getattr`` keeps hash_of usable
+        # on partially-built managers (a documented test idiom builds
+        # them via ``__new__`` to hash states without ever building a
+        # domain); the fallback is capacity_hash's own documented
+        # default, and states without zone arrays never consume it.
+        return state.capacity_hash(
+            self._geom_sig,
+            self._union_materials,
+            chi_quantum=getattr(self, "_chi_quantum", QUANT_EPS))
 
     def initial_state(self) -> SectionState:
         r"""
@@ -1198,6 +1553,11 @@ class StagedDomainManager:
             # section that does not declare one, so all pre-existing
             # (non-prestress) runs are byte-identical.
             bulk_eps_init=float(getattr(sec, "bulk_eps_init", 0.0)),
+            # Phase 8: every zone active with zero locked-in planes —
+            # the trivial state, byte-identical to the pre-staging
+            # pipeline through the materialize_view fast path.
+            bulk_active=np.ones(self._n_zones, dtype=bool),
+            bulk_planes=np.zeros((self._n_zones, 3), dtype=float),
             label="stage0",
         )
 
@@ -1225,7 +1585,7 @@ class StagedDomainManager:
         self._cache[h] = bundle
         return h, bundle, True
 
-    def resolve_stages(self, stages):
+    def resolve_stages(self, stages, *, initially_inactive=None):
         r"""
         Derive the per-stage section states, capacity hashes and
         resistance bundles for a staged combination.
@@ -1243,8 +1603,34 @@ class StagedDomainManager:
             Each stage may carry a ``section_ops`` dict with keys
             ``activate`` / ``deactivate`` (lists of union element
             indices), ``eps_override`` (``{idx: eps}``), ``bulk_eps``
-            (float) and ``release`` (bool; whether deactivations are
-            force-released vs cleanly removed).  A stage may also carry
+            (float), ``release`` (bool; whether deactivations are
+            force-released vs cleanly removed) and — Phase 8 —
+            ``activate_bulk``
+            (``{zone_index: (eps0, chi_x, chi_y)}``: cast a bulk zone
+            with its **mandatory** locked-in datum plane).  A zone
+            targeted by any stage's ``activate_bulk`` starts
+            **inactive** (activation-declarative pre-scan: casting a
+            zone at stage *k* declares it not yet cast before *k*);
+            re-activating an active zone raises.  The keyword-only
+            ``initially_inactive`` (sequence of zone indices) marks
+            zones as not-yet-cast **without** an ``activate_bulk``
+            in this stage list — required by a timeline compiler
+            emitting a prefix anchored *before* a zone's casting
+            event (Task 2), where the pre-scan has nothing to see.
+            ``deactivate_bulk`` (demolition) raises
+            ``NotImplementedError`` — it needs the released-stress
+            resultant of a bulk region, the bulk analog of
+            :meth:`deactivation_actions`.
+
+            Two invariants are enforced per stage (fail-loud):
+            the **containment invariant**
+            :math:`\mathrm{active}[i] \Rightarrow
+            \mathrm{bulk\_active}[\mathrm{parent}(i)]` for every
+            union element (which subsumes "reject
+            stage(tendon) < stage(bulk)" and protects API-built
+            stages, not only YAML), and a **non-empty active bulk**
+            (a stage whose active bulk holds no fiber is
+            meaningless).  A stage may also carry
             ``time`` (cumulative days since stage 0), copied onto
             :attr:`SectionState.time_days` — **carry-through only**: it
             never enters :meth:`SectionState.capacity_hash` (time acts
@@ -1263,11 +1649,66 @@ class StagedDomainManager:
         """
         states, hashes, bundles, deact = [], [], [], []
         cur = self.initial_state()
+
+        # ---- Bulk-staging pre-scan (Phase 8) ---------------------
+        # A zone activated at some stage is, by declaration, not yet
+        # cast before it: collect every activate_bulk target and
+        # start those zones inactive.  Activation-declarative — no
+        # separate "initially inactive" list to keep in sync — and a
+        # double activation becomes a hard error below.
+        planned = set()
+        for z in (initially_inactive or ()):
+            zi = int(z)
+            if not (1 <= zi < self._n_zones):
+                raise ValueError(
+                    f"resolve_stages: initially_inactive zone index "
+                    f"{zi} out of range (section has "
+                    f"{self._n_zones} zone(s); zone 0 = 'base' is "
+                    f"always active)."
+                )
+            planned.add(zi)
+        for stage in stages:
+            ops = stage.get("section_ops", {}) or {}
+            if "deactivate_bulk" in ops:
+                raise NotImplementedError(
+                    "bulk deactivation not yet supported (demolition "
+                    "needs the released-stress resultant of a bulk "
+                    "region, the bulk analog of deactivation_actions)."
+                )
+            for z in (ops.get("activate_bulk") or {}):
+                zi = int(z)
+                if not (1 <= zi < self._n_zones):
+                    raise ValueError(
+                        f"resolve_stages: activate_bulk zone index "
+                        f"{zi} out of range (section has "
+                        f"{self._n_zones} zone(s); zone 0 = 'base' "
+                        f"is always active and not activatable)."
+                    )
+                planned.add(zi)
+        if planned:
+            cur.bulk_active[sorted(planned)] = False
+
         for k, stage in enumerate(stages):
             ops = stage.get("section_ops", {}) or {}
             deact_idx = list(ops.get("deactivate", []) or [])
             release = bool(ops.get("release", True))
 
+            if ops.get("activate_bulk"):
+                ab = ops["activate_bulk"]
+                already = [int(z) for z in ab
+                           if cur.bulk_active[int(z)]]
+                if already:
+                    raise ValueError(
+                        f"resolve_stages: stage {k} "
+                        f"('{stage.get('name', '')}') re-activates "
+                        f"already-active bulk zone(s) {already}. A "
+                        f"zone is cast exactly once; a second "
+                        f"activation would silently overwrite its "
+                        f"locked-in datum plane."
+                    )
+                cur = cur.with_bulk_activated(
+                    [int(z) for z in ab],
+                    {int(z): tuple(p) for z, p in ab.items()})
             if ops.get("activate"):
                 cur = cur.with_activated(ops["activate"])
             if deact_idx:
@@ -1282,6 +1723,43 @@ class StagedDomainManager:
             if "time" in stage:
                 cur.time_days = float(stage["time"])
             cur.stage_index = k
+
+            # ---- Containment invariant (Phase 8) -----------------
+            # active[i] => bulk_active[parent(i)] for every union
+            # element: nothing can be anchored in a zone that is not
+            # yet cast.  Checked after all of the stage's ops, so the
+            # order of ops within a stage is immaterial.
+            if cur.bulk_active is not None:
+                bad = np.nonzero(
+                    cur.active
+                    & ~cur.bulk_active[self._staging_parents])[0]
+                if bad.size:
+                    names = getattr(self.base_section,
+                                    "zone_names", None)
+                    i0 = int(bad[0])
+                    z0 = int(self._staging_parents[i0])
+                    zlab = (names[z0] if names and z0 < len(names)
+                            else str(z0))
+                    raise ValueError(
+                        f"resolve_stages: stage {k} "
+                        f"('{stage.get('name', '')}'): union element "
+                        f"{i0} is active but its staging-parent bulk "
+                        f"zone '{zlab}' (index {z0}) is inactive. "
+                        f"Deactivate the element until the zone is "
+                        f"cast (activate_bulk), then activate/grout "
+                        f"it."
+                    )
+                # ---- Non-empty active bulk -----------------------
+                if (self._mat_indices is not None
+                        and not bool(np.any(
+                            cur.bulk_active[self._mat_indices]))):
+                    raise ValueError(
+                        f"resolve_stages: stage {k} "
+                        f"('{stage.get('name', '')}'): the active "
+                        f"bulk is empty (no fiber belongs to an "
+                        f"active zone). A stage with no bulk "
+                        f"material is meaningless."
+                    )
 
             h, bundle, _built = self.get_bundle(cur)
             states.append(cur)

@@ -112,11 +112,23 @@ class GenericSection:
     mesh_method : ``'grid'`` or ``'triangle'``, optional
         Meshing strategy. Default ``'grid'``.
     bulk_materials : list of tuple, optional
-        Additional bulk material zones. Each tuple is
-        ``(Polygon, Material)``. Fibers inside each zone use
-        that zone's material instead of ``bulk_material``.
-        Zones are checked in order; first match wins.
-        Default empty (single-material section).
+        Additional bulk material zones.  Each entry is either
+        ``(Polygon, Material)`` or ``(Polygon, Material, name)``.
+        Fibers inside each zone use that zone's material instead of
+        ``bulk_material``.  Zones are checked in order; first match
+        wins.  Default empty (single-material section).
+
+        Zone *names* (Phase 8) are the stable staging references of
+        the ``section_ops`` ``activate_bulk`` schema.  Unnamed zones
+        (2-tuples, or 3-tuples with ``name=None``) are auto-named
+        ``zone_<k>`` with *k* the 1-based position in this list; the
+        implicit zone ``0`` (``bulk_material``) is named ``base`` and
+        is always active.  Names must be unique, non-numeric strings
+        distinct from ``'base'`` (a numeric name would be ambiguous
+        with the 1-based integer zone reference).  After construction
+        the normalized 2-tuples are stored back on this attribute and
+        the names are exposed on :attr:`zone_names`, index-aligned
+        with ``mat_indices`` values.
     n_grid_x : int or None, optional
         Explicit number of grid columns for the ``'grid'`` mesher.
         When set, overrides the ``mesh_size``-based computation
@@ -135,18 +147,17 @@ class GenericSection:
         :meth:`~gensec.solver.section_state.SectionState.capacity_hash`.
 
         .. note::
-           As of this phase the value is parsed, stored, hashed and
-           propagated to every materialized view, but the integrator
-           does **not yet** evaluate the bulk constitutive law at the
-           offset argument :math:`\varepsilon_{\text{sec}} +
-           \varepsilon_{b,0}`.  A non-zero ``bulk_eps_init`` therefore
-           shifts the domain *identity* (cache key) without yet shifting
-           the domain *geometry*.  Wiring the offset into
-           :meth:`~gensec.solver.integrator.FiberSolver.strain_field`
-           and the displaced-bulk subtractions is a deliberate,
-           separately-validated kernel change (losses/creep phase); see
-           the deliverable note.  Sections that never set this field are
-           unaffected.
+           Since the Phase-5 bulk-kernel patch the fiber integrator
+           **consumes** this offset: the bulk constitutive law is
+           evaluated at :math:`\varepsilon_{\text{sec}} +
+           \varepsilon_{b,0}` at the scalar, tangent and batch sites
+           (validated by ``run_bulk_prestrain_validation_new.py``), so
+           a non-zero value moves the resistance domain, not only the
+           cache identity.  As of Phase 8 the scalar is one term of
+           the general per-fiber offset field: it is added on top of
+           the per-zone locked-in datum planes carried by
+           :attr:`~gensec.solver.section_state.SectionState.bulk_planes`.
+           Sections that never set this field are unaffected.
 
     Attributes
     ----------
@@ -224,6 +235,11 @@ class GenericSection:
         self.B = maxx - minx
         self.H = maxy - miny
         self._bounds = (minx, miny, maxx, maxy)
+
+        # ---- Bulk zone normalization (Phase 8: named zones) ----
+        # Must precede meshing: ``_material_index`` (called per fiber
+        # during the mesh walk) unpacks the normalized 2-tuples.
+        self._normalize_bulk_zones()
 
         # ---- Mesh ----
         if self.mesh_method == "grid":
@@ -455,6 +471,143 @@ class GenericSection:
     #  Multi-material zone support
     # ------------------------------------------------------------------
 
+    def _normalize_bulk_zones(self):
+        r"""
+        Normalize ``bulk_materials`` entries and build the zone-name
+        table.
+
+        Accepts, per entry, either the legacy 2-tuple
+        ``(Polygon, Material)`` or the Phase-8 3-tuple
+        ``(Polygon, Material, name)``.  Entries are stored back as
+        2-tuples (the internal contract every downstream consumer
+        unpacks) and the names — auto-generated ``zone_<k>`` where not
+        given — are collected on :attr:`zone_names`, index-aligned
+        with ``mat_indices`` values (``zone_names[0] == 'base'``).
+
+        Raises
+        ------
+        ValueError
+            Malformed entry; non-string explicit name; the reserved
+            name ``'base'``; a purely numeric name (ambiguous with the
+            1-based integer zone reference of the staging schema); or
+            a duplicate name.
+        """
+        norm, names = [], []
+        for k, entry in enumerate(self.bulk_materials):
+            entry_t = tuple(entry)
+            if len(entry_t) == 2:
+                zone_poly, zone_mat = entry_t
+                name = None
+            elif len(entry_t) == 3:
+                zone_poly, zone_mat, name = entry_t
+            else:
+                raise ValueError(
+                    f"bulk_materials[{k}]: expected (Polygon, Material)"
+                    f" or (Polygon, Material, name), got a "
+                    f"{len(entry_t)}-tuple."
+                )
+            if name is None:
+                name = f"zone_{k + 1}"
+            elif not isinstance(name, str):
+                raise ValueError(
+                    f"bulk_materials[{k}]: zone name must be a string, "
+                    f"got {name!r}. Integer zone references are the "
+                    f"1-based positions in this list and need no name."
+                )
+            if name == "base":
+                raise ValueError(
+                    f"bulk_materials[{k}]: 'base' is the reserved name "
+                    f"of the implicit zone 0 (the primary "
+                    f"bulk_material) and cannot name an explicit zone."
+                )
+            stripped = name.strip().lstrip("+-")
+            if stripped.isdigit():
+                raise ValueError(
+                    f"bulk_materials[{k}]: zone name {name!r} is "
+                    f"purely numeric and would be ambiguous with the "
+                    f"1-based integer zone reference. Use a "
+                    f"non-numeric name."
+                )
+            if name in names:
+                raise ValueError(
+                    f"bulk_materials[{k}]: duplicate zone name "
+                    f"{name!r} — names used as staging references must "
+                    f"be unique."
+                )
+            norm.append((zone_poly, zone_mat))
+            names.append(name)
+        self.bulk_materials = norm
+        self.zone_names = ["base"] + names
+
+    @property
+    def n_zones(self):
+        r"""
+        Number of bulk zones, including the implicit base zone.
+
+        Returns
+        -------
+        int
+            ``1 + len(bulk_materials)`` — index-aligned with
+            ``mat_indices`` values and :attr:`zone_names`.
+        """
+        return 1 + len(self.bulk_materials)
+
+    def zone_index(self, ref):
+        r"""
+        Resolve a bulk-zone reference to its zone index.
+
+        The staging schema references a zone either by *name*
+        (:attr:`zone_names`; ``'base'`` is zone 0) or by its **1-based
+        integer position** in the ``bulk_materials`` list (``0`` is
+        the base zone).  Whether a given zone may be the target of an
+        operation (e.g. zone 0 is never activatable) is enforced by
+        the operation, not here.
+
+        Parameters
+        ----------
+        ref : str or int
+            Zone name or zone index.
+
+        Returns
+        -------
+        int
+            Zone index in ``[0, n_zones)``.
+
+        Raises
+        ------
+        ValueError
+            Unknown name, index out of range, or unsupported type.
+            Booleans are rejected explicitly (YAML ``true`` is a
+            :class:`bool`, an :class:`int` subclass — accepting it as
+            zone 1 would mask an input error).
+        """
+        if isinstance(ref, bool):
+            raise ValueError(
+                f"zone reference must be a zone name (str) or a zone "
+                f"index (int), got the boolean {ref!r}."
+            )
+        if isinstance(ref, str):
+            try:
+                return self.zone_names.index(ref)
+            except ValueError:
+                raise ValueError(
+                    f"unknown bulk zone name {ref!r}. Known zones: "
+                    f"{self.zone_names}."
+                ) from None
+        if isinstance(ref, (int, np.integer)):
+            zi = int(ref)
+            if 0 <= zi < self.n_zones:
+                return zi
+            raise ValueError(
+                f"bulk zone index {zi} out of range: the section has "
+                f"{self.n_zones} zone(s) (0 = 'base', 1..N = "
+                f"material_zones order)."
+            )
+        raise ValueError(
+            f"zone reference must be a zone name (str) or a zone "
+            f"index (int), got {ref!r}."
+        )
+
     def _material_index(self, x, y):
         r"""
         Determine the material index for a fiber at ``(x, y)``.
@@ -596,6 +749,8 @@ class GenericSection:
                 [self._material_index(t.x, t.y)
                  for t in self.tendons],
                 dtype=int)
+            self.staging_parent_tendon = \
+                self._resolve_tendon_parents()
         else:
             self.x_tendons = np.empty(0, dtype=float)
             self.y_tendons = np.empty(0, dtype=float)
@@ -603,6 +758,66 @@ class GenericSection:
             self.eps_init_tendons = np.empty(0, dtype=float)
             self.embedded_tendons = np.empty(0, dtype=bool)
             self.mat_indices_tendon = np.empty(0, dtype=int)
+            self.staging_parent_tendon = np.empty(0, dtype=int)
+
+    def _resolve_tendon_parents(self):
+        r"""
+        Resolve each tendon's **staging parent** zone.
+
+        The staging parent is the bulk zone whose activity gates the
+        tendon in the per-stage containment invariant
+
+        .. math::
+
+            \mathrm{active}[i] \;\Rightarrow\;
+            \mathrm{bulk\_active}[\,\mathrm{parent}(i)\,]
+
+        enforced by
+        :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`.
+        By default it is the geometric containing zone
+        (``mat_indices_tendon``).  A tendon may override it via
+        :attr:`~gensec.geometry.fiber.Tendon.parent` **only** when it
+        is not embedded: an embedded tendon physically displaces the
+        zone that contains it, and the displaced-bulk subtraction —
+        which always uses the geometric zone — would contradict a
+        different staging parent.  The override exists for
+        non-embedded elements whose structural anchorage belongs to a
+        zone other than the one their coordinates happen to fall in
+        (e.g. an external tendon routed across a void).
+
+        Returns
+        -------
+        numpy.ndarray of int
+            Per-tendon staging-parent zone index.
+
+        Raises
+        ------
+        ValueError
+            ``parent`` set on an embedded tendon (the message carries
+            the coordinates and both zones), or an unresolvable zone
+            reference (propagated from :meth:`zone_index`).
+        """
+        parents = self.mat_indices_tendon.copy()
+        for j, t in enumerate(self.tendons):
+            override = getattr(t, "parent", None)
+            if override is None:
+                continue
+            zi = self.zone_index(override)
+            if t.embedded:
+                geo = int(parents[j])
+                raise ValueError(
+                    f"Tendon {j} ('{t.name}') at "
+                    f"(x={self.x_tendons[j]:.1f}, "
+                    f"y={self.y_tendons[j]:.1f}): staging 'parent' "
+                    f"override ({override!r} -> zone "
+                    f"'{self.zone_names[zi]}') is legal only with "
+                    f"embedded=False. An embedded tendon displaces "
+                    f"the zone that geometrically contains it (zone "
+                    f"'{self.zone_names[geo]}'), and its staging "
+                    f"parent must coincide with it."
+                )
+            parents[j] = zi
+        return parents
 
     # ------------------------------------------------------------------
     #  Geometric properties

@@ -43,7 +43,7 @@ jacking → ``PrestressAction`` load (in the demand).
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 from ..materials.base import Material
 
 
@@ -198,12 +198,20 @@ class Tendon:
         bonded tendons only; ``bonded=False`` (unbonded/external) is a
         *load*, not an element, and must be modeled as a
         ``PrestressAction`` in the demand layer — so it raises here.
-    system : str, optional
-        Construction-system tag (``'pre'`` / ``'post'``).  **Stored only,
-        no behavioural effect.**  Retained for I/O round-tripping; per
-        the element-vs-load taxonomy the modeling behaviour is fixed by
-        ``bonded`` and by the element's placement, so this field is
-        redundant and slated for removal — do not branch on it.
+    parent : int or str or None, optional
+        **Staging-parent zone override** (Phase 8).  Default ``None``:
+        the staging parent is the bulk zone that geometrically
+        contains the tendon (``mat_indices_tendon``), which gates the
+        tendon in the per-stage containment invariant
+        :math:`\mathrm{active}[i] \Rightarrow
+        \mathrm{bulk\_active}[\mathrm{parent}(i)]`.  A zone name or
+        1-based zone index overrides the *staging* parent only — the
+        displaced-bulk subtraction keeps using the geometric zone —
+        and is legal **only** with ``embedded=False`` (enforced at
+        section assembly, where the zone map exists).  The former
+        ``system`` tag (``'pre'``/``'post'``) is retired: the
+        construction system is derived from the staging timeline
+        (ordering of stressing vs casting events), never declared.
     n_strands : int, optional
         Number of strands.  Default 1.  Used with ``area_strand`` to
         compute ``Ap``.
@@ -251,7 +259,7 @@ class Tendon:
     eps_pe: float = 0.0
     embedded: bool = True
     bonded: bool = True
-    system: str = "pre"
+    parent: Optional[Union[int, str]] = None
     n_strands: int = 1
     area_strand: float = 0.0
     name: Optional[str] = None

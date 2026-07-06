@@ -349,9 +349,26 @@ def load_yaml(filepath):
         # ---- New generic mode ----
         polygon = _build_polygon(sec_spec)
 
-        # Optional multi-material zones
+        # Optional multi-material zones.  Key validation is
+        # strict: an unknown key (a typo) must raise, never be
+        # silently ignored — it would change the model without
+        # telling (fail-loud policy, Phase-8 gap closure).
         bulk_materials = []
-        for zone_spec in sec_spec.get("material_zones", []):
+        _zone_keys = ("shape", "params", "material", "name")
+        for iz, zone_spec in enumerate(
+                sec_spec.get("material_zones", [])):
+            unknown = sorted(set(zone_spec) - set(_zone_keys))
+            if unknown:
+                raise ValueError(
+                    f"section.material_zones[{iz}]: unknown key(s) "
+                    f"{unknown}. Valid: {list(_zone_keys)}."
+                )
+            for req in ("shape", "material"):
+                if req not in zone_spec:
+                    raise ValueError(
+                        f"section.material_zones[{iz}]: missing "
+                        f"required key '{req}'."
+                    )
             zone_poly = _SHAPE_FACTORIES[
                 zone_spec["shape"].lower()](zone_spec.get("params", {}))
             zone_mat_name = zone_spec["material"]
@@ -359,7 +376,13 @@ def load_yaml(filepath):
                 raise ValueError(
                     f"Zone material '{zone_mat_name}' not found."
                 )
-            bulk_materials.append((zone_poly, materials[zone_mat_name]))
+            # 3-tuple (Polygon, Material, name).  name=None gets the
+            # positional auto-name zone_<k> at section construction
+            # (GenericSection._normalize_bulk_zones), which also
+            # enforces uniqueness and the reserved/numeric-name rules.
+            bulk_materials.append((zone_poly,
+                                   materials[zone_mat_name],
+                                   zone_spec.get("name")))
 
         section = GenericSection(
             polygon=polygon,
@@ -489,9 +512,14 @@ def _parse_tendons(sec_spec, materials):
             material: ps_1
             Ap: 1400
             eps_pe: 0.0065
-            system: post
             bonded: true
             name: T_bottom     # optional; usable as prestress_actions ref
+            # parent: <zone>   # staging-parent override; legal only
+            #                  # with embedded: false (Phase 8)
+
+    The retired ``system`` key ('pre'/'post') raises with a migration
+    message: the construction system is derived from the staging
+    timeline, never declared per tendon.
 
     Parameters
     ----------
@@ -506,6 +534,15 @@ def _parse_tendons(sec_spec, materials):
     """
     tendons = []
     for t_spec in sec_spec.get("tendons", []):
+        if "system" in t_spec:
+            raise ValueError(
+                f"Tendon spec (y={t_spec.get('y')!r}, "
+                f"name={t_spec.get('name')!r}): the 'system' key is "
+                f"retired. Pre-/post-tensioning is derived from the "
+                f"staging timeline (ordering of stressing vs casting "
+                f"events), never declared per tendon — remove the "
+                f"key."
+            )
         mat_name = t_spec["material"]
         if mat_name not in materials:
             raise ValueError(
@@ -517,7 +554,7 @@ def _parse_tendons(sec_spec, materials):
             Ap=float(t_spec.get("Ap", 0)),
             eps_pe=float(t_spec.get("eps_pe", 0.0)),
             x=float(t_spec["x"]) if "x" in t_spec else None,
-            system=t_spec.get("system", "pre"),
+            parent=t_spec.get("parent"),
             bonded=bool(t_spec.get("bonded", True)),
             embedded=bool(t_spec.get("embedded", True)),
             n_strands=int(t_spec.get("n_strands", 1)),
@@ -623,6 +660,8 @@ def _parse_combination(c_spec):
       stage, consumed by
       :meth:`~gensec.solver.section_state.StagedDomainManager.resolve_stages`:
       ``activate`` / ``deactivate`` (lists of element references),
+      ``activate_bulk`` (``{zone_ref: {eps0, chi_x, chi_y}}`` — cast a
+      bulk zone with its mandatory locked-in datum plane; Phase 8),
       ``eps_override`` (``{element_ref: eps}``, prestrain override [-]),
       ``bulk_eps`` (float [-]; consumed by the integrator as of
       Phase 5, see :func:`_parse_section_ops_spec`), ``release`` (bool, default
@@ -1067,7 +1106,8 @@ def _resolve_single_prestress_action(spec, section, x_ref, y_ref,
 #: a typo and raises (no-silent policy: a misspelled op must never be
 #: silently dropped — it would change the model without telling).
 _SECTION_OPS_KEYS = ("activate", "deactivate", "eps_override",
-                     "bulk_eps", "release")
+                     "bulk_eps", "release", "activate_bulk",
+                     "deactivate_bulk")
 
 
 def _parse_section_ops_spec(combo_name, stage_name, ops):
@@ -1153,6 +1193,54 @@ def _parse_section_ops_spec(combo_name, stage_name, ops):
         out["release"] = val
     if "bulk_eps" in ops:
         out["bulk_eps"] = float(ops["bulk_eps"])
+    if "deactivate_bulk" in ops:
+        raise NotImplementedError(
+            f"{where}: bulk deactivation not yet supported. "
+            f"Demolition requires the released-stress resultant of a "
+            f"bulk region (the bulk analog of deactivation_actions) — "
+            f"deferred beyond the prestress arc."
+        )
+    if "activate_bulk" in ops:
+        val = ops["activate_bulk"]
+        # Casting event: activate a bulk zone with its mandatory
+        # locked-in datum plane (eps0, chi_x, chi_y).  The datum is
+        # mandatory-explicit at engine level: writing zeros is legal,
+        # omitting a component is not (a defaulted datum would be a
+        # silent reconciliation — the with_grouted failure mode).
+        if not isinstance(val, dict) or not val:
+            raise ValueError(
+                f"{where}: section_ops 'activate_bulk' must be a "
+                f"non-empty mapping "
+                f"{{zone_ref: {{eps0, chi_x, chi_y}}}}, got {val!r}."
+            )
+        out_ab = {}
+        for zref, datum in val.items():
+            zwhere = f"{where}: activate_bulk[{zref!r}]"
+            if not isinstance(datum, dict):
+                raise ValueError(
+                    f"{zwhere}: datum must be a mapping with the "
+                    f"three keys eps0, chi_x, chi_y, got "
+                    f"{type(datum).__name__}."
+                )
+            unknown_d = sorted(set(datum)
+                               - {"eps0", "chi_x", "chi_y"})
+            if unknown_d:
+                raise ValueError(
+                    f"{zwhere}: unknown datum key(s) {unknown_d}. "
+                    f"Valid: ['eps0', 'chi_x', 'chi_y']."
+                )
+            missing = [kk for kk in ("eps0", "chi_x", "chi_y")
+                       if kk not in datum]
+            if missing:
+                raise ValueError(
+                    f"{zwhere}: missing datum key(s) {missing}. The "
+                    f"casting datum plane is mandatory-explicit at "
+                    f"engine level; write zeros explicitly if that "
+                    f"is the intent."
+                )
+            out_ab[zref] = {kk: float(datum[kk])
+                            for kk in ("eps0", "chi_x", "chi_y")}
+        out["activate_bulk"] = out_ab
     return out
 
 
@@ -1326,6 +1414,36 @@ def _resolve_section_ops(combinations, section):
                 ops["release"] = spec["release"]
             if "bulk_eps" in spec:
                 ops["bulk_eps"] = spec["bulk_eps"]
+            if "activate_bulk" in spec:
+                ab = {}
+                for zref, datum in spec["activate_bulk"].items():
+                    zwhere = f"{where}.activate_bulk"
+                    try:
+                        zi = section.zone_index(zref)
+                    except AttributeError:
+                        raise ValueError(
+                            f"{zwhere}: the section does not expose "
+                            f"bulk zones (no zone_index); "
+                            f"activate_bulk needs a GenericSection "
+                            f"with material_zones."
+                        ) from None
+                    except ValueError as exc:
+                        raise ValueError(f"{zwhere}: {exc}") from None
+                    if zi == 0:
+                        raise ValueError(
+                            f"{zwhere}: zone 0 ('base') is always "
+                            f"active and not activatable."
+                        )
+                    if zi in ab:
+                        raise ValueError(
+                            f"{zwhere}: zone {zref!r} resolves to "
+                            f"zone index {zi}, already targeted in "
+                            f"this stage (name/index double "
+                            f"reference)."
+                        )
+                    ab[zi] = (datum["eps0"], datum["chi_x"],
+                              datum["chi_y"])
+                ops["activate_bulk"] = ab
             stage["section_ops"] = ops
 
 

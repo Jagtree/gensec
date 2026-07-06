@@ -917,6 +917,29 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                 f"Stage '{name}': 'state' must be a SectionState, "
                 f"got {type(state).__name__}."
             )
+        # ---- Phase-8 bulk staging: deferred to Task 3 (C4) ----
+        # The staged fiber accumulation below is sized on the base
+        # fiber set and its transition taxonomy predates per-zone
+        # locked-in planes; accepting a bulk-staged state here would
+        # either crash on an accumulator shape mismatch or silently
+        # misattribute a plane change.  Fail loud until the composite
+        # SLS basis lands (decision fork C4).
+        _ba = getattr(state, "bulk_active", None)
+        if _ba is not None and not bool(np.all(_ba)):
+            raise NotImplementedError(
+                f"Stage '{name}': SLS verification across bulk "
+                f"staging (inactive zones) is not yet supported — "
+                f"composite SLS basis deferred (fork C4, Task 3)."
+            )
+        _bp = getattr(state, "bulk_planes", None)
+        if _bp is not None and bool(
+                np.any(np.asarray(_bp, dtype=float))):
+            raise NotImplementedError(
+                f"Stage '{name}': per-zone locked-in datum planes in "
+                f"the SLS staged walk are not yet supported — the "
+                f"stage-attribution taxonomy predates them (fork C4, "
+                f"Task 3)."
+            )
         resist = _resist_mask(state, n_union)
 
         # ---- Demand walk ----------------------------------------

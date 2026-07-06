@@ -128,12 +128,13 @@ class FiberSolver:
         # evaluated at (eps_section + eps_pe).
         self._bulk_eps_init = float(
             getattr(self.sec, 'bulk_eps_init', 0.0))
-        # Per-group offsets, index-aligned with self._bulk_groups.
-        # Today every group carries the single section-level value;
-        # differential shrinkage per zone will populate distinct
-        # values here WITHOUT touching the kernel sites again.
-        self._bulk_eps_by_group = [self._bulk_eps_init
-                                   for _ in self._bulk_groups]
+        # Per-fiber / per-element imposed-strain offset fields
+        # (Phase 8): the uniform scalar above plus the per-zone
+        # locked-in datum planes carried by the view
+        # (``bulk_planes_active``).  ``None`` on the fast path — the
+        # consumption sites then add the plain scalar, keeping the
+        # legacy numeric stream unchanged (never ``eb + zeros(n)``).
+        self._build_offset_fields()
 
     def _build_rebar_groups(self):
         r"""
@@ -258,6 +259,135 @@ class FiberSolver:
             idx = np.where(mat_indices == mi)[0]
             groups.append((all_mats[mi], idx))
         return groups
+
+    def _build_offset_fields(self):
+        r"""
+        Precompute the imposed-strain offset fields (Phase 8).
+
+        The bulk constitutive law of fiber *i* (zone
+        :math:`z(i) = \texttt{mat\_indices}[i]`) is evaluated at the
+        offset argument
+        :math:`\varepsilon_{\mathrm{sec},i} +
+        \varepsilon^{\mathrm{off}}_i` with
+
+        .. math::
+
+           \varepsilon^{\mathrm{off}}_i \;=\; \varepsilon_{b,0}
+           \; + \; \varepsilon_{0,z(i)}
+           \; + \; \chi_{x,z(i)}\,(y_i - y_{\mathrm{ref}})
+           \; - \; \chi_{y,z(i)}\,(x_i - x_{\mathrm{ref}})
+
+        — the exact sign convention of :meth:`strain_field` — where
+        :math:`\varepsilon_{b,0}` is the legacy uniform scalar and
+        :math:`(\varepsilon_{0,z}, \chi_{x,z}, \chi_{y,z})` the
+        per-zone locked-in plane from the view attribute
+        ``bulk_planes_active`` (attached by
+        :func:`~gensec.solver.section_state.materialize_view`).
+        Companion fields are evaluated at the rebar and tendon
+        coordinates for the displaced-bulk subtraction: the displaced
+        concrete of zone *z* carries zone *z*'s plane at the element
+        point, with the zone given by the **geometric** containment
+        (``mat_indices_rebar`` / ``mat_indices_tendon`` — a staging
+        ``parent`` override never touches the physics).
+
+        **Fast path**: with no planes (or all-zero planes) every field
+        is ``None`` and the consumption sites add the plain scalar
+        ``_bulk_eps_init`` — byte-identity with the pre-Phase-8
+        pipeline by construction (the NumPy instruction stream is
+        unchanged), not by IEEE luck.
+
+        Raises
+        ------
+        ValueError
+            ``bulk_planes_active`` present with a shape inconsistent
+            with the section's zone indices.
+        """
+        planes = getattr(self.sec, 'bulk_planes_active', None)
+        if planes is None or not np.any(
+                np.asarray(planes, dtype=float)):
+            self._bulk_eps_field = None
+            self._rebar_eps_field = None
+            self._tendon_eps_field = None
+            return
+        planes = np.asarray(planes, dtype=float)
+        mi = getattr(self.sec, 'mat_indices', None)
+        if mi is None:
+            mi = np.zeros(int(self.sec.n_fibers), dtype=int)
+        mi = np.asarray(mi, dtype=int)
+        mir = getattr(self.sec, 'mat_indices_rebar', None)
+        if mir is None:
+            mir = np.zeros(self._ly_rebar.size, dtype=int)
+        mir = np.asarray(mir, dtype=int)
+        mit = getattr(self.sec, 'mat_indices_tendon', None)
+        if mit is None:
+            mit = np.zeros(self._ly_tendon.size, dtype=int)
+        mit = np.asarray(mit, dtype=int)
+        zmax = max([int(mi.max(initial=0)),
+                    int(mir.max(initial=0)),
+                    int(mit.max(initial=0))])
+        if planes.ndim != 2 or planes.shape[1] != 3 \
+                or planes.shape[0] <= zmax:
+            raise ValueError(
+                f"bulk_planes_active has shape {planes.shape}; "
+                f"expected (n_zones >= {zmax + 1}, 3) for this "
+                f"section's zone indices."
+            )
+        eb0 = self._bulk_eps_init
+        self._bulk_eps_field = (eb0 + planes[mi, 0]
+                                + planes[mi, 1] * self._ly_bulk
+                                - planes[mi, 2] * self._lx_bulk)
+        self._rebar_eps_field = (eb0 + planes[mir, 0]
+                                 + planes[mir, 1] * self._ly_rebar
+                                 - planes[mir, 2] * self._lx_rebar)
+        self._tendon_eps_field = (eb0 + planes[mit, 0]
+                                  + planes[mit, 1] * self._ly_tendon
+                                  - planes[mit, 2] * self._lx_tendon)
+
+    def _bulk_offset(self, idx=None):
+        r"""
+        Imposed-strain offset at bulk fibers.
+
+        Parameters
+        ----------
+        idx : numpy.ndarray or None, optional
+            Fiber subset; ``None`` for all fibers.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            The scalar ``_bulk_eps_init`` on the fast path (fields
+            ``None``), else the per-fiber field (sliced).  Either
+            broadcasts transparently against 1-D and batch strain
+            arrays at every consumption site.
+        """
+        if self._bulk_eps_field is None:
+            return self._bulk_eps_init
+        return (self._bulk_eps_field if idx is None
+                else self._bulk_eps_field[idx])
+
+    def _rebar_offset(self, idx):
+        r"""
+        Displaced-bulk offset at rebar locations (fiber-subset *idx*).
+
+        Returns
+        -------
+        float or numpy.ndarray
+        """
+        if self._rebar_eps_field is None:
+            return self._bulk_eps_init
+        return self._rebar_eps_field[idx]
+
+    def _tendon_offset(self, idx):
+        r"""
+        Displaced-bulk offset at tendon locations (subset *idx*).
+
+        Returns
+        -------
+        float or numpy.ndarray
+        """
+        if self._tendon_eps_field is None:
+            return self._bulk_eps_init
+        return self._tendon_eps_field[idx]
 
     # ==================================================================
     #  Single-configuration integration
@@ -415,7 +545,7 @@ class FiberSolver:
                 e_tot_g = e_sec_g + eps_init[None, :]
                 s_tendon = mat.stress_array(e_tot_g)
                 s_bulk = bulk_mat.stress_array(
-                    e_sec_g + self._bulk_eps_init)
+                    e_sec_g + self._tendon_offset(idx))
                 s_net = s_tendon.copy()
                 s_net[:, emb] -= s_bulk[:, emb]
                 fa = s_net * a[None, :]
@@ -428,7 +558,7 @@ class FiberSolver:
             e_tot_g = e_sec_g + eps_init
             s_tendon = mat.stress_array(e_tot_g)
             s_bulk = bulk_mat.stress_array(
-                e_sec_g + self._bulk_eps_init)
+                e_sec_g + self._tendon_offset(idx))
             s_net = s_tendon.copy()
             s_net[emb] -= s_bulk[emb]
             fa = s_net * a
@@ -439,7 +569,7 @@ class FiberSolver:
             if want_tangent:
                 Et_tendon = mat.tangent_array(e_tot_g)
                 Et_bulk = bulk_mat.tangent_array(
-                    e_sec_g + self._bulk_eps_init)
+                    e_sec_g + self._tendon_offset(idx))
                 Et_net = Et_tendon.copy()
                 Et_net[emb] -= Et_bulk[emb]
                 EtA = Et_net * a
@@ -495,13 +625,13 @@ class FiberSolver:
         if not self._is_multi_material:
             # Fast path: single material on all fibers
             sb = self.sec.bulk_material.stress_array(
-                eb + self._bulk_eps_init)
+                eb + self._bulk_offset())
         else:
             # Multi-material: evaluate each group at its own offset
             sb = np.zeros_like(eb)
-            for (mat, idx), eps_b in zip(self._bulk_groups,
-                                         self._bulk_eps_by_group):
-                sb[idx] = mat.stress_array(eb[idx] + eps_b)
+            for mat, idx in self._bulk_groups:
+                sb[idx] = mat.stress_array(
+                    eb[idx] + self._bulk_offset(idx))
 
         fA = sb * self.sec.A_fibers
         N = float(np.sum(fA))
@@ -520,7 +650,7 @@ class FiberSolver:
             er_g = er[idx]
             s_rebar = mat.stress_array(er_g)
             sb_at_rebars = bulk_mat.stress_array(
-                er_g + self._bulk_eps_init)
+                er_g + self._rebar_offset(idx))
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
 
@@ -590,16 +720,16 @@ class FiberSolver:
         # ---- Bulk: stress and tangent ----
         if not self._is_multi_material:
             sb = self.sec.bulk_material.stress_array(
-                eb + self._bulk_eps_init)
+                eb + self._bulk_offset())
             Et_b = self.sec.bulk_material.tangent_array(
-                eb + self._bulk_eps_init)
+                eb + self._bulk_offset())
         else:
             sb = np.zeros_like(eb)
             Et_b = np.zeros_like(eb)
-            for (mat, idx), eps_b in zip(self._bulk_groups,
-                                         self._bulk_eps_by_group):
-                sb[idx] = mat.stress_array(eb[idx] + eps_b)
-                Et_b[idx] = mat.tangent_array(eb[idx] + eps_b)
+            for mat, idx in self._bulk_groups:
+                e_off = eb[idx] + self._bulk_offset(idx)
+                sb[idx] = mat.stress_array(e_off)
+                Et_b[idx] = mat.tangent_array(e_off)
 
         A = self.sec.A_fibers
         ly = self._ly_bulk
@@ -635,9 +765,9 @@ class FiberSolver:
             s_rebar = mat.stress_array(er_g)
             Et_rebar = mat.tangent_array(er_g)
             sb_at_rebars = bulk_mat.stress_array(
-                er_g + self._bulk_eps_init)
+                er_g + self._rebar_offset(idx))
             Et_bulk_r = bulk_mat.tangent_array(
-                er_g + self._bulk_eps_init)
+                er_g + self._rebar_offset(idx))
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
             ly_r = self._ly_rebar[idx]
@@ -724,12 +854,12 @@ class FiberSolver:
         # Bulk stresses: (n, n_fibers)
         if not self._is_multi_material:
             sb = self.sec.bulk_material.stress_array(
-                eb + self._bulk_eps_init)
+                eb + self._bulk_offset())
         else:
             sb = np.zeros_like(eb)
-            for (mat, idx), eps_b in zip(self._bulk_groups,
-                                         self._bulk_eps_by_group):
-                sb[:, idx] = mat.stress_array(eb[:, idx] + eps_b)
+            for mat, idx in self._bulk_groups:
+                sb[:, idx] = mat.stress_array(
+                    eb[:, idx] + self._bulk_offset(idx))
 
         fA = sb * self.sec.A_fibers[None, :]        # (n, n_fibers)
         N = fA.sum(axis=1)                           # (n,)
@@ -767,7 +897,7 @@ class FiberSolver:
             er_g = er[:, idx]
             s_rebar = mat.stress_array(er_g)
             sb_at_rebars = bulk_mat.stress_array(
-                er_g + self._bulk_eps_init)
+                er_g + self._rebar_offset(idx))
             a = self.sec.A_rebars[idx]
             emb = embedded[idx]
             ly_r = self._ly_rebar[idx]
@@ -1534,12 +1664,12 @@ class FiberSolver:
         # Bulk stresses
         if not self._is_multi_material:
             sb = self.sec.bulk_material.stress_array(
-                eb + self._bulk_eps_init)
+                eb + self._bulk_offset())
         else:
             sb = np.zeros_like(eb)
-            for (mat, idx), eps_b in zip(self._bulk_groups,
-                                         self._bulk_eps_by_group):
-                sb[idx] = mat.stress_array(eb[idx] + eps_b)
+            for mat, idx in self._bulk_groups:
+                sb[idx] = mat.stress_array(
+                    eb[idx] + self._bulk_offset(idx))
 
         # Rebar stresses (zone-aware grouping).
         sr_ideal_gross = np.zeros_like(er)
@@ -1548,7 +1678,7 @@ class FiberSolver:
             er_g = er[idx]
             sr_ideal_gross[idx] = mat.stress_array(er_g)
             sb_at_rebars[idx] = bulk_mat.stress_array(
-                er_g + self._bulk_eps_init)
+                er_g + self._rebar_offset(idx))
 
         # Net rebar stress (subtract zone-correct bulk at rebar location)
         sr_net = sr_ideal_gross.copy()
@@ -1593,7 +1723,7 @@ class FiberSolver:
                 et_tot[idx] = e_tot_g
                 sp[idx] = mat.stress_array(e_tot_g)
                 sb_at_tendons[idx] = bulk_mat.stress_array(
-                    e_sec_g + self._bulk_eps_init)
+                    e_sec_g + self._tendon_offset(idx))
             sp_net = sp.copy()
             emb_t = self.sec.embedded_tendons
             sp_net[emb_t] -= sb_at_tendons[emb_t]
@@ -1643,9 +1773,8 @@ class FiberSolver:
         """
         eb, er = self.strain_field(eps0, chi_x, chi_y)
 
-        for (mat, idx), eps_b in zip(self._bulk_groups,
-                                     self._bulk_eps_by_group):
-            e_group = eb[idx] + eps_b
+        for mat, idx in self._bulk_groups:
+            e_group = eb[idx] + self._bulk_offset(idx)
             if np.any(e_group < mat.eps_min) or \
                np.any(e_group > mat.eps_max):
                 return False

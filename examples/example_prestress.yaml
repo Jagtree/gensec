@@ -62,5 +62,4 @@ section:
       material: ps_strand
       Ap: 1400        # mm^2  (e.g. 10 strands * 140 mm^2)
       eps_pe: 0.0065  # effective prestrain after losses (tension +)
-      system: post    # 'pre' or 'post' (stored; no effect in Phase 1)
       bonded: true    # Phase 1 supports bonded only

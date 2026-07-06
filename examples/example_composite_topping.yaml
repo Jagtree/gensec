@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------------------
+# GenSec example -- composite section, engine-level bulk staging (Phase 8).
+#
+# A precast web (cast first) receives a topping (cast later) on the
+# already-deformed substrate.  The topping zone is *activated* at its
+# casting stage with an explicit locked-in datum plane: the negated
+# substrate strain plane at casting, so the topping is stress-free at
+# the instant it is cast (linear incremental == one-shot equivalence).
+#
+# Engine-level schema: the datum plane (eps0, chi_x, chi_y) is
+# mandatory-explicit -- zeros are legal but must be written.  The
+# timeline-owned automatic datum ('auto') is the Task-2 resolution
+# walk.  Zone references: 'base' (zone 0, always active) or the zone
+# 'name' declared in material_zones (or its 1-based position).
+# ---------------------------------------------------------------------------
+
+materials:
+  c_precast: {type: concrete_ec2_gen1, class: 'C45/55'}
+  c_topping: {type: concrete_ec2_gen1, class: 'C30/37'}
+  steel:     {type: steel, fyk: 450, gamma_s: 1.15}
+
+section:
+  shape: rect
+  params: {B: 600, H: 1400}       # composite envelope
+  bulk_material: c_precast         # zone 0 ('base'): the precast web
+  mesh_size: 50
+  material_zones:
+    - shape: custom                        # topping slab, y in [1200, 1400]
+      params:
+        exterior: [[0, 1200], [600, 1200], [600, 1400], [0, 1400]]
+      material: c_topping
+      name: topping
+  rebars:
+    - {x:  60, y:   60, As: 800, material: steel, name: A1}
+    - {x: 540, y:   60, As: 800, material: steel, name: A2}
+    - {x:  60, y: 1340, As: 400, material: steel, name: T1}
+    - {x: 540, y: 1340, As: 400, material: steel, name: T2}
+
+# Sign convention: compression-negative N; Mx = sum F * (y - y_ref),
+# so a sagging moment (tension at the bottom bars A1/A2) is NEGATIVE.
+demands:
+  - {name: G1, N_kN: -300, Mx_kNm: -220}   # self weight on the precast
+  - {name: G2, Mx_kNm: -180}               # topping weight + finishes
+  - {name: Q,  Mx_kNm: -260}               # service load on the composite
+
+combinations:
+  - name: staged-composite
+    stages:
+      - name: precast-alone
+        components: [{ref: G1, factor: 1.35}]
+        # T1/T2 sit in the topping: they cannot exist before their
+        # parent zone is cast (containment invariant).
+        section_ops: {deactivate: [T1, T2], release: false}
+      - name: cast-topping
+        components: [{ref: G2, factor: 1.35}]
+        section_ops:
+          # Engine-level explicit datum (illustrative values); with
+          # the Task-2 timeline this becomes datum: auto.
+          activate_bulk:
+            topping: {eps0: 2.1e-4, chi_x: 3.4e-7, chi_y: 0.0}
+          activate: [T1, T2]
+      - name: service
+        components: [{ref: Q, factor: 1.5}]
+
+output:
+  generate_mx_my: false

@@ -191,9 +191,10 @@ section:
   # --- Bulk pre-strain (resistance side) -----------------------------
   # Uniform locked-in bulk strain [-] (shrinkage/thermal), tension
   # positive.  Canonical key ``prestrain`` (alias ``eps_init``).
-  # PHASE-5 GUARD: the field is parsed, hashed and propagated, but
-  # the fiber kernel does not consume it yet -- a NON-ZERO value
-  # RAISES (no-silent-no-op) until the kernel change lands.
+  # Since the Phase-5 bulk-kernel patch the fiber kernel CONSUMES
+  # this offset (bulk law evaluated at eps_sec + prestrain); as of
+  # Phase 8 it is one term of the per-fiber offset field, on top of
+  # the per-zone locked-in datum planes of staged casting.
   # prestrain: 0.0
 
   # --- Rebars ---------------------------------------------------------
@@ -243,7 +244,10 @@ section:
   #   jacking strain sigma_p0/Ep for pre-tensioning.  The immediate
   #   elastic-shortening loss is NOT stored here: it emerges from
   #   section equilibrium (see solver/prestress_transfer.py).
-  # system: 'pre'/'post' -- stored only, no behavioural effect.
+  # parent: staging-parent zone override (name or 1-based zone
+  #   index); legal only with embedded: false.  The former 'system'
+  #   key ('pre'/'post') is retired: the construction system is
+  #   derived from the staging timeline, never declared per tendon.
   # name:   optional; referenceable both from ``prestress_actions``
   #         (ref -> tendon geometry) and from ``section_ops``.
   #
@@ -254,7 +258,6 @@ section:
   #     n_strands: 7
   #     area_strand: 150      # => Ap = 1050 mm2
   #     eps_pe: 0.00715       # ~= 1395 MPa / 195000 MPa
-  #     system: pre
   #     bonded: true          # (default; false raises by design)
   #     embedded: true
   #     name: T_bottom
