@@ -6,3 +6,5 @@ uv run run_posttension_shortening_validation.py
 uv run run_prestress_action_validation.py
 uv run run_prestress_uls_unbonded_validation.py
 uv run run_phase7_sls_validation.py
+uv run run_phase8_task1_validation.py
+uv run run_phase8_task2_validation.py

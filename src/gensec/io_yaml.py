@@ -441,6 +441,13 @@ def load_yaml(filepath):
     # ---- Output options (with v2.1 flag defaults) ----
     output_opts = _parse_output_flags(data.get("output", {}))
 
+    # Phase-8 Task-2: the single construction timeline (G-D1).
+    # Carried raw (a list of single-key event mappings) for
+    # gensec.solver.timeline.ConstructionTimeline.from_block. Absent
+    # -> None and the whole timeline machinery is inert (the run is
+    # byte-identical to the pre-Task-2 behaviour).
+    construction_history = data.get("construction_history")
+
     return {
         "materials": materials,
         "section": section,
@@ -448,6 +455,7 @@ def load_yaml(filepath):
         "combinations": combinations,
         "envelopes": envelopes,
         "output_options": output_opts,
+        "construction_history": construction_history,
     }
 
 
@@ -753,10 +761,19 @@ def _parse_combination(c_spec):
                     f"a stage of a staged combination, not on a simple "
                     f"(components-only) combination."
                 )
-        return {
+        combo = {
             "name": name,
             "components": _parse_component_list(c_spec["components"]),
         }
+        # Phase-8 Task-2: a components-based combination may anchor at
+        # a construction-timeline point. The anchor metadata is passed
+        # verbatim to the timeline compiler; its presence does not
+        # conflict with the components/stages exclusivity (the compiler
+        # emits the stages). Combinations without 'at' are unaffected.
+        for _tl_key in ("at", "history_factors", "gamma_P"):
+            if _tl_key in c_spec:
+                combo[_tl_key] = c_spec[_tl_key]
+        return combo
 
     # Staged.
     if "prestress_actions" in c_spec:

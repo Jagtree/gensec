@@ -1,0 +1,91 @@
+# =====================================================================
+#  GenSec — Phase-8 Task-2 example: composite staged construction driven
+#  by a single construction *timeline* (``construction_history``).
+#
+#  This is the timeline-driven successor to ``example_composite_topping``:
+#  the same precast + topping composite, but the casting datum of the
+#  topping is computed automatically (``datum: auto``) from the substrate
+#  state under the permanent construction loads locked in before the
+#  topping is cast (decision C3), instead of being hand-entered.
+#
+#  A 600 x 1400 precast web (base, zone 0) receives a 200 mm topping
+#  (zone 1) cast on top after the precast has taken its self-weight.
+#  Verification combinations anchor at named timeline *points*.
+# =====================================================================
+
+materials:
+  c_precast:
+    type: concrete
+    fck: 45.0
+    gamma_c: 1.5
+  c_topping:
+    type: concrete
+    fck: 30.0
+    gamma_c: 1.5
+  steel:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+
+section:
+  shape: rect
+  params:
+    B: 600
+    H: 1400
+  bulk_material: c_precast
+  mesh_size: 50
+  # Zone 1 = topping (top 200 mm).  Zone 0 = precast base (implicit).
+  material_zones:
+    - shape: custom
+      name: topping
+      material: c_topping
+      params:
+        exterior: [[0, 1200], [600, 1200], [600, 1400], [0, 1400]]
+  rebars:
+    - {name: A1, x: 60,  y: 60,   diameter: 26, material: steel}   # precast
+    - {name: A2, x: 540, y: 60,   diameter: 26, material: steel}   # precast
+    - {name: T1, x: 60,  y: 1340, diameter: 16, material: steel}   # topping
+    - {name: T2, x: 540, y: 1340, diameter: 16, material: steel}   # topping
+
+# Permanent actions only enter the timeline (variable actions are
+# combination components).  SI in the engine; kN / kN*m at the surface.
+demands:
+  - {name: G1, N_kN: -300, Mx_kNm: -220}   # precast self-weight (stage 0)
+  - {name: G2, Mx_kNm: -180}               # topping + superimposed dead
+  - {name: Q,  Mx_kNm: -260}               # variable (live)
+
+# ---------------------------------------------------------------------
+#  The one construction history (G-D1).  Ordered physical events plus
+#  named anchor points.  ``load`` references a permanent demand;
+#  ``cast`` activates a zone with a locked-in datum (``auto`` here).
+# ---------------------------------------------------------------------
+construction_history:
+  - load:  {demand: G1}                     # precast carries its own weight
+  - cast:  {zone: topping, datum: auto}     # topping cast; datum computed
+  - point: transfer                         # composite just formed
+  - load:  {demand: G2}                     # dead load on the composite
+  - point: service                          # in-service permanent state
+
+# ---------------------------------------------------------------------
+#  Verification combinations anchor at timeline points via ``at``.
+#  ``history_factors`` scales the permanent history loads (C1);
+#  omission of a prefix load warns.  ``gamma_P`` (favourable |
+#  unfavourable | float) applies only to demand-side prestress (none
+#  here).  ``at`` may be a list -> one run per point, governing = max.
+# ---------------------------------------------------------------------
+combinations:
+  - name: ULS_composite
+    at: [transfer, service]
+    history_factors: {G1: 1.35, G2: 1.35}
+    gamma_P: favourable
+    components:
+      - {ref: Q, factor: 1.5}
+
+  - name: SLS_char
+    at: service
+    history_factors: {G1: 1.0, G2: 1.0}
+    components:
+      - {ref: Q, factor: 1.0}
+
+output:
+  verification_top_k: 10
