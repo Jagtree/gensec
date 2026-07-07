@@ -108,6 +108,19 @@ def run_timeline(data: dict, *, n_points: int = 40,
             these through the ordinary per-combination path).
     """
     if not timeline_active(data):
+        # Fail loud: an ``at`` anchor with no timeline to anchor against is
+        # a modelling error, not a silently-ignored key.  (Without this
+        # guard the combination would fall through to the legacy path and
+        # its ``at`` would be dropped — exactly the kind of quiet
+        # mismodel the project forbids.)
+        orphan = [c.get("name") for c in data.get("combinations", [])
+                  if c.get("at") is not None]
+        if orphan:
+            raise ValueError(
+                f"combination(s) {orphan} declare an 'at' anchor but the "
+                f"model has no 'construction_history' to anchor against. "
+                f"Add a construction_history, or remove the anchor."
+            )
         return None
 
     section = data["section"]

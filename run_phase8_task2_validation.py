@@ -241,6 +241,75 @@ def axis_A3_gamma_P() -> bool:
     return ok
 
 
+def axis_A6_prestress_equivalence() -> bool:
+    r"""
+    A6 — a compiled ``stress`` → ``grout`` sequence is byte-equivalent to
+    the post-tensioning driver (``10_3`` §5 axis-1).
+
+    The reconciled locked-in strain the timeline bakes into the grout
+    stage is compared against
+    :func:`gensec.solver.posttension.grout` applied to
+    :func:`gensec.solver.posttension.solve_posttension_sequence` — the
+    timeline **reuses** exactly those, so agreement is to machine zero.
+    Also asserts the resolved grout state is ``active & bonded`` at that
+    strain, and that the tendon's demand-side action is cancelled at
+    grout (the single-side invariant: cumulative demand nets to zero).
+    """
+    from gensec.solver.posttension import (
+        solve_posttension_sequence, grout)
+    from gensec.solver.timeline import (
+        _tendon_local_index, _tendon_union_index)
+    from gensec.solver.section_state import StagedDomainManager
+    from gensec.solver.check import VerificationEngine
+
+    data = load_yaml("examples\example_prestress.yaml")
+    section = data["section"]
+    T, SIGMA = "tendon_0", 1400.0
+
+    tl = ConstructionTimeline.from_block([
+        {"stress": {"tendons": [T], "sigma_p0": SIGMA}},
+        {"grout": {"tendons": [T]}},
+        {"point": "after"}])
+    res = tl.resolve(section, {})
+    w1 = res.grout_eps_init[T]
+
+    li = _tendon_local_index(section, T)
+    ui = _tendon_union_index(section, T)
+    sig = [0.0] * len(section.tendons)
+    sig[li] = SIGMA
+    result = solve_posttension_sequence(
+        section, sigma_p0=sig, order=[li], base_N=0.0, base_Mx=0.0,
+        base_My=0.0)
+    w2 = grout(section, result, indices=[li]).report[
+        "reconciliation"][0]["eps_init"]
+    byte_eq = abs(w1 - w2) <= 1e-15
+
+    _pt, stages, _i = tl.compile_combination(
+        {"name": "c", "at": "after", "components": []}, res, section, {})[0]
+    mgr = StagedDomainManager(section, biaxial=False,
+                              gen_kwargs={"n_points": 40})
+    states, _h, _b, _d = mgr.resolve_stages(stages)
+    f = states[-1]
+    state_ok = (int(f.active[ui]) == 1 and int(f.bonded[ui]) == 1
+                and abs(f.eps_init[ui] - w2) <= 1e-15)
+
+    nm = NMDiagram(FiberSolver(section))
+    eng = VerificationEngine(nm.generate(n_points=40), nm, {"eta_norm": True},
+                             n_points=40, staged_manager=mgr)
+    r = eng.check_combination({"name": "c", "stages": stages}, {})
+    cum = r["stages"][-1]["cumulative"]
+    single_side = (abs(cum["N_kN"]) < 1e-6 and abs(cum["Mx_kNm"]) < 1e-6
+                   and abs(cum["My_kNm"]) < 1e-6)
+
+    ok = byte_eq and state_ok and single_side
+    print(f"  A6 byte-equiv eps_init: timeline={w1:.6e} driver={w2:.6e} "
+          f"|Δ|={abs(w1-w2):.1e}")
+    print(f"  A6 grout state active&bonded @ reconciled strain: {state_ok}")
+    print(f"  A6 single-side (demand nets to 0 after grout): {single_side} "
+          f"-> {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
 # -- small geometry helpers (independent of timeline internals) -------------
 
 def _parents(section):
@@ -272,6 +341,8 @@ def main() -> int:
         "A3 warn-on-omission": axis_A3_warn_on_omission(section, ddb),
         "A3 gamma_P resolution": axis_A3_gamma_P(),
         "A4 fail-loud inventory": axis_A4_fail_loud(section, ddb),
+        "A6 prestress byte-equivalence (stress→grout)":
+            axis_A6_prestress_equivalence(),
     }
     print("=" * 64)
     for name, ok in results.items():

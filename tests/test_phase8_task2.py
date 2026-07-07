@@ -41,6 +41,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _EXAMPLE = os.path.join(_HERE, "..", "examples\\example_composite_topping.yaml")
 if not os.path.exists(_EXAMPLE):
     _EXAMPLE = "example_composite_topping.yaml"
+_PRESTRESS = os.path.join(_HERE, "..", "examples\\example_prestress.yaml")
+if not os.path.exists(_PRESTRESS):
+    _PRESTRESS = "example_prestress.yaml"
 
 
 def _load():
@@ -294,6 +297,76 @@ class TestFactorsAndReduction(unittest.TestCase):
         self.assertEqual(gov["governing_point"], "t2")
         self.assertEqual(gov["eta_governing"], 1.1)
         self.assertFalse(gov["verified"])
+
+
+class TestPrestressReconciliation(unittest.TestCase):
+    r"""Task-2 prestress closure: stress → grout reconciliation reuse."""
+
+    def setUp(self):
+        data = load_yaml(_PRESTRESS)
+        self.section = data["section"]
+        self.T = "tendon_0"
+        self.sigma = 1400.0
+        self.tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": [self.T], "sigma_p0": self.sigma}},
+            {"grout": {"tendons": [self.T]}},
+            {"point": "after"}])
+        self.res = self.tl.resolve(self.section, {})
+
+    def _driver_eps_init(self):
+        from gensec.solver.posttension import (
+            solve_posttension_sequence, grout)
+        from gensec.solver.timeline import _tendon_local_index
+        li = _tendon_local_index(self.section, self.T)
+        sig = [0.0] * len(self.section.tendons)
+        sig[li] = self.sigma
+        result = solve_posttension_sequence(
+            self.section, sigma_p0=sig, order=[li],
+            base_N=0.0, base_Mx=0.0, base_My=0.0)
+        return grout(self.section, result, indices=[li]).report[
+            "reconciliation"][0]["eps_init"]
+
+    def test_reconciled_eps_init_byte_equivalent_to_driver(self):
+        self.assertAlmostEqual(
+            self.res.grout_eps_init[self.T], self._driver_eps_init(),
+            places=15)
+
+    def test_compiled_grout_state_active_bonded_at_strain(self):
+        from gensec.solver.timeline import _tendon_union_index
+        ui = _tendon_union_index(self.section, self.T)
+        _pt, stages, _i = self.tl.compile_combination(
+            {"name": "c", "at": "after", "components": []},
+            self.res, self.section, {})[0]
+        mgr = StagedDomainManager(self.section, biaxial=False,
+                                  gen_kwargs={"n_points": 40})
+        states, _h, _b, _d = mgr.resolve_stages(stages)
+        f = states[-1]
+        self.assertEqual(int(f.active[ui]), 1)
+        self.assertEqual(int(f.bonded[ui]), 1)
+        self.assertAlmostEqual(f.eps_init[ui], self._driver_eps_init(),
+                               places=15)
+
+    def test_single_side_invariant_demand_nets_to_zero(self):
+        _pt, stages, _i = self.tl.compile_combination(
+            {"name": "c", "at": "after", "components": []},
+            self.res, self.section, {})[0]
+        mgr = StagedDomainManager(self.section, biaxial=False,
+                                  gen_kwargs={"n_points": 40})
+        nm = NMDiagram(FiberSolver(self.section))
+        eng = VerificationEngine(nm.generate(n_points=40), nm,
+                                 {"eta_norm": True}, n_points=40,
+                                 staged_manager=mgr)
+        r = eng.check_combination({"name": "c", "stages": stages}, {})
+        cum = r["stages"][-1]["cumulative"]
+        self.assertAlmostEqual(cum["N_kN"], 0.0, places=6)
+        self.assertAlmostEqual(cum["Mx_kNm"], 0.0, places=6)
+        self.assertAlmostEqual(cum["My_kNm"], 0.0, places=6)
+
+    def test_grout_without_stress_raises(self):
+        tl = ConstructionTimeline.from_block([
+            {"grout": {"tendons": [self.T]}}, {"point": "p"}])
+        with self.assertRaises(ValueError):
+            tl.resolve(self.section, {})
 
 
 if __name__ == "__main__":

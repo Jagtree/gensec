@@ -316,6 +316,34 @@ def _run(args):
             demand_results,
             os.path.join(outdir, "demand_summary.json"))
 
+    # ==============================================================
+    #  Phase-8 Task-2: construction-timeline driver (single opt-in gate)
+    # ==============================================================
+    # When the model carries a construction_history, one timeline is
+    # built and resolved once; every combination that declares an
+    # 'at' anchor is compiled against it and verified per anchor
+    # point, the governing point being the transparent maximum (C2).
+    # Anchored combinations are removed from the legacy loop below.
+    # Without a timeline the call returns None and this block is inert
+    # (byte-identical to the pre-Task-2 run); an 'at' anchor with no
+    # timeline raises inside the driver (fail-loud).
+    from .solver.timeline_run import run_timeline
+    timeline_out = run_timeline(data, n_points=args.n_points,
+                                biaxial=(nm_3d is not None))
+    if timeline_out is not None:
+        print("\n  Construction timeline active: verifying anchored "
+              "combinations per point.")
+        for _cname, _gov in timeline_out["anchored"].items():
+            _status = "OK" if _gov["verified"] else "NOT VERIFIED"
+            print(f"    {_cname}: governing point "
+                  f"'{_gov['governing_point']}' "
+                  f"eta={_gov['eta_governing']} ({_status})")
+            for _pt, _r in _gov["per_point"].items():
+                print(f"        {_pt}: eta={_r.get('eta_governing')}")
+        _anchored_names = set(timeline_out["anchored"])
+        combinations = [c for c in combinations
+                        if c.get("name") not in _anchored_names]
+
     # --- 2. Combination verification ---
     combination_results = []
     combination_results_db = {}

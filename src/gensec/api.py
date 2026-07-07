@@ -479,6 +479,20 @@ class _Session:
 
         demand_results = engine.check_demands(demands) if demands else []
 
+        # Phase-8 Task-2: construction-timeline driver (same opt-in
+        # gate as the CLI). Anchored combinations are verified per
+        # point and dropped from the legacy loop; without a
+        # construction_history the call is inert (returns None). An
+        # 'at' anchor with no timeline raises inside the driver.
+        from .solver.timeline_run import run_timeline
+        timeline_results: dict = {}
+        _tl = run_timeline(data, n_points=n_points, biaxial=False)
+        if _tl is not None:
+            timeline_results = _tl["anchored"]
+            _anchored = set(timeline_results)
+            combinations = [c for c in combinations
+                            if c.get("name") not in _anchored]
+
         combination_results: list[dict] = []
         combination_db: dict[str, dict] = {}
         for combo in combinations:
@@ -514,6 +528,7 @@ class _Session:
                 demands=demand_results,
                 combinations=combination_results,
                 envelopes=envelope_results,
+                timeline=timeline_results,
                 engine=engine,
             ),
         )

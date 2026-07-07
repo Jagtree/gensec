@@ -420,21 +420,30 @@ class ConstructionTimeline:
         grouted: set = set()
         stressed: Dict[str, int] = {}  # tendon -> event index of stress
         pre_post: Dict[str, str] = {}
+        # reconciled grouting strain per tendon, and the jacking stress
+        # declared at each ``stress`` event (Task-2 prestress closure).
+        grout_eps_init: Dict[str, float] = {}
+        stress_sigma: Dict[str, float] = {}
 
         # Elements (rebars/tendons) contained in castable zones do not
-        # exist before their zone is cast.  They are deactivated at the
-        # first stage (``release: False`` — nothing to release, they are
-        # not present yet) and activated at their zone's ``cast`` event;
-        # otherwise the engine's containment guard rejects the stage
-        # (an element active while its staging-parent zone is inactive).
+        # exist before their zone is cast; and a *post-tensioned* tendon
+        # (one that is grouted somewhere on the timeline) does not exist
+        # in the resistance domain before it is grouted — it is a
+        # demand-side load until then.  Both are deactivated at the first
+        # stage (``release: False`` — nothing to release, not present
+        # yet) and (re)activated at their event (``cast`` for a zone
+        # element, ``grout`` for a post-tensioned tendon); otherwise the
+        # engine's containment / single-side guards reject the stage.
         nonbase = _nonbase_elements(section)
+        pt_tendons = _posttension_union_indices(self, section)
+        initial_off = sorted(set(nonbase) | set(pt_tendons))
 
         def _emit(stage: dict) -> None:
             stage_prefix.append(stage)
-            if len(stage_prefix) == 1 and nonbase:
+            if len(stage_prefix) == 1 and initial_off:
                 ops = stage_prefix[0].setdefault("section_ops", {})
                 ops["deactivate"] = sorted(set(ops.get("deactivate", []))
-                                           | set(nonbase))
+                                           | set(initial_off))
                 ops.setdefault("release", False)
 
         for ev in self.events:
@@ -452,8 +461,11 @@ class ConstructionTimeline:
                        "components": [{"ref": dref, "factor": 1.0}]})
 
             elif ev.kind == "stress":
+                sigma_p0 = ev.payload.get("sigma_p0")
                 for t in _event_tendon_refs(ev):
                     stressed[t] = ev.index
+                    if sigma_p0 is not None:
+                        stress_sigma[t] = float(sigma_p0)
                     parent = _tendon_parent_zone(section, t)
                     # pre/post derived from whether the parent is cast
                     if parent in cast_so_far or parent == 0:
@@ -463,11 +475,28 @@ class ConstructionTimeline:
                 _emit({"name": f"stress[{ev.index}]", "components": []})
 
             elif ev.kind == "grout":
-                for t in _event_tendon_refs(ev):
-                    if t in grouted:
-                        continue
-                    grouted.add(t)
-                _emit({"name": f"grout[{ev.index}]", "components": []})
+                grout_now = [t for t in _event_tendon_refs(ev)
+                             if t not in grouted]
+                eps_map = self._reconcile_grout(
+                    section, grout_now, stress_sigma,
+                    (cumN, cumMx, cumMy), ev)
+                grout_eps_init.update(eps_map)
+                grouted.update(grout_now)
+                # Emit the grouting into the walk's stage prefix too, so a
+                # later ``cast`` computes its auto datum on a substrate
+                # that already carries the bonded tendon at its reconciled
+                # strain.  ``activate`` + ``eps_override`` reproduces
+                # ``SectionState.with_grouted`` exactly for a tendon whose
+                # intrinsic ``bonded`` flag is already set (the ungrouted
+                # phase is ``active=False``); the only thing the dedicated
+                # primitive adds is atomicity of the single-side invariant.
+                gops = {"activate": [_tendon_union_index(section, t)
+                                     for t in grout_now],
+                        "eps_override": {
+                            _tendon_union_index(section, t): eps_map[t]
+                            for t in grout_now if t in eps_map}}
+                _emit({"name": f"grout[{ev.index}]", "components": [],
+                       "section_ops": gops})
 
             elif ev.kind == "interval":
                 days = ev.payload.get("days", ev.payload.get("value"))
@@ -500,12 +529,15 @@ class ConstructionTimeline:
                        "components": [],
                        "section_ops": {
                            "activate_bulk": {zi: datums[zi]},
-                           "activate": _zone_elements(section, zi)}})
+                           "activate": [e for e in
+                                        _zone_elements(section, zi)
+                                        if e not in pt_tendons]}})
 
         return TimelineResolution(
             datums=datums, explicit_datums=explicit,
             pre_post=pre_post, grouted=frozenset(grouted),
-            stressed=dict(stressed))
+            stressed=dict(stressed), grout_eps_init=grout_eps_init,
+            stress_sigma=stress_sigma)
 
     def _auto_datum(self, mgr, stage_prefix, cast_so_far, zi, demand,
                     ev, tol, max_iter) -> Tuple[float, float, float]:
@@ -601,6 +633,116 @@ class ConstructionTimeline:
                 f"carry its own construction loads is a real finding."
             )
         return (-sol["eps0"], -sol["chi_x"], -sol["chi_y"])
+
+    # -- prestress reconciliation (driver reuse) ----------------------
+
+    def _reconcile_grout(self, section, grout_now, stress_sigma, base_demand,
+                         ev) -> Dict[str, float]:
+        r"""
+        Reconciled locked-in strain for the tendons grouted at *ev*.
+
+        **Reuses** the sectional post-tensioning driver rather than
+        reimplementing the elastic-shortening / reconciliation algebra:
+
+        1. :func:`gensec.solver.posttension.solve_posttension_sequence`
+           re-runs the stressing sequence on the current hardened bulk
+           under the cumulative characteristic *base_demand* (the
+           sollecitazione present at grouting, applied debit-free), and
+           returns per-tendon :math:`\varepsilon_{pe,\text{eff}}` (the
+           post-loss jacking strain) and :math:`\varepsilon_{\text{sec,
+           grout}}` (the concrete strain at each tendon at grout).
+        2. :func:`gensec.solver.posttension.grout` forms the reconciled
+           datum
+
+           .. math::
+
+               \varepsilon_{\text{init},j}
+                   = \varepsilon_{pe,\text{eff},j}
+                     - \varepsilon_{\text{sec,grout},j},
+
+           so that the bonded tendon evaluates
+           :math:`\sigma_p(\varepsilon_{\text{sec,grout},j}
+           + \varepsilon_{\text{init},j})
+           = \sigma_p(\varepsilon_{pe,\text{eff},j})` — the post-loss
+           effective stress at the grouting strain datum.
+
+        The compiler then lowers this to an ``eps_override`` on the grout
+        stage, so a compiled ``stress`` → ``grout`` sequence is
+        byte-equivalent to calling the driver directly (``10_3`` §5
+        axis-1).
+
+        Scope: a single-bulk post-tensioning where every grouted tendon
+        was stressed **before** any grouting (the standard "stress all,
+        then grout all").  Grouting in stages (a second ``grout`` after a
+        prior one) is the intra-sequence bonded-stiffness case and is
+        **not** modelled — it raises, pointing at
+        ``6_8-WARNING_intra_sequence_bonded.md``.
+
+        Parameters
+        ----------
+        section : GenericSection
+        grout_now : list of str
+            Tendon names grouted at this event (already de-duplicated
+            against previously grouted tendons).
+        stress_sigma : dict
+            ``{tendon_name: sigma_p0}`` accumulated up to this event.
+        base_demand : tuple of float
+            Cumulative characteristic ``(N, Mx, My)`` at the grout event
+            [N, N·mm].
+        ev : TimelineEvent
+            The grout event (for error messages).
+
+        Returns
+        -------
+        dict
+            ``{tendon_name: eps_init}`` for the tendons grouted here.
+
+        Raises
+        ------
+        ValueError
+            A tendon is grouted without a prior ``stress`` (no jacking
+            stress to reconcile).
+        NotImplementedError
+            Staged grouting (a prior grout already bonded tendons) — the
+            intra-sequence case.
+        """
+        if not grout_now:
+            return {}
+
+        missing = [t for t in grout_now if t not in stress_sigma]
+        if missing:
+            raise ValueError(
+                f"construction_history[{ev.index}]: tendon(s) {missing} "
+                f"are grouted but were never stressed (no 'sigma_p0' to "
+                f"reconcile). A tendon must be stressed before it is "
+                f"grouted."
+            )
+
+        from .posttension import solve_posttension_sequence, grout
+
+        tendons = list(getattr(section, "tendons", []) or [])
+        nt = len(tendons)
+        # sigma_p0 aligned with section.tendons; stressing order = the
+        # order the stress events appeared (dict preserves it).
+        sigma_arr = [0.0] * nt
+        order = []
+        for t, s in stress_sigma.items():
+            li = _tendon_local_index(section, t)
+            sigma_arr[li] = float(s)
+            order.append(li)
+
+        bN, bMx, bMy = base_demand
+        result = solve_posttension_sequence(
+            section, sigma_p0=sigma_arr, order=order,
+            base_N=bN, base_Mx=bMx, base_My=bMy)
+
+        grout_local = [_tendon_local_index(section, t) for t in grout_now]
+        gres = grout(section, result, indices=grout_local)
+
+        by_local = {rec["tendon"]: rec["eps_init"]
+                    for rec in gres.report["reconciliation"]}
+        return {t: float(by_local[_tendon_local_index(section, t)])
+                for t in grout_now}
 
     # -- compiler ------------------------------------------------------
 
@@ -708,14 +850,16 @@ class ConstructionTimeline:
         """
         zone_names = list(getattr(section, "zone_names", []) or [])
         nonbase = _nonbase_elements(section)
+        pt_tendons = _posttension_union_indices(self, section)
+        initial_off = sorted(set(nonbase) | set(pt_tendons))
         stages: List[dict] = []
 
         def _emit(stage: dict) -> None:
             stages.append(stage)
-            if len(stages) == 1 and nonbase:
+            if len(stages) == 1 and initial_off:
                 ops = stages[0].setdefault("section_ops", {})
                 ops["deactivate"] = sorted(set(ops.get("deactivate", []))
-                                           | set(nonbase))
+                                           | set(initial_off))
                 ops.setdefault("release", False)
 
         for ev in prefix:
@@ -731,7 +875,9 @@ class ConstructionTimeline:
                        "components": [],
                        "section_ops": {
                            "activate_bulk": {zi: resolution.datums[zi]},
-                           "activate": _zone_elements(section, zi)}})
+                           "activate": [e for e in
+                                        _zone_elements(section, zi)
+                                        if e not in pt_tendons]}})
 
             elif ev.kind == "stress":
                 acts = self._stress_actions(
@@ -740,9 +886,10 @@ class ConstructionTimeline:
                        "_prestress_actions": acts})
 
             elif ev.kind == "grout":
-                ops = self._grout_ops(ev, resolution, section)
+                ops, drop = self._grout_stage(
+                    ev, resolution, section, gamma_P)
                 _emit({"name": f"grout[{ev.index}]", "components": [],
-                       "section_ops": ops})
+                       "section_ops": ops, "_prestress_actions": drop})
 
             elif ev.kind == "interval":
                 days = ev.payload.get("days", ev.payload.get("value"))
@@ -785,26 +932,57 @@ class ConstructionTimeline:
             acts.append(act)
         return acts
 
-    def _grout_ops(self, ev, resolution, section) -> dict:
+    def _grout_stage(self, ev, resolution, section, gamma_P):
         r"""
-        Emit the capacity-side op that grouts a tendon.
+        Emit the grouting stage: activate + reconciled ``eps_init``, and
+        cancel the tendon's demand-side action (single-side invariant).
 
-        Grouting flips the tendon to ``active & bonded`` with its
-        reconciled ``eps_init`` (the grouting datum = ``eps_pe`` at
-        grout).  In the resolved stage schema this is an ``activate`` of
-        the tendon union index plus an ``eps_override`` setting the
-        reconciled strain — reusing
-        :func:`gensec.solver.posttension.grout`'s reconciliation on the
-        real repo.  The reconciled strain is a resolution-walk product;
-        this method wires it into the op.
+        Grouting flips each tendon to ``active & bonded`` at its
+        reconciled locked-in strain (``resolution.grout_eps_init``,
+        produced by :meth:`_reconcile_grout` via driver reuse).  In the
+        resolved-stage schema this is an ``activate`` of the tendon union
+        index plus an ``eps_override`` — arraywise identical to
+        :meth:`SectionState.with_grouted` for a tendon whose intrinsic
+        ``bonded`` flag is set (the dedicated primitive only adds
+        atomicity).
+
+        The same stage must **remove** the tendon's demand-side
+        :class:`PrestressAction` — the one the ``stress`` stage added —
+        because after grouting the tendon is a resistance element, not a
+        load.  ``_check_staged`` accumulates ``_prestress_actions``
+        cumulatively, so the negative action here nets the tendon's demand
+        contribution to zero from this stage on.  That is the §F
+        single-side invariant (``GroutResult.dropped_actions``) made
+        explicit; :math:`\gamma_P` is applied to the drop exactly as it
+        was to the stressing load, so the cancellation is exact.
+
+        Returns
+        -------
+        tuple
+            ``(section_ops, drop_actions)`` — ``section_ops`` is
+            ``{"activate": [...], "eps_override": {...}}``;
+            ``drop_actions`` is the list of cancelling
+            :class:`PrestressAction` for the grouted tendons.
         """
-        # Placeholder wiring: the reconciled eps_init comes from the
-        # resolution walk's posttension driver.  Full driver reuse is
-        # the axis-1 integration completed on the repo (see recap 10_4
-        # §status).  Here we emit the structural op with the union index.
-        activate = [_tendon_union_index(section, t)
-                    for t in _event_tendon_refs(ev)]
-        return {"activate": activate}
+        activate: List[int] = []
+        eps_override: Dict[int, float] = {}
+        drop: List[PrestressAction] = []
+        for t in _event_tendon_refs(ev):
+            ui = _tendon_union_index(section, t)
+            activate.append(ui)
+            if t in resolution.grout_eps_init:
+                eps_override[ui] = resolution.grout_eps_init[t]
+            sigma = resolution.stress_sigma.get(t)
+            if sigma is not None:
+                tinfo = _tendon_info(section, t)
+                P = float(sigma) * float(tinfo["Ap"]) * gamma_P
+                a = PrestressAction.from_force(
+                    P, tinfo["x"], tinfo["y"],
+                    x_ref=tinfo["x_ref"], y_ref=tinfo["y_ref"],
+                    label=f"grout_drop:{t}", origin="timeline_grout_drop")
+                drop.append(PrestressAction(
+                    -a.N, -a.Mx, -a.My, label=a.label, origin=a.origin))
+        return ({"activate": activate, "eps_override": eps_override}, drop)
 
     @staticmethod
     def _emit_variable_stages(combo: dict) -> List[dict]:
@@ -887,18 +1065,40 @@ class TimelineResolution:
         Tendon names grouted somewhere on the timeline.
     stressed : dict
         ``{tendon_name: event_index}`` of the stressing event.
+    grout_eps_init : dict
+        ``{tendon_name: eps_init}`` — the **reconciled** locked-in strain
+        each grouted tendon carries once bonded,
+        :math:`\varepsilon_{\text{init}}
+        = \varepsilon_{pe,\text{eff}} - \varepsilon_{\text{sec,grout}}`,
+        obtained by **reusing**
+        :func:`gensec.solver.posttension.solve_posttension_sequence` and
+        :func:`gensec.solver.posttension.grout` (no reimplementation) so
+        that the resistance evaluates
+        :math:`\sigma_p(\varepsilon_{\text{sec,grout}}
+        + \varepsilon_{\text{init}}) = \sigma_p(\varepsilon_{pe,
+        \text{eff}})`.  This is what makes a compiled ``stress`` →
+        ``grout`` sequence byte-equivalent to the driver (``10_3`` §5
+        axis-1).
+    stress_sigma : dict
+        ``{tendon_name: sigma_p0}`` [MPa] — the jacking stress declared
+        at the tendon's ``stress`` event, net of friction/anchorage slip
+        (member-level, supplied as input).  Used by the compiler to size
+        the demand-side action while the tendon is unbonded and to cancel
+        it at grout (the single-side invariant).
     """
 
     __slots__ = ("datums", "explicit_datums", "pre_post", "grouted",
-                 "stressed")
+                 "stressed", "grout_eps_init", "stress_sigma")
 
     def __init__(self, datums, explicit_datums, pre_post, grouted,
-                 stressed):
+                 stressed, grout_eps_init=None, stress_sigma=None):
         self.datums = datums
         self.explicit_datums = explicit_datums
         self.pre_post = pre_post
         self.grouted = grouted
         self.stressed = stressed
+        self.grout_eps_init = grout_eps_init or {}
+        self.stress_sigma = stress_sigma or {}
 
 
 # ---------------------------------------------------------------------------
@@ -1047,19 +1247,24 @@ def _tendon_info(section, name) -> dict:
     from .integrator import FiberSolver
     solver = FiberSolver(section)
     x_ref, y_ref = float(solver.x_ref), float(solver.y_ref)
-    names = list(getattr(section, "tendon_names", []) or [])
-    x_t = getattr(section, "x_tendons", None)
-    y_t = getattr(section, "y_tendons", None)
-    a_t = getattr(section, "A_tendons", getattr(section, "area_tendons", None))
-    for k, nm in enumerate(names):
+    # Enumerate the tendon objects directly (the ``tendon_names`` /
+    # ``x_tendons`` parallel arrays are not populated on every section
+    # builder); name resolution matches _tendon_local_index / _tendon_
+    # union_index exactly so the three helpers never disagree.
+    tendons = list(getattr(section, "tendons", []) or [])
+    for k, t in enumerate(tendons):
+        nm = getattr(t, "name", None) or f"tendon_{k}"
         if nm == name:
             return {
-                "x": float(x_t[k]), "y": float(y_t[k]),
-                "Ap": float(a_t[k]),
+                "x": float(getattr(t, "x", 0.0)),
+                "y": float(getattr(t, "y", 0.0)),
+                "Ap": float(getattr(t, "area", getattr(t, "Ap", 0.0))),
                 "x_ref": x_ref, "y_ref": y_ref,
             }
+    known = [getattr(t, "name", None) or f"tendon_{k}"
+             for k, t in enumerate(tendons)]
     raise ValueError(
-        f"unknown tendon '{name}'. Known: {names}.")
+        f"unknown tendon '{name}'. Known: {known}.")
 
 
 def _tendon_parent_zone(section, name) -> int:
@@ -1083,6 +1288,37 @@ def _tendon_union_index(section, name) -> int:
         if (getattr(t, "name", None) or f"tendon_{k}") == name:
             return n_reb + k
     raise ValueError(f"unknown tendon '{name}'.")
+
+
+def _tendon_local_index(section, name) -> int:
+    r"""Local (tendon-array) index of a tendon by name."""
+    for k, t in enumerate(getattr(section, "tendons", []) or []):
+        if (getattr(t, "name", None) or f"tendon_{k}") == name:
+            return k
+    raise ValueError(f"unknown tendon '{name}'.")
+
+
+def _posttension_union_indices(timeline, section) -> List[int]:
+    r"""
+    Union indices of tendons grouted somewhere on the timeline.
+
+    A tendon that is grouted is **post-tensioned**: a demand-side load
+    until its ``grout`` event, a bonded resistance element after.  It
+    must therefore be inactive during the ungrouted phase (activated at
+    grout, not at its zone's cast), unlike a pre-tensioned tendon which
+    is bonded from casting.
+    """
+    names = set()
+    for ev in timeline.events:
+        if ev.kind == "grout":
+            names.update(_event_tendon_refs(ev))
+    out: List[int] = []
+    for t in names:
+        try:
+            out.append(_tendon_union_index(section, t))
+        except ValueError:
+            pass
+    return sorted(out)
 
 
 def _n_zones(mgr) -> int:
