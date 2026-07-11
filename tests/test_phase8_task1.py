@@ -705,7 +705,9 @@ class TestSlsBoundary(unittest.TestCase):
               "increment": (-1e5, -5e7, 0.0)}],
             moduli=moduli)
 
-    def test_masked_state_rejected(self):
+    def test_masked_state_supported(self):
+        # C4 lifted the former guard: a masked composite state (an
+        # inactive zone) is now a supported SLS input, not a rejection.
         sec = _composite(linear=False)
         mgr = StagedDomainManager(sec, biaxial=False)
         s = mgr.initial_state().copy_advanced(0)
@@ -714,10 +716,13 @@ class TestSlsBoundary(unittest.TestCase):
         s.active = np.ones(n, bool)
         s.bonded = np.ones(n, bool)
         s.eps_init = np.zeros(n)
-        with self.assertRaisesRegex(NotImplementedError, "bulk"):
-            self._staged_input(s)
+        r = self._staged_input(s)
+        self.assertIn("stages", r)
+        self.assertIn("concrete", r["stages"][0])
 
-    def test_nonzero_planes_rejected(self):
+    def test_nonzero_planes_supported(self):
+        # C4 lifted the former guard: per-zone locked-in datum planes are
+        # now honoured through the solver, not rejected.
         sec = _composite(linear=False)
         mgr = StagedDomainManager(sec, biaxial=False)
         s = mgr.initial_state().copy_advanced(0)
@@ -727,8 +732,9 @@ class TestSlsBoundary(unittest.TestCase):
         s.active = np.ones(n, bool)
         s.bonded = np.ones(n, bool)
         s.eps_init = np.zeros(n)
-        with self.assertRaisesRegex(NotImplementedError, "planes"):
-            self._staged_input(s)
+        r = self._staged_input(s)
+        self.assertIn("stages", r)
+        self.assertIn("concrete", r["stages"][0])
 
     def test_composite_static_sls_smoke(self):
         # Multi-zone, all-active, zero-planes: the supported path
