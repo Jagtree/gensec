@@ -185,6 +185,10 @@ def print_sls_results(res):
     for st in res["stages"]:
         t = f", t={st['time']} d" if st.get("time") is not None else ""
         print(f"\nStage: {st['name']}{t}")
+        # --- GENSEC T3 C4 composite-SLS (idempotency sentinel) ---
+        az = st.get("active_zones")
+        if az is not None:
+            print(f"  active zones: {', '.join(az)}")
         cum = st["cumulative"]
         print(f"  demand (cum): N={cum['N_kN']:.2f} kN, "
               f"Mx={cum['Mx_kNm']:.2f} kNm, "

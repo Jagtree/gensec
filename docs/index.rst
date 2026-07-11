@@ -74,6 +74,7 @@ Key capabilities
    theory/ideal_gross_properties
    theory/nm_diagram
    theory/demand_verification
+   theory/construction_timeline
 
 
 .. toctree::

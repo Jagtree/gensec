@@ -621,8 +621,99 @@ def _element_sigmas(solver, sol, view):
     return bulk_sigma, elem_union_idx, elem_sigma, plane
 
 
+def _affine_entering_set(coeffs, zone_E, plane_hi, state_planes,
+                         zone_entering, x_ref, y_ref, d_bulk_eps=0.0):
+    r"""
+    Initialise the per-zone affine concrete-stress coefficients of the
+    zones that enter the resistance set at the current stage.
+
+    An entering zone comes into existence carrying its locked-in datum
+    plane :math:`(\varepsilon_0^d, \chi_x^d, \chi_y^d)_z`; the solver
+    has already subtracted it in the fibre stresses, so the coefficients
+    are SET (not incremented) from the effective plane
+    :math:`\mathbf{p}_{hi} - \mathbf{p}^d_z`:
+
+    .. math::
+
+        c_{0,z} &= E_z\left(\Delta\varepsilon_0
+            - \Delta\chi_x\, y_{\mathrm{ref}}
+            + \Delta\chi_y\, x_{\mathrm{ref}}
+            + \Delta\varepsilon_b\right), \\
+        c_{x,z} &= -E_z\,\Delta\chi_y, \qquad
+        c_{y,z} = E_z\,\Delta\chi_x ,
+
+    with :math:`\Delta\mathbf{p} = \mathbf{p}_{hi} - \mathbf{p}^d_z`
+    and :math:`\Delta\varepsilon_b` the legacy uniform bulk pre-strain.
+
+    Parameters
+    ----------
+    coeffs : dict
+        ``{"c0", "cx", "cy"}`` per-zone arrays, mutated in place.
+    zone_E : numpy.ndarray
+        Zone moduli, index-aligned with the coefficient arrays.
+    plane_hi : tuple of float
+        Solved section plane ``(eps0, chi_x, chi_y)``.
+    state_planes : numpy.ndarray or None
+        Per-zone locked-in datum planes, shape ``(n_zones, 3)``; ``None``
+        means a zero datum for every zone.
+    zone_entering : numpy.ndarray of bool
+        Zones to initialise this call.
+    x_ref, y_ref : float
+        Solver reference point.
+    d_bulk_eps : float, optional
+        Legacy uniform bulk imposed-strain offset.
+    """
+    ent = np.nonzero(np.asarray(zone_entering, dtype=bool))[0]
+    if ent.size == 0:
+        return
+    planes = (np.zeros((zone_E.size, 3), dtype=float)
+              if state_planes is None
+              else np.asarray(state_planes, dtype=float))
+    for z in ent:
+        e0 = plane_hi[0] - float(planes[z, 0])
+        cx = plane_hi[1] - float(planes[z, 1])
+        cy = plane_hi[2] - float(planes[z, 2])
+        Ez = float(zone_E[z])
+        coeffs["c0"][z] = Ez * (e0 - cx * y_ref + cy * x_ref
+                                + d_bulk_eps)
+        coeffs["cx"][z] = -Ez * cy
+        coeffs["cy"][z] = Ez * cx
+
+
+def _active_zone_labels(base_section, zone_active, n_zones):
+    r"""
+    Human-readable labels of the bulk zones active at a stage.
+
+    Parameters
+    ----------
+    base_section : GenericSection
+    zone_active : numpy.ndarray of bool or None
+        The stage's bulk-active mask; ``None`` means every zone active.
+    n_zones : int
+
+    Returns
+    -------
+    list of str
+        Labels (``zone_names`` when available, else the zone index) of
+        the active zones, in index order.
+    """
+    names = getattr(base_section, "zone_names", None)
+    if zone_active is None:
+        active = range(n_zones)
+    else:
+        za = np.asarray(zone_active, dtype=bool)
+        active = [int(z) for z in np.nonzero(za)[0]]
+    out = []
+    for z in active:
+        if names is not None and z < len(names):
+            out.append(str(names[z]))
+        else:
+            out.append(str(z))
+    return out
+
+
 def _affine_increment(coeffs, zone_E, plane_hi, plane_lo,
-                      x_ref, y_ref, d_bulk_eps=0.0):
+                      x_ref, y_ref, d_bulk_eps=0.0, zone_mask=None):
     r"""
     Accumulate one plane difference into the per-zone affine
     coefficients of the concrete stress field.
@@ -658,10 +749,19 @@ def _affine_increment(coeffs, zone_E, plane_hi, plane_lo,
     de0 = plane_hi[0] - plane_lo[0]
     dcx = plane_hi[1] - plane_lo[1]
     dcy = plane_hi[2] - plane_lo[2]
-    coeffs["c0"] += zone_E * (de0 - dcx * y_ref + dcy * x_ref
-                              + d_bulk_eps)
-    coeffs["cx"] += -zone_E * dcy
-    coeffs["cy"] += zone_E * dcx
+    d_c0 = zone_E * (de0 - dcx * y_ref + dcy * x_ref + d_bulk_eps)
+    d_cx = -zone_E * dcy
+    d_cy = zone_E * dcx
+    if zone_mask is not None:
+        # C4: restrict the increment to a subset of zones (persisting
+        # zones — entering zones are SET, not incremented).
+        m = np.asarray(zone_mask, dtype=bool)
+        d_c0 = np.where(m, d_c0, 0.0)
+        d_cx = np.where(m, d_cx, 0.0)
+        d_cy = np.where(m, d_cy, 0.0)
+    coeffs["c0"] += d_c0
+    coeffs["cx"] += d_cx
+    coeffs["cy"] += d_cy
 
 
 def _decompression_probe(x_t, y_t, zone, coeffs, c_dec):
@@ -857,6 +957,23 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
     active-and-bonded element (the constitutive law at the element's
     total strain, prestrain included) — the quantity the normative
     limits address.
+
+    **Single-compatibility-plane invariant (C4).** This walk models
+    staged construction under a *single* strain-compatibility plane
+    per stage: every active bulk zone shares one solved plane
+    :math:`(\varepsilon_0, \chi_x, \chi_y)`.  An entering zone is
+    assumed to be cast onto the current member and to share its plane
+    from that stage on; its locked-in datum is frozen at cast and is
+    constant thereafter.  Two situations are therefore **out of
+    scope** and raise: (i) a persisting zone whose datum changes
+    mid-history (re-datuming of cured concrete), and (ii) two
+    structurally independent bodies each carrying their own
+    pre-connection load history on distinct planes, later made
+    solidal — that requires per-body equilibria and a connection
+    event (see the composability handoff in ``10_6``).  The fibre
+    stresses stay correct in every supported case because the solver
+    consumes ``bulk_planes_active``; the guard protects the affine
+    decompression bookkeeping and the physical meaning of the walk.
     """
     if x_ref is None:
         x_ref = float(base_section.x_centroid)
@@ -888,7 +1005,14 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
         )
 
     # ---- Accumulators -------------------------------------------
+    # --- GENSEC T3 C4 composite-SLS (idempotency sentinel) ---
     S_bulk = np.zeros(n_fib, dtype=float)
+    # C4: which base fibers have entered the resistance history yet.
+    # Not-yet-cast zones stay False so their zero entries cannot spoof
+    # the concrete stress extremes.
+    present_bulk = np.zeros(n_fib, dtype=bool)
+    fiber_zone = (mat_indices if mat_indices is not None
+                  else np.zeros(n_fib, dtype=int))
     S_union = np.full(n_union, np.nan, dtype=float)
     present = np.zeros(n_union, dtype=bool)
     coeffs = {
@@ -917,29 +1041,16 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                 f"Stage '{name}': 'state' must be a SectionState, "
                 f"got {type(state).__name__}."
             )
-        # ---- Phase-8 bulk staging: deferred to Task 3 (C4) ----
-        # The staged fiber accumulation below is sized on the base
-        # fiber set and its transition taxonomy predates per-zone
-        # locked-in planes; accepting a bulk-staged state here would
-        # either crash on an accumulator shape mismatch or silently
-        # misattribute a plane change.  Fail loud until the composite
-        # SLS basis lands (decision fork C4).
-        _ba = getattr(state, "bulk_active", None)
-        if _ba is not None and not bool(np.all(_ba)):
-            raise NotImplementedError(
-                f"Stage '{name}': SLS verification across bulk "
-                f"staging (inactive zones) is not yet supported — "
-                f"composite SLS basis deferred (fork C4, Task 3)."
-            )
-        _bp = getattr(state, "bulk_planes", None)
-        if _bp is not None and bool(
-                np.any(np.asarray(_bp, dtype=float))):
-            raise NotImplementedError(
-                f"Stage '{name}': per-zone locked-in datum planes in "
-                f"the SLS staged walk are not yet supported — the "
-                f"stage-attribution taxonomy predates them (fork C4, "
-                f"Task 3)."
-            )
+        # ---- Composite bulk staging (C4) ----------------------
+        # Inactive zones and per-zone locked-in planes are now
+        # supported: the solver consumes bulk_planes_active, so b_hi
+        # is the true per-zone stress; entering zones initialise from
+        # that total read, persisting zones accumulate the increment.
+        zone_active = getattr(state, "bulk_active", None)
+        zone_active_prev = (None if prev_state is None
+                            else getattr(prev_state, "bulk_active",
+                                         None))
+        state_planes = getattr(state, "bulk_planes", None)
         resist = _resist_mask(state, n_union)
 
         # ---- Demand walk ----------------------------------------
@@ -1000,13 +1111,32 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
         (b_hi, u_idx, e_hi,
          plane_hi) = _element_sigmas(solver_k, sol_hi, slsv_k)
 
+        # C4: view-order bulk stresses scatter back to base indices;
+        # per-fiber entering mask follows the fiber's zone.
+        keep = np.asarray(getattr(view_k, "_bulk_keep",
+                                  np.arange(b_hi.size)), dtype=int)
+        base_zone_view = fiber_zone[keep]
         if k == 0:
-            # Total read: the section comes into existence carrying
-            # its initial strains; there is no prior stress history.
-            S_bulk += b_hi
-            _affine_increment(
-                coeffs, zone_E, plane_hi, (0.0, 0.0, 0.0),
-                x_ref, y_ref,
+            zone_entering = (np.ones(n_zones, dtype=bool)
+                             if zone_active is None else zone_active)
+        elif zone_active is None:
+            zone_entering = np.zeros(n_zones, dtype=bool)
+        else:
+            za_prev = (np.ones(n_zones, dtype=bool)
+                       if zone_active_prev is None
+                       else np.asarray(zone_active_prev, dtype=bool))
+            zone_entering = np.asarray(zone_active, dtype=bool) \
+                & ~za_prev
+        fiber_enter_view = zone_entering[base_zone_view]
+
+        if k == 0:
+            # Total read: every present fiber comes into existence
+            # carrying its initial strains; no prior stress history.
+            S_bulk[keep] = b_hi
+            present_bulk[keep] = True
+            _affine_entering_set(
+                coeffs, zone_E, plane_hi, state_planes,
+                zone_entering, x_ref, y_ref,
                 d_bulk_eps=float(state.bulk_eps_init))
             S_union[u_idx] = e_hi
             present[u_idx] = True
@@ -1021,8 +1151,33 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
             # element of the current view).
             d_bulk = b_hi - b_lo
             d_elem = e_hi - e_lo
+            # Persisting zones accumulate the plane increment; the
+            # per-zone datum cancels here (it is constant once cast).
+            zone_persist = ~zone_entering
+            # Invariant (C4): a cast zone's datum is frozen.  A change
+            # on a persisting zone is a re-datuming or a multi-body
+            # merge — neither is modelled here.  Fail loud.
+            _prev_planes = getattr(prev_state, "bulk_planes", None)
+            if state_planes is not None and _prev_planes is not None:
+                _sp = np.asarray(state_planes, dtype=float)
+                _pp = np.asarray(_prev_planes, dtype=float)
+                _pers = np.nonzero(zone_persist)[0]
+                _bad = [int(z) for z in _pers
+                        if not np.allclose(_sp[z], _pp[z],
+                                           rtol=0.0, atol=1e-12)]
+                if _bad:
+                    raise NotImplementedError(
+                        f"Stage '{name}': the locked-in datum of "
+                        f"persisting bulk zone(s) {_bad} changed since "
+                        f"the previous stage.  A cast zone's datum is "
+                        f"frozen; a mid-history change is either "
+                        f"re-datuming of cured concrete or a "
+                        f"multi-body merge, neither of which the "
+                        f"single-compatibility-plane SLS walk models "
+                        f"(see composability handoff, 10_6)."
+                    )
             _affine_increment(coeffs, zone_E, plane_hi, plane_lo,
-                              x_ref, y_ref)
+                              x_ref, y_ref, zone_mask=zone_persist)
 
             # State term (loss redistribution) — eps-only
             # transitions, evaluated on the *current* moduli.
@@ -1048,9 +1203,20 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                     coeffs, zone_E, plane_lo, plane_pe,
                     x_ref, y_ref,
                     d_bulk_eps=(float(state.bulk_eps_init)
-                                - float(prev_state.bulk_eps_init)))
+                                - float(prev_state.bulk_eps_init)),
+                    zone_mask=zone_persist)
 
-            S_bulk += d_bulk
+            # Persisting fibers accumulate the increment; entering
+            # fibers initialise from the stage's total read (datum
+            # already carried by b_hi through bulk_planes_active).
+            persist_view = ~fiber_enter_view
+            S_bulk[keep[persist_view]] += d_bulk[persist_view]
+            S_bulk[keep[fiber_enter_view]] = b_hi[fiber_enter_view]
+            present_bulk[keep] = True
+            _affine_entering_set(
+                coeffs, zone_E, plane_hi, state_planes,
+                zone_entering, x_ref, y_ref,
+                d_bulk_eps=float(state.bulk_eps_init))
             # Persisting elements accumulate the increment; entering
             # elements initialise from the stage's total read.
             enter_set = set(entering.tolist())
@@ -1077,8 +1243,16 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                 )
 
         # ---- Stage record ---------------------------------------
-        i_min = int(np.argmin(S_bulk))
-        i_max = int(np.argmax(S_bulk))
+        # C4: extremes over fibers that have entered the history; a
+        # not-yet-cast zone must not spoof min/max with its zero.
+        idx_present = np.nonzero(present_bulk)[0]
+        if idx_present.size == 0:
+            raise RuntimeError(
+                f"Stage '{name}': no active bulk fiber in the SLS "
+                f"history (empty composite state)."
+            )
+        i_min = int(idx_present[np.argmin(S_bulk[idx_present])])
+        i_max = int(idx_present[np.argmax(S_bulk[idx_present])])
         elements = []
         for u in np.nonzero(present)[0]:
             if u < n_reb:
@@ -1116,6 +1290,8 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                            float(base_section.y_fibers[i_max])),
             },
             "elements": elements,
+            "active_zones": _active_zone_labels(base_section,
+                                                zone_active, n_zones),
         }
 
         # ---- Checks (D4 semantics) ------------------------------

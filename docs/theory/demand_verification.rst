@@ -477,3 +477,39 @@ The on-demand :math:`\eta` is a scalar ray-cast metric equivalent to
 ``eta_norm_ray`` in the domain pipeline.  The normalised metrics
 (``eta_norm``, ``eta_norm_beta``) require the full hull and are only
 available via ``gensec run``.
+
+Serviceability (SLS) stress verification on staged/composite sections
+---------------------------------------------------------------------
+
+:func:`~gensec.solver.sls.verify_sls_staged` accumulates concrete and
+element stresses across a stage history and evaluates the per-stage
+:class:`~gensec.materials.verification_limits.StressLimits` checks
+(concrete compression, steel/tendon stress, decompression, uncracked
+basis). Each stage carries a :class:`~gensec.solver.section_state.SectionState`;
+persisting elements accumulate the demand increment, entering elements
+initialise from the stage's total read.
+
+For **composite** sections built by casting (precast + topping,
+timber–concrete, steel-deck slabs) the walk runs directly on the masked
+staged views: inactive zones and per-zone locked-in datum planes are
+supported. A zone that is not yet cast contributes no stress until its
+casting stage, at which point its fibres enter carrying the zone's datum;
+thereafter they accumulate the increment. The accumulated concrete
+extremes are reported over the fibres that have entered the history, so a
+not-yet-cast zone cannot displace the reported minimum or maximum.
+
+This is the serviceability face of the staged-construction equivalence
+proved in :doc:`construction_timeline`: the substrate carries the
+pre-cast load on its own (pre-composite) section, the composite carries
+the increment, and the accumulated fibre stress is their sum. Extreme
+fibres, the interface, and per-tendon decompression are all read off this
+accumulated field.
+
+.. note::
+
+   The walk models staged construction under a **single strain-
+   compatibility plane per stage**: every active zone shares one solved
+   plane, and each entering zone is cast onto the current member. Two
+   structurally independent bodies each carrying their own pre-connection
+   history on distinct planes, later made solidal, are out of scope and
+   raise fail-loud; that case is a separate composability feature.

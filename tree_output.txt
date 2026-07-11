@@ -31,6 +31,7 @@
 │   │   └── 📄 architecture_solver.rst
 │   ├── 📁 theory
 │   │   ├── 📄 constitutive_laws.rst
+│   │   ├── 📄 construction_timeline.rst
 │   │   ├── 📄 demand_verification.rst
 │   │   ├── 📄 fiber_method.rst
 │   │   ├── 📄 ideal_gross_properties.rst
@@ -94,7 +95,9 @@
 │   │   │   ├── 📄 posttension.py
 │   │   │   ├── 📄 prestress_transfer.py
 │   │   │   ├── 📄 section_state.py
-│   │   │   └── 📄 sls.py
+│   │   │   ├── 📄 sls.py
+│   │   │   ├── 📄 timeline.py
+│   │   │   └── 📄 timeline_run.py
 │   │   ├── 📄 .coverage
 │   │   ├── 📄 __init__.py
 │   │   ├── 📄 __main__.py
@@ -123,6 +126,9 @@
 │   ├── 📄 test_infrastructure.py
 │   ├── 📄 test_materials.py
 │   ├── 📄 test_phase7_sls.py
+│   ├── 📄 test_phase8_task1.py
+│   ├── 📄 test_phase8_task2.py
+│   ├── 📄 test_phase8_task3.py
 │   ├── 📄 test_posttension.py
 │   ├── 📄 test_prestress_transfer.py
 │   ├── 📄 test_prestress_uls_unbonded.py
@@ -171,6 +177,9 @@
 ├── 📄 run_phase3_validation.py
 ├── 📄 run_phase4_yaml_validation.py
 ├── 📄 run_phase7_sls_validation.py
+├── 📄 run_phase8_task1_validation.py
+├── 📄 run_phase8_task2_validation.py
+├── 📄 run_phase8_task3_validation.py
 ├── 📄 run_posttension_sequence_validation.py
 ├── 📄 run_posttension_shortening_validation.py
 ├── 📄 run_prestress_action_validation.py

@@ -17,6 +17,42 @@ in the repository root.
 .. _Semantic Versioning: https://semver.org
 
 
+Unreleased
+----------
+
+Composite serviceability verification on staged sections (Phase-8
+Task 3, fork C4).
+
+**Features**
+
+- **Composite staged SLS.** :func:`~gensec.solver.sls.verify_sls_staged`
+  now verifies serviceability stresses on masked composite views with
+  inactive zones and per-zone locked-in datum planes. Bulk zones inherit
+  the entering/persisting accumulation taxonomy of the point elements: an
+  entering zone initialises from its datum-inclusive total read, a
+  persisting zone accumulates the increment. The concrete stress extremes
+  are gated to the fibres present at the verified stage.
+  :func:`~gensec.solver.report.print_sls_results` reports the per-stage
+  active-zone context.
+
+- **New theory page** :doc:`theory/construction_timeline` — the
+  three-layer staged-construction architecture, the linear
+  one-shot-with-datum ≡ incremental-staged equivalence proof, the
+  characteristic-datum convention, and the pre-/post-tensioning rule.
+
+**Invariants**
+
+- ``verify_sls_staged`` states and enforces the single-compatibility-plane
+  invariant: a persisting bulk zone whose locked-in datum changes
+  mid-history raises :class:`NotImplementedError` (re-datuming of cured
+  concrete, or a multi-body merge, are out of scope).
+
+**Deferred**
+
+- Losses-on-timeline (fork C5) is split to a dedicated rheology phase;
+  the GUI/PyPI milestone (D7) remains gated until it lands.
+
+
 v0.3.3
 ------
 

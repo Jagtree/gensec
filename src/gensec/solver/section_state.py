@@ -1275,6 +1275,11 @@ def _apply_bulk_staging(base_section, state: SectionState, view):
         view.A_fibers = base_section.A_fibers[keep]
         view.mat_indices = mi[keep]
         view.n_fibers = int(keep.size)
+        # --- GENSEC T3 C4 composite-SLS (idempotency sentinel) ---
+        # C4: view->base fiber map, consumed by verify_sls_staged to
+        # scatter view-order bulk stresses back into the base-indexed
+        # accumulator (the bulk analogue of view._union_index).
+        view._bulk_keep = keep
 
         # Containment invariant on the elements kept in this view
         # (resolve_stages enforces it for manager-built walks; this
@@ -1409,6 +1414,12 @@ def materialize_view(base_section, state: SectionState):
     # Re-slice / plane attachment / geometry overrides, or a strict
     # no-op on the trivial state (single-bulk byte-identity anchor).
     _apply_bulk_staging(base_section, state, view)
+
+    # C4: regimes 1-2 keep the full base mesh, so the view->base fiber
+    # map is the identity over the (unchanged) fiber count.  Regime 3
+    # attached the real re-slice map above.
+    if not hasattr(view, "_bulk_keep"):
+        view._bulk_keep = np.arange(int(view.n_fibers))
 
     view._ideal_gross_props_cache = None
     return view
