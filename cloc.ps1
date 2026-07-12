@@ -1,0 +1,1 @@
+cloc . --exclude-dir=.git,.venv,venv,__pycache__,.pytest_cache,.mypy_cache,results

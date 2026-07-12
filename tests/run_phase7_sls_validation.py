@@ -246,8 +246,13 @@ def v1_transfer(sec, moduli):
         moduli=moduli, x_ref=XR, y_ref=YR,
         debug_check_affine=True)
 
-    y_bot = float(sec.y_fibers.min())
-    y_top = float(sec.y_fibers.max())
+    # F6 / Option A: EN 1992-1-1 7.2 limits sigma_c at the EXTREME FIBRE
+    # of the section, not at the centroid of the outermost row of a
+    # discretisation.  The strain plane is exactly linear, so the face
+    # value is a closed form -- evaluating the reference at
+    # y_fibers.min()/.max() shares the implementation's half-fibre inset
+    # and therefore cannot ever catch it.
+    y_bot, y_top = 0.0, H
     c = res["stages"][0]["concrete"]
 
     for tag, discrete, atol in (("discrete", True, 1e-3),
@@ -301,7 +306,7 @@ def v2_v3_service_and_loss(sec, moduli):
         moduli=moduli, x_ref=XR, y_ref=YR,
         debug_check_affine=True)
 
-    y_bot = float(sec.y_fibers.min())
+    y_bot = 0.0
 
     # V2: increment on an unchanged state — accumulated equals the
     # total solve at (0, M0 + dM) (telescoping, same view).

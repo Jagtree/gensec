@@ -705,6 +705,97 @@ class SectionState:
             s.bulk_planes[z, :] = plane
         return s
 
+    def with_bulk_plane_delta(self, delta_map) -> "SectionState":
+        r"""
+        **Add** a locked-in datum plane increment to zones that are
+        already active (Phase-5 / C5).
+
+        The counterpart of :meth:`with_bulk_activated`, which *sets* a
+        zone's datum plane **absolutely, once, at casting**.  Nothing in
+        the pre-C5 vocabulary could *increment* the plane of a zone that
+        is already in the domain — and that is exactly what a
+        time-dependent interval does: over :math:`[t_0, t]` the concrete
+        accumulates a stress-independent eigenstrain (creep under the
+        frozen stress, plus shrinkage), and creep under a *linear* stress
+        field is a *linear* imposed strain, so all three components of
+        the plane move, not only :math:`\varepsilon_0`.
+
+        .. math::
+
+            \text{bulk\_planes}[z] \;\mathrel{+}=\;
+            \boldsymbol{\beta}_z
+            \;=\; -\,\varepsilon_{\mathrm{imp},z}
+
+        The sign is the fiber kernel's: it *adds* the offset
+        (:math:`\sigma = \mathrm{law}(\varepsilon_{\mathrm{sec}}
+        + \varepsilon_{\mathrm{bulk}})`) while the physics *subtracts*
+        the eigenstrain (:math:`\sigma = E(\varepsilon_{\mathrm{tot}}
+        - \varepsilon_{\mathrm{imp}})`).  Its falsifiable consequence:
+        a fully restrained shrinking member goes into **tension**.
+        :mod:`gensec.solver.losses` owns the sign flip and states it once.
+
+        Being **additive** is what makes a step-by-step integration
+        composable: N sub-steps of an interval sum to the interval.  An
+        absolute setter would make the last step overwrite the history.
+
+        Parameters
+        ----------
+        delta_map : dict
+            ``{zone_index: (d_eps0, d_chi_x, d_chi_y)}``.  A zone absent
+            from the map is untouched.
+
+        Returns
+        -------
+        SectionState
+            A copy.
+
+        Raises
+        ------
+        ValueError
+            State built without zone arrays; zone index out of range;
+            malformed or non-finite increment; a target zone that is
+            **not active** (an eigenstrain cannot accrue in concrete that
+            has not been cast — that is a modelling error, not a no-op).
+
+        Notes
+        -----
+        The increment lands in ``bulk_planes``, which the capacity hash
+        already covers, so two different loss states can never collapse
+        onto one cached domain.  No hash change is needed.
+        """
+        if self.bulk_active is None or self.bulk_planes is None:
+            raise ValueError(
+                "with_bulk_plane_delta: this state carries no zone "
+                "arrays (legacy direct construction). Derive states "
+                "from StagedDomainManager.initial_state()."
+            )
+        n_zones = int(self.bulk_active.size)
+        s = self.copy_advanced(self.stage_index, self.label)
+        for z, d in delta_map.items():
+            z = int(z)
+            if not (0 <= z < n_zones):
+                raise ValueError(
+                    f"with_bulk_plane_delta: zone index {z} out of "
+                    f"range (state has {n_zones} zone(s))."
+                )
+            if not bool(self.bulk_active[z]):
+                raise ValueError(
+                    f"with_bulk_plane_delta: zone {z} is not active, so "
+                    f"it cannot accumulate a creep/shrinkage eigenstrain "
+                    f"— concrete that has not been cast does not creep. "
+                    f"Cast the zone (activate_bulk) before the interval "
+                    f"that loads it."
+                )
+            delta = np.asarray(d, dtype=float).ravel()
+            if delta.size != 3 or not np.all(np.isfinite(delta)):
+                raise ValueError(
+                    f"with_bulk_plane_delta: the increment for zone {z} "
+                    f"must be three finite floats "
+                    f"(d_eps0, d_chi_x, d_chi_y), got {d!r}."
+                )
+            s.bulk_planes[z, :] += delta
+        return s
+
 # ==================================================================
 #  PrestressAction (Phase-3 interface; fleshed out in prestress v1)
 # ==================================================================
@@ -1726,6 +1817,12 @@ class StagedDomainManager:
                 cur = cur.with_deactivated(deact_idx)
             if ops.get("eps_override"):
                 cur = cur.with_eps_override(ops["eps_override"])
+            if ops.get("bulk_plane_delta"):
+                # C5: the time-dependent eigenstrain of an interval.
+                # Additive, so N sub-steps sum to the interval, and it
+                # lands in bulk_planes -- already hashed, so two loss
+                # states never collapse onto one cached domain.
+                cur = cur.with_bulk_plane_delta(ops["bulk_plane_delta"])
             if "bulk_eps" in ops:
                 cur = cur.with_bulk_eps(ops["bulk_eps"])
             # Informational time stamp [days], cumulative since stage 0.

@@ -302,6 +302,15 @@ def resolve_sls_moduli(section, moduli=None):
     for key, val in moduli.items():
         if isinstance(key, str):
             by_name[key] = val
+        elif isinstance(key, int):
+            # An ``id(material)`` handed directly.  Needed because a
+            # ``Concrete`` is an unfrozen dataclass -- hence *unhashable*
+            # -- and carries an empty ``name`` unless one is declared, so
+            # neither the by-instance nor the by-name path is reachable
+            # for a programmatically built section.  Without this key the
+            # explicit-moduli contract of D3 has a dead end.  (Phase-5
+            # finding F3.)
+            by_id[key] = val
         else:
             by_id[id(key)] = val
 
@@ -670,9 +679,18 @@ def _affine_entering_set(coeffs, zone_E, plane_hi, state_planes,
               if state_planes is None
               else np.asarray(state_planes, dtype=float))
     for z in ent:
-        e0 = plane_hi[0] - float(planes[z, 0])
-        cx = plane_hi[1] - float(planes[z, 1])
-        cy = plane_hi[2] - float(planes[z, 2])
+        # F7: the fibre kernel ADDS the datum -- integrator.py evaluates the
+        # bulk law at  eps_sec + [eps_b0 + eps_0,z + chi_x,z (y-y_ref)
+        # - chi_y,z (x-x_ref)] -- which is exactly why
+        # ConstructionTimeline._auto_datum stores the NEGATED plane.  This
+        # function used to SUBTRACT it, on the (false) premise recorded in
+        # its own docstring that "the solver has already subtracted it".  It
+        # has not.  The affine field was therefore wrong by 2x the datum on
+        # every entering zone, and debug_check_affine -- which is off by
+        # default -- was the only thing that could see it.
+        e0 = plane_hi[0] + float(planes[z, 0])
+        cx = plane_hi[1] + float(planes[z, 1])
+        cy = plane_hi[2] + float(planes[z, 2])
         Ez = float(zone_E[z])
         coeffs["c0"][z] = Ez * (e0 - cx * y_ref + cy * x_ref
                                 + d_bulk_eps)
@@ -868,9 +886,147 @@ def _skipped_entry(name, reason):
 # ==================================================================
 
 
+def _zone_regions(base_section):
+    r"""
+    The **material region** of every bulk zone, as a Shapely geometry.
+
+    A zone declared in ``bulk_materials`` is an *overlay*: it occupies its
+    own polygon, and the base zone occupies whatever is left.  So the base
+    region is the section polygon **minus** the union of the overlays --
+    not the section polygon.
+
+    Returns
+    -------
+    list of shapely geometry
+        Index-aligned with the zone indices (0 = base).
+    """
+    from shapely.ops import unary_union
+    overlays = [p for (p, _m) in (base_section.bulk_materials or [])]
+    base = base_section.polygon
+    if overlays:
+        regions = [base.difference(unary_union(overlays))]
+    else:
+        regions = [base]
+    regions += [p.intersection(base) for p in overlays]
+    return regions
+
+
+def _region_vertices(geom):
+    r"""Every boundary vertex of a (possibly multi-part, possibly holed)
+    region, as ``(x, y)`` pairs."""
+    pts = []
+    parts = geom.geoms if hasattr(geom, "geoms") else [geom]
+    for g in parts:
+        if g.is_empty:
+            continue
+        pts.extend(g.exterior.coords)
+        for ring in g.interiors:
+            pts.extend(ring.coords)
+    return pts
+
+
+def _extreme_fibre(base_section, coeffs, present_zones):
+    r"""
+    The **true extreme-fibre** concrete stresses, in closed form.
+
+    The SLS stress field is *exactly affine* over each zone --
+    :math:`\sigma_z(x,y) = c_{0,z} + c_{x,z}\,x + c_{y,z}\,y`, which
+    ``debug_check_affine`` asserts against the fiber accumulator to
+    :math:`10^{-8}` MPa.  The extremum of an affine function over a
+    polygon is attained at a **vertex**.  So the extremes are a closed
+    form, and there is no reason to accept a discretisation error where
+    one exists.
+
+    .. warning::
+
+        Taking ``argmin``/``argmax`` over the *fibres* -- which is what
+        this function replaces -- reports the stress at the outermost
+        fibre's **centroid**, inset half a fibre from the section face.
+        On a 800 mm web meshed at 50 mm that under-reports the
+        extreme-fibre stress by :math:`1 - 50/800 = 6.25\,\%` of the
+        bending part, in the **non-conservative** direction: EN 1992-1-1
+        §7.2 limits :math:`\sigma_c` at the *extreme fibre*, not at the
+        centroid of the last row of fibres.  A fine mesh hides it, which
+        is why it survived (Phase-5 finding F6).
+
+    Parameters
+    ----------
+    base_section : GenericSection
+    coeffs : dict
+        ``{'c0': (n_zones,), 'cx': ..., 'cy': ...}`` -- the per-zone
+        affine stress field already assembled by the caller.
+    present_zones : iterable of int
+        Zones that have entered the history (a not-yet-cast zone must not
+        spoof the extremes with its zero).
+
+    Returns
+    -------
+    tuple
+        ``(sigma_min, (x, y), sigma_max, (x, y))``.
+    """
+    regions = _zone_regions(base_section)
+    s_min, p_min = float("inf"), None
+    s_max, p_max = float("-inf"), None
+    for z in present_zones:
+        z = int(z)
+        if z >= len(regions):
+            continue
+        for (x, y) in _region_vertices(regions[z]):
+            s = float(coeffs["c0"][z] + coeffs["cx"][z] * x
+                      + coeffs["cy"][z] * y)
+            if s < s_min:
+                s_min, p_min = s, (float(x), float(y))
+            if s > s_max:
+                s_max, p_max = s, (float(x), float(y))
+    if p_min is None:
+        raise RuntimeError(
+            "extreme-fibre stress: no present zone has a region.")
+    return s_min, p_min, s_max, p_max
+
+
+def _extreme_fibre_by_zone(base_section, coeffs, present_zones):
+    r"""
+    The extreme-fibre stresses of **each** present zone, separately.
+
+    The global extremes are not enough on a composite: the maximum
+    compressive stress and the maximum tensile stress may sit in
+    *different* zones, and each zone has its own limit (its own
+    :math:`f_{ck}`).  A check that reads only the global extreme is
+    checking one zone against another zone's limit.
+
+    Returns
+    -------
+    dict
+        ``{zone_name: {'sigma_min_MPa', 'at_min', 'sigma_max_MPa',
+        'at_max'}}``.
+    """
+    regions = _zone_regions(base_section)
+    out = {}
+    for z in present_zones:
+        z = int(z)
+        if z >= len(regions):
+            continue
+        s_min, p_min = float("inf"), None
+        s_max, p_max = float("-inf"), None
+        for (x, y) in _region_vertices(regions[z]):
+            s = float(coeffs["c0"][z] + coeffs["cx"][z] * x
+                      + coeffs["cy"][z] * y)
+            if s < s_min:
+                s_min, p_min = s, (float(x), float(y))
+            if s > s_max:
+                s_max, p_max = s, (float(x), float(y))
+        if p_min is None:
+            continue
+        name = (base_section.zone_names[z]
+                if z < len(base_section.zone_names) else f"zone[{z}]")
+        out[name] = {"sigma_min_MPa": round(s_min, 6), "at_min": p_min,
+                     "sigma_max_MPa": round(s_max, 6), "at_max": p_max}
+    return out
+
+
 def verify_sls_staged(base_section, stages, *, moduli=None,
                       x_ref=None, y_ref=None, tol=1.0e-3,
-                      max_iter=50, debug_check_affine=False):
+                      max_iter=50, debug_check_affine=True):
     r"""
     SLS stress verification over a stage history (Phase 7 engine).
 
@@ -1253,6 +1409,18 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
             )
         i_min = int(idx_present[np.argmin(S_bulk[idx_present])])
         i_max = int(idx_present[np.argmax(S_bulk[idx_present])])
+        # F6: the reported extremes are the TRUE extreme-fibre stresses,
+        # from the closed form on the affine field, not the outermost
+        # fibre's centroid value (which is inset half a fibre and
+        # under-reports, non-conservatively, the very stress EN 1992-1-1
+        # 7.2 limits).  The fibre argmin/argmax above is kept only to
+        # name the present zones.
+        _present_zones = sorted(set(int(v) for v in mat_indices[idx_present]))
+        (_s_min, _at_min,
+         _s_max, _at_max) = _extreme_fibre(base_section, coeffs,
+                                           _present_zones)
+        _by_zone = _extreme_fibre_by_zone(base_section, coeffs,
+                                          _present_zones)
         elements = []
         for u in np.nonzero(present)[0]:
             if u < n_reb:
@@ -1282,12 +1450,16 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
             "plane": {"eps0": plane_hi[0], "chi_x": plane_hi[1],
                       "chi_y": plane_hi[2]},
             "concrete": {
-                "sigma_min_MPa": round(float(S_bulk[i_min]), 6),
-                "at_min": (float(base_section.x_fibers[i_min]),
-                           float(base_section.y_fibers[i_min])),
-                "sigma_max_MPa": round(float(S_bulk[i_max]), 6),
-                "at_max": (float(base_section.x_fibers[i_max]),
-                           float(base_section.y_fibers[i_max])),
+                "sigma_min_MPa": round(_s_min, 6),
+                "at_min": _at_min,
+                "sigma_max_MPa": round(_s_max, 6),
+                "at_max": _at_max,
+                # The global extremes are not enough on a composite: each
+                # zone has its own f_ck, and the governing compression may
+                # sit in one zone while the governing tension sits in
+                # another.  GenSec's job is to hand the engineer every
+                # number it has, not only the one it acted on.
+                "by_zone": _by_zone,
             },
             "elements": elements,
             "active_zones": _active_zone_labels(base_section,

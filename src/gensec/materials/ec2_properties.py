@@ -286,7 +286,7 @@ class fben2:
         if time >= 28:
             self.fcm = fck + 8  # [MPa]
             self.fck = fck  # [MPa]
-            alpha = 1
+            alpha = 2/3
         elif time < 3:
             self.fcm = 0  # [MPa]
             self.fck = 0  # [MPa]
@@ -294,13 +294,13 @@ class fben2:
         else:
             self.fcm = self.beta_cc * self.fcm_28  # [MPa]
             self.fck = self.fcm - 8  # [MPa]
-            alpha = 2/3
+            alpha = 1
         # Other concrete properties evaluations
         self.eps_c1 = min(2.8, (0.7*(self.fcm**0.31))) / 10**3
         self.eps_c1_28 = min(2.8, (0.7*(self.fcm_28**0.31))) / 10**3
-        if self.fck <= 50:
-            # with time influence:
-            self.fctm = (self.beta_cc**alpha)*0.3*(self.fck**(2/3))  # [MPa]
+        if self.fck_28 <= 50:
+            self.fctm = ((self.beta_cc**alpha)
+                         * 0.3*(self.fck_28**(2/3)))  # [MPa]
             self.eps_cu1 = 3.5 / 10**3  # [no unit] --> it is not in ‰
             self.eps_c2 = 2 / 10**3  # [no unit] --> it is not in ‰
             self.eps_cu2 = 3.5 / 10**3  # [no unit] --> it is not in ‰
@@ -316,19 +316,18 @@ class fben2:
             self.eps_c3_28 = 1.75 / 10**3  # [no unit] --> it is not in ‰
             self.eps_cu3_28 = 3.5 / 10**3  # [no unit] --> it is not in ‰
         else:
-            # with time influence:
-            self.fctm = (self.beta_cc**alpha) * \
-                2.12*np.log(1+(self.fcm/10))  # [MPa]
-            self.eps_cu1 = max((2.8+27*((98-self.fcm)/100)**4) / 10**3,
+            self.fctm = ((self.beta_cc**alpha)
+                         * 2.12*np.log(1+(self.fcm_28/10)))  # [MPa]
+            self.eps_cu1 = max((2.8+27*((98-self.fcm_28)/100)**4) / 10**3,
                                self.eps_c1)  # [no unit] --> it is not in ‰
-            self.eps_c2 = (2 + 0.085*((self.fck-50)**0.53)) / 10**3 \
+            self.eps_c2 = (2 + 0.085*((self.fck_28-50)**0.53)) / 10**3 \
                 # [no unit] --> it is not in ‰
-            self.eps_cu2 = max((2.6 + 35*((90-self.fck)/100)**4) / 10**3,
+            self.eps_cu2 = max((2.6 + 35*((90-self.fck_28)/100)**4) / 10**3,
                                self.eps_c2)  # [no unit] --> it is not in ‰
-            self.n_exp = 1.4 + 23.4*((90-self.fck)/100)**4
-            self.eps_c3 = (1.75 + 0.55*((self.fck-50)/40)) / 10**3 \
+            self.n_exp = 1.4 + 23.4*((90-self.fck_28)/100)**4
+            self.eps_c3 = (1.75 + 0.55*((self.fck_28-50)/40)) / 10**3 \
                 # [no unit] --> it is not in ‰
-            self.eps_cu3 = max((2.6 + 35*((90-self.fck)/100)**4) / 10**3,
+            self.eps_cu3 = max((2.6 + 35*((90-self.fck_28)/100)**4) / 10**3,
                                self.eps_c3)  # [no unit] --> it is not in ‰
             # without time influence:
             self.fctm_28 = 2.12*np.log(1+(self.fcm_28/10))  # [MPa]
@@ -348,8 +347,8 @@ class fben2:
                                   self.eps_c3_28)
         self.fctk_005 = 0.7*self.fctm  # [MPa]
         self.fctk_095 = 1.3*self.fctm  # [MPa]
-        self.ecm = (1000)*22*(self.fcm/10)**(0.3) \
-            * ((self.beta_cc**alpha)**0.3)  # [MPa]
+        self.ecm = ((1000)*22*(self.fcm_28/10)**(0.3)
+                    * (self.beta_cc ** 0.3))  # [MPa]
         self.fctk_005_28 = 0.7*self.fctm_28  # [MPa]
         self.fctk_095_28 = 1.3*self.fctm_28  # [MPa]
         self.ecm_28 = (1000)*22*(self.fcm_28/10)**(0.3)  # [MPa]

@@ -1,0 +1,120 @@
+# =====================================================================
+#  GenSec — flagship for Phase 5 / C5: time-dependent losses on a
+#  PRESTRESSED COMPOSITE section.
+#
+#  A post-tensioned precast beam (cast, cured, stressed, grouted) that
+#  is left to creep for two months, then receives a topping and creeps
+#  on to 70 years.  It is the case EN 1992-1-1 (5.46) *cannot* express:
+#  two concrete zones of different age, different creep and different
+#  shrinkage, restraining each other.
+# =====================================================================
+
+materials:
+  c_precast:
+    type: concrete
+    fck: 45.0
+    gamma_c: 1.5
+  c_topping:
+    type: concrete
+    fck: 30.0
+    gamma_c: 1.5
+  steel:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+  strand:
+    type: prestressing_steel_ec2
+    class: Y1860S7          # f_p01k=1600, f_pk=1860, eps_uk=0.035, Ep=195000
+    ls: F
+    diagram: inclined
+
+section:
+  shape: rect
+  params: {B: 600, H: 1400}
+  bulk_material: c_precast
+  mesh_size: 50
+  material_zones:
+    - shape: custom
+      name: topping
+      material: c_topping
+      params:
+        exterior: [[0, 1200], [600, 1200], [600, 1400], [0, 1400]]
+  rebars:
+    - {name: A1, x: 60,  y: 60,   diameter: 26, material: steel}
+    - {name: A2, x: 540, y: 60,   diameter: 26, material: steel}
+    - {name: T1, x: 60,  y: 1340, diameter: 16, material: steel}
+    - {name: T2, x: 540, y: 1340, diameter: 16, material: steel}
+  tendons:
+    - name: P1
+      x: 300
+      y: 150
+      Ap: 2000.0
+      material: strand
+      eps_pe: 0.0          # set by the timeline's stress/grout events
+      bonded: true
+
+# ---------------------------------------------------------------------
+#  The rheology.  Nothing here is mechanics: every key is either the
+#  norm's own (fck, cement class, RH) or the container's own (chi, the
+#  relaxation reduction).  Swap `provider: ec2` for `provider: aci` and
+#  the container does not move.
+# ---------------------------------------------------------------------
+losses_models:
+  rheo_precast:
+    provider: ec2
+    fck: 45.0
+    cement_class: R          # rapid-hardening: a precast yard
+    RH: 70.0
+    chi: lump                # 0.8 — EN 1992-1-1 (5.46).  'from_J' computes it.
+    relaxation_reduction: 0.8
+  rheo_topping:
+    provider: ec2
+    fck: 30.0
+    cement_class: N
+    RH: 70.0
+    chi: lump
+
+demands:
+  - {name: G1, N_kN: -300, Mx_kNm: -220}   # precast self-weight
+  - {name: G2, Mx_kNm: -180}               # topping + superimposed dead
+  - {name: Q,  Mx_kNm: -260}               # variable
+
+construction_history:
+  - load:     {demand: G1}                          # precast on its bearings
+  - stress:   {tendons: [P1], sigma_p0: 1300.0}     # jacking
+  - grout:    {tendons: [P1]}                       # bonded from here on
+  - point:    transfer
+  - interval:                                       # 28 d -> 90 d, precast alone
+      days: 62
+      losses:
+        base: {model: rheo_precast, age: 28, curing: 3}
+  - cast:     {zone: topping, datum: auto}          # topping cast at 90 d
+  - interval:                                       # props in: the topping cures
+      days: 3                                       #   and already shrinks --
+      losses:                                       #   restrained by the precast
+        base:    {model: rheo_precast}              # age DERIVED: 28 + 62 = 90 d
+        topping: {model: rheo_topping, age: 1, curing: 1}
+  - load:     {demand: G2}                          # props struck at 4 d
+  - point:    composite
+  - interval:                                       # -> 70 years
+      days: 25457
+      losses:
+        base:    {model: rheo_precast}              # DERIVED: 93 d
+        topping: {model: rheo_topping}              # DERIVED:  4 d
+  - point:    service
+
+combinations:
+  - name: ULS_composite
+    at: [transfer, composite, service]
+    history_factors: {G1: 1.35, G2: 1.35}
+    gamma_P: favourable
+    components:
+      - {ref: Q, factor: 1.5}
+  - name: SLS_char
+    at: service
+    history_factors: {G1: 1.0, G2: 1.0}
+    components:
+      - {ref: Q, factor: 1.0}
+
+output:
+  verification_top_k: 10

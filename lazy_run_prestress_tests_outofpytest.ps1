@@ -9,3 +9,4 @@ uv run tests\run_phase7_sls_validation.py
 uv run tests\run_phase8_task1_validation.py
 uv run tests\run_phase8_task2_validation.py
 uv run tests\run_phase8_task3_validation.py
+uv run tests\run_phase5_c5_validation.py

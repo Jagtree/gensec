@@ -179,14 +179,21 @@ class ConstructionTimeline:
     points : dict
     """
 
-    def __init__(self, events: List[TimelineEvent], points: Dict[str, int]):
+    def __init__(self, events: List[TimelineEvent], points: Dict[str, int],
+                 losses_models=None):
         self.events = events
         self.points = points
+        #: ``{name: LossModel}`` — the rheological models the
+        #: ``interval`` events reference (C5).  Empty when the model
+        #: declares no ``losses_models`` block, in which case the
+        #: timeline is byte-identical to the pre-C5 behaviour.
+        self.losses_models = dict(losses_models or {})
 
     # -- construction --------------------------------------------------
 
     @classmethod
-    def from_block(cls, block: Sequence[dict]) -> "ConstructionTimeline":
+    def from_block(cls, block: Sequence[dict], losses_models=None
+                   ) -> "ConstructionTimeline":
         r"""
         Parse the YAML ``construction_history`` block into a timeline.
 
@@ -259,18 +266,15 @@ class ConstructionTimeline:
 
             if kind == "interval" and isinstance(payload, dict) \
                     and "losses" in payload:
-                raise NotImplementedError(
-                    "construction_history: 'interval' with a 'losses' "
-                    "key is a Task-3 feature (rheological loss events "
-                    "driving RheologicalModel). Carry time only for now."
-                )
+                _validate_losses_spec(payload["losses"], losses_models,
+                                      len(events))
 
             events.append(TimelineEvent(kind, dict(payload)
                                         if isinstance(payload, dict)
                                         else {"value": payload},
                                         len(events)))
 
-        return cls(events, points)
+        return cls(events, points, losses_models=losses_models)
 
     # -- validation ----------------------------------------------------
 
@@ -425,6 +429,34 @@ class ConstructionTimeline:
         grout_eps_init: Dict[str, float] = {}
         stress_sigma: Dict[str, float] = {}
 
+        # ---- C5: the timeline clock and the rheological walk state ----
+        # ``t_now`` [days] advances only on ``interval`` events -- every
+        # other event is instantaneous.  It is what lets the walk say how
+        # old a zone is, and how long a tendon has been under load, at the
+        # moment an interval starts.
+        t_now = 0.0
+        t_stress: Dict[str, float] = {}      # tendon -> clock at stressing
+        zone_age0: Dict[int, float] = {}     # zone   -> age at the clock
+        zone_curing: Dict[int, float] = {}   # zone   -> t_s
+        # The concrete stress HISTORY, per zone: [(age_at_application,
+        # stress_plane)].  Creep obeys Boltzmann superposition, so a
+        # stress standing for years creeps far less over the next interval
+        # than one just applied -- and the emitted state cannot say which
+        # is which (reading a stress back with the instantaneous modulus
+        # gives the wrong number).  The walk must carry it.
+        creep_history: Dict[int, list] = {}
+        relax_from: Dict[str, tuple] = {}
+        # The SERVICE datum of every staged zone -- distinct from the
+        # capacity datum in ``bulk_planes`` (F4).  Both say "this zone is
+        # unstressed at its own casting"; they differ because one is drawn
+        # by the ULS solver and the other by the linear service solve.
+        service_datums: Dict[int, tuple] = {}
+        # The frozen emission: {event_index: section_ops}.  Computed ONCE,
+        # here; the compiler REPLAYS it and never re-derives.  Losses are
+        # timeline physics, frozen like the casting datums.
+        losses_ops: Dict[int, dict] = {}
+        losses_trace: Dict[int, list] = {}
+
         # Elements (rebars/tendons) contained in castable zones do not
         # exist before their zone is cast; and a *post-tensioned* tendon
         # (one that is grouted somewhere on the timeline) does not exist
@@ -464,6 +496,7 @@ class ConstructionTimeline:
                 sigma_p0 = ev.payload.get("sigma_p0")
                 for t in _event_tendon_refs(ev):
                     stressed[t] = ev.index
+                    t_stress.setdefault(t, t_now)
                     if sigma_p0 is not None:
                         stress_sigma[t] = float(sigma_p0)
                     parent = _tendon_parent_zone(section, t)
@@ -500,8 +533,34 @@ class ConstructionTimeline:
 
             elif ev.kind == "interval":
                 days = ev.payload.get("days", ev.payload.get("value"))
-                _emit({"name": f"interval[{ev.index}]", "components": [],
-                       "time": float(days) if days is not None else None})
+                spec = ev.payload.get("losses")
+                stage = {"name": f"interval[{ev.index}]", "components": [],
+                         "time": float(days) if days is not None else None}
+                if spec:
+                    if days is None:
+                        raise ValueError(
+                            f"construction_history[{ev.index}]: an "
+                            f"'interval' carrying 'losses' must declare "
+                            f"its length in 'days'.  Creep, shrinkage and "
+                            f"relaxation are all functions of elapsed "
+                            f"time; there is nothing to integrate over."
+                        )
+                    (ops, tr, creep_history,
+                     relax_from) = self._interval_losses(
+                        section, mgr, stage_prefix, cast_so_far,
+                        (cumN, cumMx, cumMy), spec, float(days), zone_names,
+                        t_now, t_stress, zone_age0, zone_curing,
+                        creep_history, relax_from, service_datums, ev, tol,
+                        max_iter)
+                    if ops:
+                        stage["section_ops"] = ops
+                    losses_ops[ev.index] = ops
+                    losses_trace[ev.index] = tr
+                _emit(stage)
+                if days is not None:
+                    t_now += float(days)
+                    for z in list(zone_age0):
+                        zone_age0[z] += float(days)
 
             elif ev.kind == "cast":
                 zi = _resolve_zone(ev.payload["zone"], zone_names)
@@ -524,6 +583,10 @@ class ConstructionTimeline:
                         f"{{eps0, chi_x, chi_y}} mapping, got "
                         f"{datum_spec!r}."
                     )
+                service_datums[zi] = self._service_datum(
+                    section, mgr, stage_prefix, cast_so_far, zi,
+                    (cumN, cumMx, cumMy), zone_names, zone_age0,
+                    zone_curing, tol, max_iter)
                 cast_so_far.append(zi)
                 _emit({"name": f"cast[{ev.index}]",
                        "components": [],
@@ -537,7 +600,263 @@ class ConstructionTimeline:
             datums=datums, explicit_datums=explicit,
             pre_post=pre_post, grouted=frozenset(grouted),
             stressed=dict(stressed), grout_eps_init=grout_eps_init,
-            stress_sigma=stress_sigma)
+            stress_sigma=stress_sigma, losses_ops=losses_ops,
+            losses_trace=losses_trace)
+
+    def _service_datum(self, section, mgr, stage_prefix, cast_so_far, zi,
+                       demand, zone_names, zone_age0, zone_curing, tol,
+                       max_iter):
+        r"""
+        The **service** casting datum of zone *zi* — the twin of
+        :meth:`_auto_datum`, drawn with the *linear* view (C5, finding
+        F4).
+
+        :meth:`_auto_datum` solves the substrate with the ULS view
+        (design constitutive laws, non-linear) and writes
+        :math:`(-\varepsilon_0, -\chi_x, -\chi_y)` into
+        ``bulk_planes``.  That is the right datum for the **resistance
+        domain**: the new zone enters it from its own zero.
+
+        It is the *wrong* datum for the **losses**, which are a
+        linear-viscoelastic, service-level calculation.  Negating a
+        ULS-drawn plane against a service-drawn one leaves a residue of
+        order :math:`10^{-4}` of strain, i.e. a few MPa of stress that a
+        freshly-cast zone does not actually carry — enough, on a young
+        topping, to trip the non-linear-creep limit and stop the run.
+        "A zone is unstressed at its own casting" is physics; it must not
+        depend on which solver drew the plane.
+
+        So the walk draws **both**: the ULS datum into ``bulk_planes``
+        (capacity), and this one into ``TimelineResolution`` (service).
+        Neither is derived from the other.
+
+        Returns
+        -------
+        tuple of float
+            :math:`(-\varepsilon_0, -\chi_x, -\chi_y)` of the linear
+            service solve, or ``(0, 0, 0)`` if no rheological model is in
+            play (the field is then never read).
+
+        Notes
+        -----
+        Uses each zone's own :math:`E_c(t)` from its loss model when one
+        is declared for it; otherwise the material's own SLS modulus.  A
+        model that declares no ``losses_models`` never reaches here.
+        """
+        from .losses import (_zone_material, _zone_drying_geometry
+                             as _zone_drying, _UNCAST_PLACEHOLDER_E)
+        from .sls import resolve_sls_moduli, sls_view
+        from .section_state import materialize_view
+        from .integrator import FiberSolver
+
+        if not self.losses_models:
+            return (0.0, 0.0, 0.0)
+        N, Mx, My = demand
+        if abs(N) < 1e-30 and abs(Mx) < 1e-30 and abs(My) < 1e-30:
+            return (0.0, 0.0, 0.0)
+
+        n_zones = len(zone_names) or 1
+        not_cast = [z for z in range(1, n_zones)
+                    if z not in cast_so_far and z != zi]
+        if not stage_prefix:
+            state = mgr.initial_state()
+        else:
+            states, _h, _b, _d = mgr.resolve_stages(
+                stage_prefix, initially_inactive=not_cast + [zi])
+            state = states[-1]
+
+        # moduli of the substrate as it stands at the cast
+        mod = {}
+        for z in range(n_zones):
+            mat = _zone_material(section, z)
+            if z == zi or not bool(state.bulk_active[z]):
+                mod[id(mat)] = _UNCAST_PLACEHOLDER_E
+                continue
+            lm = self._zone_loss_model(z, zone_names)
+            if lm is None:
+                mod[id(mat)] = _UNCAST_PLACEHOLDER_E
+            else:
+                A_c, u_d = _zone_drying(section, z)
+                prov = (lm.provider if lm.provider.A_c is not None
+                        else lm.provider.with_geometry(A_c, u_d))
+                mod[id(mat)] = prov.E_c(zone_age0.get(z, 28.0))
+
+        view = materialize_view(section, state)
+        solver = FiberSolver(sls_view(view, resolve_sls_moduli(section, mod)))
+        sol = solver.solve_equilibrium(N, Mx, My, tol=tol, max_iter=max_iter)
+        if not sol["converged"]:
+            raise ValueError(
+                f"construction_history: the *service* casting datum of "
+                f"zone '{zone_names[zi]}' did not converge under the "
+                f"cumulative demand (N={N / 1e3:.1f} kN, "
+                f"Mx={Mx / 1e6:.1f} kN·m).  A linear view should always "
+                f"converge -- the substrate is likely degenerate."
+            )
+        return (-sol["eps0"], -sol["chi_x"], -sol["chi_y"])
+
+    def _zone_loss_model(self, z, zone_names):
+        r"""The loss model any ``interval`` declares for zone *z*, or
+        ``None``.  Read from the events, so the datum drawn at a cast
+        knows the rheology the zone will later be given."""
+        for ev in self.events:
+            if ev.kind != "interval":
+                continue
+            for ref, spec in (ev.payload.get("losses") or {}).items():
+                if _resolve_zone(ref, zone_names) == z:
+                    return self.losses_models.get(spec.get("model"))
+        return None
+
+    def _interval_losses(self, section, mgr, stage_prefix, cast_so_far,
+                         demand, spec, days, zone_names, t_now, t_stress,
+                         zone_age0, zone_curing, creep_history, relax_from,
+                         service_datums, ev, tol, max_iter):
+        r"""
+        Compute the time-dependent losses of one ``interval`` (C5).
+
+        Resolves the current stage prefix to a :class:`SectionState` —
+        the same device :meth:`_auto_datum` and :meth:`_reconcile_grout`
+        use — hands it to the AAEM container
+        (:func:`gensec.solver.losses.expand_losses`) and returns the
+        ``section_ops`` that encode the end-of-interval strain state.
+
+        **The emission happens exactly once, here.**  The compiler
+        replays :attr:`TimelineResolution.losses_ops` and never
+        re-derives: losses are timeline physics, frozen like the casting
+        datums.  Re-deriving them per combination would let a
+        combination's *variable* actions leak into a *permanent*
+        creep history — the quiet mismodel this architecture exists to
+        prevent.
+
+        Parameters
+        ----------
+        section : GenericSection
+        mgr : StagedDomainManager
+        stage_prefix : list of dict
+            The stages emitted so far.
+        cast_so_far : list of int
+            Zones cast so far.
+        demand : tuple of float
+            The cumulative characteristic ``(N, Mx, My)`` standing at the
+            interval — the sustained action the AAEM integrates under.
+        spec : dict
+            The event's ``losses`` block, ``{zone_ref: {model, age,
+            curing}}``.
+        days : float
+            Length of the interval [days].
+        zone_names : list of str
+        t_now : float
+            The timeline clock at the *start* of the interval [days].
+        t_stress : dict
+            ``{tendon: clock at stressing}``.
+        zone_age0, zone_curing : dict
+            Per-zone age at the clock, and curing age — carried across
+            intervals by the walk.  Mutated in place.
+        creep_history : dict
+            ``{zone: [(tau, sigma_plane)]}``.  Carried across intervals.
+        ev : TimelineEvent
+        tol, max_iter :
+            Forwarded to the service solve.
+
+        Returns
+        -------
+        tuple
+            ``(section_ops, trace, creep_history)``.
+
+        Raises
+        ------
+        ValueError
+            A zone with no declared age on its first interval; a declared
+            age inconsistent with the clock; an unknown model reference.
+        """
+        from .losses import expand_losses
+
+        n_zones = len(zone_names) or 1
+        not_cast = [z for z in range(1, n_zones) if z not in cast_so_far]
+        if not stage_prefix:
+            state = mgr.initial_state()
+        else:
+            states, _h, _b, _d = mgr.resolve_stages(
+                stage_prefix, initially_inactive=not_cast)
+            state = states[-1]
+
+        models, ages0, ages1, curing = {}, {}, {}, {}
+        for zone_ref, zs in spec.items():
+            z = _resolve_zone(zone_ref, zone_names)
+            name = zs["model"]
+            lm = self.losses_models.get(name)
+            if lm is None:
+                raise ValueError(
+                    f"construction_history[{ev.index}]: 'interval.losses' "
+                    f"references loss model '{name}', which the "
+                    f"'losses_models' block does not define. Known: "
+                    f"{sorted(self.losses_models)}."
+                )
+            declared = zs.get("age")
+            if z in zone_age0:
+                derived = zone_age0[z]
+                if declared is not None \
+                        and abs(float(declared) - derived) > 1e-9:
+                    raise ValueError(
+                        f"construction_history[{ev.index}]: zone "
+                        f"'{zone_ref}' is declared to be "
+                        f"{float(declared):g} d old at this interval, but "
+                        f"the timeline clock makes it {derived:g} d "
+                        f"(declared {zone_age0[z] - t_now:+g} d earlier "
+                        f"and advanced by the intervening intervals).  An "
+                        f"age is declared once, then derived; a mismatch "
+                        f"is a modelling error, not a re-declaration."
+                    )
+                age0 = derived
+            else:
+                if declared is None:
+                    raise ValueError(
+                        f"construction_history[{ev.index}]: zone "
+                        f"'{zone_ref}' appears in an 'interval.losses' "
+                        f"for the first time and declares no 'age'.  "
+                        f"Creep and shrinkage both depend on how old the "
+                        f"concrete is; the timeline cannot know, and "
+                        f"assuming would be a silent normative choice."
+                    )
+                age0 = float(declared)
+                zone_age0[z] = age0
+            if z not in zone_curing:
+                if "curing" not in zs:
+                    raise ValueError(
+                        f"construction_history[{ev.index}]: zone "
+                        f"'{zone_ref}' declares no 'curing' age.  Drying "
+                        f"shrinkage is measured from the end of curing; "
+                        f"an assumed curing age is an assumed shrinkage."
+                    )
+                zone_curing[z] = float(zs["curing"])
+            if age0 <= 0.0:
+                raise ValueError(
+                    f"construction_history[{ev.index}]: zone "
+                    f"'{zone_ref}' is {age0:g} d old at the start of the "
+                    f"interval.  Concrete cannot creep before it exists; "
+                    f"cast it, let it harden, then load it."
+                )
+            models[z] = lm
+            ages0[z] = age0
+            ages1[z] = age0 + days
+            curing[z] = zone_curing[z]
+
+        tendon_ages0 = {}
+        for j, t in enumerate(getattr(section, "tendons", [])):
+            nm = getattr(t, "name", None) or f"tendon[{j}]"
+            if not state.active[int(section.x_rebars.size) + j]:
+                continue
+            # A pre-tensioned tendon carries no ``stress`` event: it was
+            # stressed against the abutments before the timeline began, so
+            # its relaxation clock starts at t = 0.
+            tendon_ages0[nm] = max(0.0, t_now - t_stress.get(nm, 0.0))
+
+        ops, trace, creep_history, relax_from = expand_losses(
+            section, state, models=models, demand=demand,
+            zone_ages_t0=ages0, zone_ages_t=ages1, zone_curing_ages=curing,
+            tendon_ages_t0=tendon_ages0, interval_days=days,
+            history=creep_history, relax_from=relax_from,
+            service_datums=service_datums, label=f"interval[{ev.index}]")
+        return ops, trace, creep_history, relax_from
 
     def _auto_datum(self, mgr, stage_prefix, cast_so_far, zi, demand,
                     ev, tol, max_iter) -> Tuple[float, float, float]:
@@ -893,8 +1212,16 @@ class ConstructionTimeline:
 
             elif ev.kind == "interval":
                 days = ev.payload.get("days", ev.payload.get("value"))
-                _emit({"name": f"interval[{ev.index}]", "components": [],
-                       "time": float(days) if days is not None else None})
+                stage = {"name": f"interval[{ev.index}]", "components": [],
+                         "time": float(days) if days is not None else None}
+                # C5: REPLAY the frozen emission.  Never re-derive: the
+                # AAEM integrates the *permanent* action standing on the
+                # timeline, and a combination's variable part has no
+                # business in a creep history.
+                ops = resolution.losses_ops.get(ev.index)
+                if ops:
+                    stage["section_ops"] = ops
+                _emit(stage)
         return stages
 
     def _stress_actions(self, ev, resolution, section, gamma_P
@@ -1088,16 +1415,30 @@ class TimelineResolution:
     """
 
     __slots__ = ("datums", "explicit_datums", "pre_post", "grouted",
-                 "stressed", "grout_eps_init", "stress_sigma")
+                 "stressed", "grout_eps_init", "stress_sigma",
+                 "losses_ops", "losses_trace")
 
     def __init__(self, datums, explicit_datums, pre_post, grouted,
-                 stressed, grout_eps_init=None, stress_sigma=None):
+                 stressed, grout_eps_init=None, stress_sigma=None,
+                 losses_ops=None, losses_trace=None):
         self.datums = datums
         self.explicit_datums = explicit_datums
         self.pre_post = pre_post
         self.grouted = grouted
         self.stressed = stressed
         self.grout_eps_init = grout_eps_init or {}
+        #: C5 -- the FROZEN loss emission: ``{event_index: section_ops}``.
+        #: Computed exactly once, in :meth:`ConstructionTimeline.resolve`;
+        #: :meth:`ConstructionTimeline.compile_combination` **replays** it
+        #: and never re-derives.  Re-deriving per combination would let a
+        #: combination's *variable* actions leak into a *permanent* creep
+        #: history -- losses are timeline physics, frozen like the casting
+        #: datums.
+        self.losses_ops = losses_ops or {}
+        #: ``{event_index: [IntervalLosses, ...]}`` -- the per-step trace,
+        #: for reporting.  GenSec's purpose is to give the engineer every
+        #: number it used, not only the one it acted on.
+        self.losses_trace = losses_trace or {}
         self.stress_sigma = stress_sigma or {}
 
 
@@ -1151,6 +1492,82 @@ def governing_point(per_point_results: Dict[str, dict]) -> dict:
 #: no provider is supplied.  Any normative may override via a provider
 #: (mirror ``gamma_s_prestress`` / ``delta_sigma_p_uls``).
 _GAMMA_P_EC2 = {"favourable": 1.0, "unfavourable": 1.3}
+
+
+def _validate_losses_spec(spec, losses_models, ev_index):
+    r"""
+    Structural validation of an ``interval``'s ``losses`` block (C5).
+
+    Runs at :meth:`ConstructionTimeline.from_block` time — before any
+    section exists — so a typo in a model name or a missing age surfaces
+    at parse, not three solves later.
+
+    Expected shape::
+
+        losses:
+          base:    {model: rheo_c45, age: 90, curing: 3}
+          topping: {model: rheo_c30, age: 2,  curing: 1}
+
+    ``age`` is the age of the zone [days] **at the start of this
+    interval** and ``curing`` the age at the end of curing (:math:`t_s`,
+    the origin of drying shrinkage).  Both are **required the first time
+    a zone appears** and are *derived* from the timeline clock on later
+    intervals; when given again they are cross-checked.  There is no
+    default: an assumed curing age is an assumed shrinkage, and this
+    project does not make normative choices silently.
+
+    Parameters
+    ----------
+    spec : dict
+        The raw ``losses`` payload.
+    losses_models : dict or None
+        ``{name: LossModel}`` from the model's ``losses_models`` block.
+    ev_index : int
+        Event position, for the message.
+
+    Raises
+    ------
+    ValueError
+        Malformed block, unknown key, or a model reference that the
+        ``losses_models`` block does not define.
+    """
+    where = f"construction_history[{ev_index}]: 'interval.losses'"
+    if not isinstance(spec, dict) or not spec:
+        raise ValueError(
+            f"{where} must be a non-empty mapping "
+            f"{{zone: {{model, age, curing}}}}, got {spec!r}.  A bare "
+            f"model name is not accepted: the rheology of a zone is "
+            f"meaningless without its age and its curing age, and "
+            f"guessing them would be a silent normative choice."
+        )
+    known = set(losses_models or {})
+    for zone_ref, z in spec.items():
+        w = f"{where}, zone '{zone_ref}'"
+        if not isinstance(z, dict):
+            raise ValueError(
+                f"{w}: must be a mapping {{model, age, curing}}, got "
+                f"{z!r}."
+            )
+        unknown = sorted(set(z) - {"model", "age", "curing"})
+        if unknown:
+            raise ValueError(
+                f"{w}: unknown key(s) {unknown}.  Valid: model, age, "
+                f"curing."
+            )
+        if "model" not in z:
+            raise ValueError(f"{w}: 'model' is required.")
+        if known and z["model"] not in known:
+            raise ValueError(
+                f"{w}: loss model '{z['model']}' is not defined.  The "
+                f"'losses_models' block declares {sorted(known)}."
+            )
+        for k in ("age", "curing"):
+            if k in z and not (isinstance(z[k], (int, float))
+                               and float(z[k]) >= 0.0):
+                raise ValueError(
+                    f"{w}: '{k}' must be a non-negative number of days, "
+                    f"got {z[k]!r}."
+                )
 
 
 def _resolve_gamma_P(spec, provider) -> float:

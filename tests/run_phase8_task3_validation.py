@@ -92,7 +92,7 @@ def composite():
                          LinearElastic(E=E2, name="topping"), "topping")],
         tendons=[Tendon(y=Y_T, Ap=AP, material=_ps(), x=B / 2.0,
                         eps_pe=EPS_PE, name="T1")],
-        mesh_size=50.0, n_grid_x=8, n_grid_y=20)
+        mesh_size=50.0, n_grid_x=8, n_grid_y=40)
 
 
 def composite_plain():
@@ -214,7 +214,13 @@ def t2_service(sec):
     u_sub = _solve(K_prec, (0.0, Mg), np.zeros(2))
     K_comp = _fiber_stiffness(sec, [True, True])
     u_inc = _solve(K_comp, (0.0, dM), np.zeros(2))
-    datum_top = [u_sub[0], u_sub[1], 0.0]        # DATUM-CONVENTION
+    # F7: the fibre kernel ADDS the bulk offset (integrator.py), which is
+    # why ConstructionTimeline._auto_datum stores the NEGATED plane.  This
+    # validator was written -- and, per 10_6 §Verification-honesty, NOT RUN
+    # -- against the opposite assumption, and flagged it inline as
+    # "# DATUM-CONVENTION".  The first run found it.  The datum of a zone
+    # cast onto a substrate standing at u_sub is -u_sub.
+    datum_top = [-u_sub[0], -u_sub[1], 0.0]
     planes = np.array([[0.0, 0.0, 0.0], datum_top], float)
 
     s0 = _state(sec, active=[], bonded=[], eps_t=0.0,
@@ -233,9 +239,20 @@ def t2_service(sec):
     check("T2 substrate bottom (datum-robust superposition)",
           abs(rc["sigma_min_MPa"] - sub_bot) < 1e-3,
           f"got={rc['sigma_min_MPa']:.4f} exp={sub_bot:.4f}")
-    check("T2 topping top (datum-dependent) [# DATUM-CONVENTION]",
-          abs(rc["sigma_max_MPa"] - top_top) < 1e-3,
-          f"got={rc['sigma_max_MPa']:.4f} exp={top_top:.4f}")
+    # The GLOBAL maximum sits in the SUBSTRATE here (E1 = 35000 > E2 =
+    # 31000, so the substrate's top out-stresses the topping's), and this
+    # check used to compare it against the TOPPING's top -- two different
+    # quantities.  Read the topping's own extreme.  Each zone has its own
+    # f_ck anyway: a check on the global extreme alone is checking one
+    # zone against another zone's limit.
+    top = rc["by_zone"]["topping"]
+    check("T2 topping top (its own extreme fibre)",
+          abs(top["sigma_max_MPa"] - top_top) < 1e-3,
+          f"got={top['sigma_max_MPa']:.4f} exp={top_top:.4f}")
+    check("T2 the global max is in the SUBSTRATE, not the topping",
+          rc["at_max"][1] <= H1 + 1e-9,
+          f"global max {rc['sigma_max_MPa']:.4f} @ y={rc['at_max'][1]:.0f} "
+          f"vs topping top {top['sigma_max_MPa']:.4f}")
 
 
 def t3_decompression(sec):

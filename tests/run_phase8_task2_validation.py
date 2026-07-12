@@ -63,7 +63,7 @@ from gensec.solver.timeline import (
     ConstructionTimeline, governing_point, _resolve_gamma_P,
 )
 
-EXAMPLE = "examples\example_composite_topping.yaml"
+EXAMPLE = "examples/example_composite_topping.yaml"
 TOL = 1e-12
 
 
@@ -210,8 +210,12 @@ def axis_A4_fail_loud(section, ddb) -> bool:
     check("unknown kind", lambda: C.from_block([{"pour": {}}]), ValueError)
     check("dup point", lambda: C.from_block(
         [{"point": "p"}, {"point": "p"}]), ValueError)
-    check("interval+losses", lambda: C.from_block(
-        [{"interval": {"days": 1, "losses": "creep"}}]), NotImplementedError)
+    # C5 landed: 'interval' + 'losses' is no longer a placeholder.  A bare
+    # model name is still refused -- a zone's rheology is meaningless
+    # without its age and its curing age, and guessing them would be a
+    # silent normative choice -- but with ValueError now.
+    check("interval+losses (bare name)", lambda: C.from_block(
+        [{"interval": {"days": 1, "losses": "creep"}}]), ValueError)
     check("cast base", lambda: C.from_block(
         [{"cast": {"zone": "base"}}]).validate(section), ValueError)
     check("unknown zone", lambda: C.from_block(
@@ -262,7 +266,7 @@ def axis_A6_prestress_equivalence() -> bool:
     from gensec.solver.section_state import StagedDomainManager
     from gensec.solver.check import VerificationEngine
 
-    data = load_yaml("examples\example_prestress.yaml")
+    data = load_yaml("examples/example_prestress.yaml")
     section = data["section"]
     T, SIGMA = "tendon_0", 1400.0
 

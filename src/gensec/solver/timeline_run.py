@@ -128,7 +128,9 @@ def run_timeline(data: dict, *, n_points: int = 40,
     combinations = data.get("combinations", [])
     ddb = _demand_db(demands)
 
-    tl = ConstructionTimeline.from_block(data["construction_history"])
+    tl = ConstructionTimeline.from_block(
+        data["construction_history"],
+        losses_models=data.get("losses_models"))
     resolution = tl.resolve(section, ddb)
 
     if biaxial is None:

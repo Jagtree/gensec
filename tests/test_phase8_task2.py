@@ -76,10 +76,19 @@ class TestTimelineParse(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConstructionTimeline.from_block([{"point": "p"}, {"point": "p"}])
 
-    def test_interval_losses_is_task3(self):
-        with self.assertRaises(NotImplementedError):
+    def test_interval_losses_is_implemented_in_c5(self):
+        """C5 landed: 'interval' + 'losses' is no longer a placeholder.
+        A bare model name is still refused -- a zone's rheology is
+        meaningless without its age and its curing age -- but with
+        ValueError now, not NotImplementedError."""
+        with self.assertRaises(ValueError):
             ConstructionTimeline.from_block(
                 [{"interval": {"days": 28, "losses": "creep"}}])
+        tl = ConstructionTimeline.from_block(
+            [{"interval": {"days": 28,
+                           "losses": {"base": {"model": "m", "age": 28,
+                                               "curing": 3}}}}])
+        self.assertEqual(len(tl.events), 1)
 
     def test_bad_event_object_construction(self):
         with self.assertRaises(ValueError):

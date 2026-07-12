@@ -95,6 +95,10 @@ from .geometry.section import RectSection
 from .geometry.geometry import GenericSection
 from .geometry import primitives as prim
 from .solver.section_state import PrestressAction
+from .solver.losses import LossModel
+from .materials.rheology import (
+    EC2RheologicalModel, ACIRheologicalModel, TabulatedRheologicalModel,
+)
 from .materials.ec2_bridge import (
     concrete_from_class, concrete_from_ec2,
     prestress_from_ec2, prestress_from_class,
@@ -448,6 +452,10 @@ def load_yaml(filepath):
     # byte-identical to the pre-Task-2 behaviour).
     construction_history = data.get("construction_history")
 
+    # Phase-5 / C5: the rheological loss models an ``interval`` may
+    # reference.  Absent -> {} and the whole machinery is inert.
+    losses_models = _parse_losses_models(data.get("losses_models"))
+
     return {
         "materials": materials,
         "section": section,
@@ -456,7 +464,108 @@ def load_yaml(filepath):
         "envelopes": envelopes,
         "output_options": output_opts,
         "construction_history": construction_history,
+        "losses_models": losses_models,
     }
+
+
+#: Provider constructors reachable from a YAML ``losses_models`` block.
+#: A norm enters GenSec by adding one line here and one class in
+#: :mod:`gensec.materials.rheology` -- nothing in the container moves.
+_RHEO_PROVIDERS = {
+    "ec2": EC2RheologicalModel,
+    "ntc": EC2RheologicalModel,      # NTC 2018 adopts the EC2 formulae
+    "aci": ACIRheologicalModel,
+    "aci209": ACIRheologicalModel,
+    "tabulated": TabulatedRheologicalModel,
+}
+#: Keys of a ``losses_models`` entry that belong to the **container**
+#: (:class:`~gensec.solver.losses.LossModel`), not to the provider.
+_LOSS_CONTAINER_KEYS = ("provider", "chi", "relaxation_reduction",
+                        "n_steps", "steps")
+
+
+def _parse_losses_models(block):
+    r"""
+    Parse the top-level ``losses_models`` block into
+    :class:`~gensec.solver.losses.LossModel` objects (Phase 5 / C5).
+
+    ::
+
+        losses_models:
+          rheo_precast:
+            provider: ec2               # | ntc | aci | tabulated
+            fck: 45                     # -> the provider's constructor
+            cement_class: R
+            RH: 70
+            chi: lump                   # -> the container: lump | from_J | float
+            relaxation_reduction: 0.8   # -> the container
+            steps: [1, 7, 30, 365]      # -> the container (opt-in)
+
+    Every key that is **not** a container knob is forwarded verbatim to
+    the provider's constructor, so a new norm needs no change here beyond
+    an entry in :data:`_RHEO_PROVIDERS` — the split between *mechanics*
+    (container) and *normative content* (provider) is enforced by the
+    parser itself.
+
+    The drying geometry :math:`(A_c, u)` is deliberately **not** a YAML
+    key: the container binds it per concrete zone from the section's own
+    polygons, because in a composite section every zone has its own
+    exposed perimeter.  A provider constructed with an explicit ``A_c``
+    and ``u`` keeps them (an engineer overriding the exposed perimeter of
+    a topping cast onto a web).
+
+    Parameters
+    ----------
+    block : dict or None
+        The raw ``losses_models`` mapping.
+
+    Returns
+    -------
+    dict
+        ``{name: LossModel}``.  Empty when the block is absent, in which
+        case the whole rheology machinery is inert and the run is
+        byte-identical to the pre-C5 behaviour.
+
+    Raises
+    ------
+    ValueError
+        Malformed block; unknown provider; a provider constructor that
+        rejects its arguments (re-raised with the model's name attached).
+    """
+    if not block:
+        return {}
+    if not isinstance(block, dict):
+        raise ValueError(
+            f"'losses_models' must be a mapping {{name: spec}}, got "
+            f"{type(block).__name__}."
+        )
+    out = {}
+    for name, spec in block.items():
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"losses_models['{name}'] must be a mapping, got "
+                f"{type(spec).__name__}."
+            )
+        pname = str(spec.get("provider", "")).lower()
+        if pname not in _RHEO_PROVIDERS:
+            raise ValueError(
+                f"losses_models['{name}']: unknown provider "
+                f"{spec.get('provider')!r}. Valid: "
+                f"{sorted(set(_RHEO_PROVIDERS))}."
+            )
+        pkwargs = {k: v for k, v in spec.items()
+                   if k not in _LOSS_CONTAINER_KEYS}
+        try:
+            provider = _RHEO_PROVIDERS[pname](name=name, **pkwargs)
+        except TypeError as exc:
+            raise ValueError(
+                f"losses_models['{name}']: the '{pname}' provider does "
+                f"not accept these keys ({sorted(pkwargs)}) -- {exc}."
+            ) from exc
+        ckwargs = {k: spec[k] for k in _LOSS_CONTAINER_KEYS
+                   if k in spec and k != "provider"}
+        out[name] = LossModel(provider=provider, name=name, **ckwargs)
+    return out
 
 
 def _parse_rebars(sec_spec, materials):
@@ -1124,7 +1233,7 @@ def _resolve_single_prestress_action(spec, section, x_ref, y_ref,
 #: silently dropped — it would change the model without telling).
 _SECTION_OPS_KEYS = ("activate", "deactivate", "eps_override",
                      "bulk_eps", "release", "activate_bulk",
-                     "deactivate_bulk")
+                     "deactivate_bulk", "bulk_plane_delta")
 
 
 def _parse_section_ops_spec(combo_name, stage_name, ops):

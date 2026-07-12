@@ -73,11 +73,15 @@ N_FIB_Y = 200
 # closed-form run of run_phase7_sls_validation.py on this exact
 # model — transfer stage M = 40 kNm, losses stage eps_pe -> 0.0055
 # after +80 kNm service moment):
-REG_TRANSFER_SIG_MIN = -30.490098      # [MPa]
-REG_TRANSFER_SIG_MAX = 10.261473       # [MPa]
+# F6 (Phase-5): re-anchored to the EXTREME-FIBRE stresses.  The previous
+# values (-30.490098 / 10.261473 / -33.620496) were the outermost FIBRE
+# CENTROID's, inset half a fibre from the section face -- a systematic,
+# NON-CONSERVATIVE under-report of the very stress EN 1992-1-1 7.2 limits.
+REG_TRANSFER_SIG_MIN = -30.592489      # [MPa]
+REG_TRANSFER_SIG_MAX = 10.363864       # [MPa]
 REG_TRANSFER_SIGMA_P = 1033.492574     # [MPa]
 REG_TRANSFER_SIGMA_S0 = -165.605338    # [MPa]
-REG_LOSSES_SIG_MIN = -33.620496        # [MPa]
+REG_LOSSES_SIG_MIN = -33.743676        # [MPa]
 REG_LOSSES_SIGMA_P = 926.924518        # [MPa]
 
 
@@ -196,8 +200,8 @@ class TestTransfer(_SLSCaseBase):
         res = self._transfer_result()
         u = self._solve_u(self.sec, (0.0, self.M0), True, EPS_PE)
         c = res["stages"][0]["concrete"]
-        y_bot = float(self.sec.y_fibers.min())
-        y_top = float(self.sec.y_fibers.max())
+        y_bot = 0.0
+        y_top = H
         self.assertAlmostEqual(c["sigma_min_MPa"],
                                self._sig_c(u, y_bot), delta=1e-3)
         self.assertAlmostEqual(c["sigma_max_MPa"],
@@ -213,7 +217,7 @@ class TestTransfer(_SLSCaseBase):
         u = self._solve_u(self.sec, (0.0, self.M0), True, EPS_PE,
                           discrete=False)
         c = res["stages"][0]["concrete"]
-        ref = self._sig_c(u, float(self.sec.y_fibers.min()))
+        ref = self._sig_c(u, 0.0)
         self.assertAlmostEqual(c["sigma_min_MPa"], ref,
                                delta=5e-3 * abs(ref))
 
@@ -265,7 +269,7 @@ class TestStagedAccumulation(_SLSCaseBase):
         c = res["stages"][1]["concrete"]
         self.assertAlmostEqual(
             c["sigma_min_MPa"],
-            self._sig_c(u, float(self.sec.y_fibers.min())),
+            self._sig_c(u, 0.0),
             delta=1e-3)
         self.assertAlmostEqual(self._elem_sigma(res, 1, 2),
                                self._sig_el(u, Y_T, EP, EPS_PE),
@@ -278,7 +282,7 @@ class TestStagedAccumulation(_SLSCaseBase):
         c = res["stages"][2]["concrete"]
         self.assertAlmostEqual(
             c["sigma_min_MPa"],
-            self._sig_c(u, float(self.sec.y_fibers.min())),
+            self._sig_c(u, 0.0),
             delta=1e-3)
         self.assertAlmostEqual(self._elem_sigma(res, 2, 2),
                                self._sig_el(u, Y_T, EP,
