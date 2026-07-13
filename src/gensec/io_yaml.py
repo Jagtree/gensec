@@ -97,7 +97,7 @@ from .geometry import primitives as prim
 from .solver.section_state import PrestressAction
 from .solver.losses import LossModel
 from .materials.rheology import (
-    EC2RheologicalModel, ACIRheologicalModel, TabulatedRheologicalModel,
+    EC2RheologicalModel, TabulatedRheologicalModel,
 )
 from .materials.ec2_bridge import (
     concrete_from_class, concrete_from_ec2,
@@ -474,10 +474,12 @@ def load_yaml(filepath):
 _RHEO_PROVIDERS = {
     "ec2": EC2RheologicalModel,
     "ntc": EC2RheologicalModel,      # NTC 2018 adopts the EC2 formulae
-    "aci": ACIRheologicalModel,
-    "aci209": ACIRheologicalModel,
     "tabulated": TabulatedRheologicalModel,
 }
+# 'aci' is deliberately absent.  A rheology is declarable only for a norm
+# GenSec can actually design to, and there is no ACI material -- no bridge,
+# no partial factors, no limit states.  The ACI provider exists, as a
+# falsification fixture, in aci209_falsification.py, outside the package.
 #: Keys of a ``losses_models`` entry that belong to the **container**
 #: (:class:`~gensec.solver.losses.LossModel`), not to the provider.
 _LOSS_CONTAINER_KEYS = ("provider", "chi", "relaxation_reduction",
@@ -493,7 +495,7 @@ def _parse_losses_models(block):
 
         losses_models:
           rheo_precast:
-            provider: ec2               # | ntc | aci | tabulated
+            provider: ec2               # | ntc | tabulated
             fck: 45                     # -> the provider's constructor
             cement_class: R
             RH: 70

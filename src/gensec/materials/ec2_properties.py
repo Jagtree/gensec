@@ -283,6 +283,14 @@ class fben2:
         # function of time
         self.fcm_28 = fck + 8  # [MPa]
         self.fck_28 = fck  # [MPa]
+        # F1 (Phase-5): the exponent alpha of EN 1992-1-1 eq. (3.4),
+        #     f_ctm(t) = [beta_cc(t)]^alpha * f_ctm ,
+        # is alpha = 1 for t < 28 d and alpha = 2/3 for t >= 28 d -- the
+        # tensile strength drops FASTER than beta_cc when young and grows
+        # SLOWER when mature.  It was inverted.  Inert at t = 28 d, where
+        # beta_cc = 1; it bites only away from it, and Phase 5 is the first
+        # consumer of fben2 at t != 28.
+        # alpha belongs to f_ctm and to NOTHING ELSE -- see the modulus (F2).
         if time >= 28:
             self.fcm = fck + 8  # [MPa]
             self.fck = fck  # [MPa]
@@ -298,7 +306,15 @@ class fben2:
         # Other concrete properties evaluations
         self.eps_c1 = min(2.8, (0.7*(self.fcm**0.31))) / 10**3
         self.eps_c1_28 = min(2.8, (0.7*(self.fcm_28**0.31))) / 10**3
+        # F1c: the strength CLASS is a 28-day property.  Branching on the
+        # AGED self.fck made a C60 at 3 days (fck(3) = 32.7 MPa) take the
+        # C<=50 formula -- ageing must not change which equation applies.
         if self.fck_28 <= 50:
+            # with time influence:
+            # F1b: EN 1992-1-1 (3.4) is  f_ctm(t) = beta_cc^alpha * f_ctm ,
+            # with f_ctm the 28-DAY value.  Using self.fck (already aged,
+            # fck(t) = beta_cc*fcm_28 - 8) double-counts beta_cc -- the same
+            # vice the modulus had (F2).  Reference it to fck_28.
             self.fctm = ((self.beta_cc**alpha)
                          * 0.3*(self.fck_28**(2/3)))  # [MPa]
             self.eps_cu1 = 3.5 / 10**3  # [no unit] --> it is not in ‰
@@ -316,8 +332,15 @@ class fben2:
             self.eps_c3_28 = 1.75 / 10**3  # [no unit] --> it is not in ‰
             self.eps_cu3_28 = 3.5 / 10**3  # [no unit] --> it is not in ‰
         else:
+            # with time influence:
+            # F1b (C55+ branch): same -- reference to the 28-day f_cm.
             self.fctm = ((self.beta_cc**alpha)
                          * 2.12*np.log(1+(self.fcm_28/10)))  # [MPa]
+            # F1d: the strain limits of Table 3.1 are CLASS properties -- they
+            # are not time-dependent.  Evaluating them on the AGED fck made a
+            # C60 at 3 d (fck(3) = 32.7 MPa) raise a NEGATIVE base to the power
+            # 0.53 and produce a silent **NaN**, which then propagated into the
+            # constitutive law.  Reference them to the 28-day class.
             self.eps_cu1 = max((2.8+27*((98-self.fcm_28)/100)**4) / 10**3,
                                self.eps_c1)  # [no unit] --> it is not in ‰
             self.eps_c2 = (2 + 0.085*((self.fck_28-50)**0.53)) / 10**3 \
@@ -347,6 +370,15 @@ class fben2:
                                   self.eps_c3_28)
         self.fctk_005 = 0.7*self.fctm  # [MPa]
         self.fctk_095 = 1.3*self.fctm  # [MPa]
+        # F2 (Phase-5): EN 1992-1-1 3.1.3(3) is
+        #     E_cm(t) = [f_cm(t) / f_cm]^0.3 * E_cm = [beta_cc(t)]^0.3 * E_cm.
+        # This line used to multiply by ((beta_cc ** alpha) ** 0.3) -- f_ctm's
+        # exponent, which has no business in a modulus.  Below 28 d, where
+        # self.fcm already carries a beta_cc, that DOUBLE-COUNTED it and gave
+        # beta_cc^0.5 (~ -10% at 3 d on C45).  Merely inverting alpha (the F1
+        # fix) does not repair it: it makes it beta_cc^0.6, AND it breaks the
+        # t >= 28 branch, which was correct.  alpha must be REMOVED, not
+        # flipped.
         self.ecm = ((1000)*22*(self.fcm_28/10)**(0.3)
                     * (self.beta_cc ** 0.3))  # [MPa]
         self.fctk_005_28 = 0.7*self.fctm_28  # [MPa]

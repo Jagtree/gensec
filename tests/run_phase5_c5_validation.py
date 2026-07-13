@@ -54,8 +54,9 @@ from gensec.geometry.fiber import Tendon
 from gensec.materials.base import aging_coefficient, relaxation_function
 from gensec.materials.ec2_bridge import concrete_from_class, prestress_from_ec2
 from gensec.materials.rheology import (
-    ACIRheologicalModel, EC2RheologicalModel, TabulatedRheologicalModel,
+    EC2RheologicalModel, TabulatedRheologicalModel,
 )
+from aci209_falsification import ACIRheologicalModel
 from gensec.solver.losses import (
     LossModel, compute_interval_losses, ec2_5106_closed_form, expand_losses,
 )

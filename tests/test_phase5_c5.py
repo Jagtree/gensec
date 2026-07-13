@@ -27,8 +27,18 @@ from gensec.materials.base import (
 )
 from gensec.materials.ec2_bridge import concrete_from_class, prestress_from_ec2
 from gensec.materials.rheology import (
-    ACIRheologicalModel, EC2RheologicalModel, TabulatedRheologicalModel,
+    EC2RheologicalModel, TabulatedRheologicalModel,
 )
+
+# The ACI provider is a FALSIFICATION FIXTURE, not a library module: GenSec
+# has no ACI material, so a rheology for it would promise a design capability
+# that does not exist.  It lives at the repository root, outside the package.
+import os                                                        # noqa: E402
+import sys                                                       # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+from aci209_falsification import ACIRheologicalModel              # noqa: E402
 from gensec.solver.losses import (
     EC2_LUMP_CHI, LossModel, compute_interval_losses, ec2_5106_closed_form,
     expand_losses,
@@ -155,14 +165,29 @@ class TestEC2Provider:
         b = ec2_steel.relaxation(1e9, 0.7)
         assert a == pytest.approx(b, rel=1e-12)
 
-    def test_E_c_uses_beta_cc_to_the_0_3_not_fbpren(self):
-        """Phase-5 finding F2: ``fben2.ecm`` applies the *tensile*
-        exponent to the modulus, giving beta_cc**0.5 below 28 d.  The
-        provider computes E_cm(t) itself, per §3.1.3(3)."""
+    def test_E_c_IS_fben2s(self):
+        """The provider must NOT re-derive EC2's instantaneous properties.
+        It once did -- because fben2.ecm was broken (F2) -- and that fork
+        left two implementations of the same Eurocode formula with nothing
+        enforcing that they agree.  F1/F2 are closed; the fork is gone.
+        This test is the enforcement: E_c(t) IS fben2.ecm, at every age."""
+        from gensec.materials.ec2_properties import fben2
         m = EC2RheologicalModel(fck=35, cement_class="N").with_geometry(
             A_c=AC, u=U)
-        assert m.E_c(3.0) == pytest.approx(
-            m.Ecm28 * m.beta_cc(3.0) ** 0.3, rel=1e-12)
+        for t in (3.0, 7.0, 28.0, 90.0, 365.0):
+            p = fben2(fck=35.0, ls="S", loadtype="slow", TypeConc="N",
+                      time=t)
+            assert m.E_c(t) == pytest.approx(p.ecm, rel=1e-12)
+            assert m.linearity_limit(t) == pytest.approx(0.45 * p.fck,
+                                                         rel=1e-12)
+        assert m.fcm == pytest.approx(43.0, rel=1e-12)
+
+    def test_nothing_eurocode_is_stored_on_the_provider(self):
+        """A value copied at construction is a value frozen at
+        construction.  The provider must hold NO Eurocode number."""
+        m = EC2RheologicalModel(fck=35, cement_class="N")
+        stored = set(vars(m))
+        assert not stored & {"fcm", "Ecm28", "s_cem", "_memo", "_p28"}
 
     def test_linearity_limit_is_045_fck(self, ec2):
         assert ec2.linearity_limit(28.0) == pytest.approx(0.45 * 35.0,
