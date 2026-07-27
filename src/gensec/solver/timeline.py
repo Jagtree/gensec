@@ -285,7 +285,11 @@ class ConstructionTimeline:
         Fail-loud inventory (``10_3`` §5.6): unknown zone / tendon /
         demand references; ``cast`` of the base zone (zone 0, never
         castable — master plan §1); ``grout``/``stress`` of an unknown
-        tendon.  Demand references are checked by :meth:`resolve` /
+        tendon; ``grout`` of a **pre-tensioned** tendon (F-C(1) — it has
+        no duct, and it never emitted the demand-side action a grout
+        stage exists to cancel, so grouting it would inject an orphan
+        negative prestress demand).  Demand references are checked by
+        :meth:`resolve` /
         :meth:`compile_combination` against the demand database (not
         available here), so only geometry references are checked at this
         stage.
@@ -329,6 +333,33 @@ class ConstructionTimeline:
                             f"'{ev.kind}' references unknown tendon "
                             f"'{t}'. Known: {sorted(tendon_names)}."
                         )
+
+        # -- F-C(1): grouting a PRE-tensioned tendon --------------------
+        # Every tendon reference is known good by here, so the classifier
+        # cannot raise on a bad name and mask this message.  The rule it
+        # applies is the same one ``resolve`` uses -- one home (rule 5).
+        pre_post = _classify_pre_post(self.events, section)
+        for ev in self.events:
+            if ev.kind != "grout":
+                continue
+            pretensioned = sorted(t for t in _event_tendon_refs(ev)
+                                  if pre_post.get(t) == "pre")
+            if pretensioned:
+                raise ValueError(
+                    f"construction_history[{ev.index}]: 'grout' of "
+                    f"tendon(s) {pretensioned}, which this history "
+                    f"classifies as PRE-tensioned — they are stressed "
+                    f"before their parent zone is cast.  A pre-tensioned "
+                    f"strand is bonded by the concrete cast around it: "
+                    f"there is no duct and nothing to grout, and it is a "
+                    f"capacity-side element from its zone's cast, so it "
+                    f"never emits the demand-side prestress action that "
+                    f"a grout stage exists to cancel.  Grouting it would "
+                    f"subtract an action that was never added — an "
+                    f"orphan NEGATIVE prestress demand.  Either cast the "
+                    f"parent zone before the 'stress' (which makes the "
+                    f"tendon post-tensioned), or drop the 'grout'."
+                )
 
     # -- helpers -------------------------------------------------------
 
@@ -403,9 +434,21 @@ class ConstructionTimeline:
             Non-convergence of a substrate solve (a substrate that
             cannot carry its own construction loads is a real finding);
             unknown demand reference in a ``load`` event.
+        NotImplementedError
+            An ``interval`` is crossed while a post-tensioned tendon is
+            stressed but not yet grouted (F-B).  The scope boundary is
+            D8's sibling: the tendon is inactive, hence invisible to both
+            the unbonded guard and the relaxation walk, and the window's
+            relaxation would be lost rather than deferred.
         """
         self.validate(section)
         zone_names = list(getattr(section, "zone_names", []) or [])
+        # The pre/post rule has ONE home (rule 5): the module-level
+        # classifier, which ``validate`` has just used on the same
+        # events.  The walk below still populates ``pre_post``
+        # incrementally -- a tendon stressed *after* an interval must not
+        # be pending *at* it -- but it no longer re-derives the rule.
+        pre_post_all = _classify_pre_post(self.events, section)
         mgr = StagedDomainManager(section, biaxial=False,
                                   gen_kwargs={"n_points": 40})
 
@@ -499,12 +542,10 @@ class ConstructionTimeline:
                     t_stress.setdefault(t, t_now)
                     if sigma_p0 is not None:
                         stress_sigma[t] = float(sigma_p0)
-                    parent = _tendon_parent_zone(section, t)
-                    # pre/post derived from whether the parent is cast
-                    if parent in cast_so_far or parent == 0:
-                        pre_post[t] = "post"
-                    else:
-                        pre_post[t] = "pre"
+                    # pre/post read from the single classifier; the
+                    # assignment stays *here* so the map grows with the
+                    # walk (F-B reads it mid-walk).
+                    pre_post[t] = pre_post_all[t]
                 _emit({"name": f"stress[{ev.index}]", "components": []})
 
             elif ev.kind == "grout":
@@ -532,6 +573,40 @@ class ConstructionTimeline:
                        "section_ops": gops})
 
             elif ev.kind == "interval":
+                # -- F-B: the [stress, grout] window is integrated by no
+                # one.  A post-tensioned tendon is a demand-side load
+                # until it is grouted, hence ``active=False``, hence
+                # invisible to the D8 unbonded guard AND to the
+                # relaxation walk.  The window is not deferred to the
+                # next interval either: the first post-grout interval
+                # initialises relax_from at T = t_now - t_stress, so
+                # rho(T_grout) - rho(0) is skipped for good.  This is a
+                # scope boundary, not a malformed input -> the D8 type.
+                pending = sorted(t for t in stressed
+                                 if pre_post.get(t) == "post"
+                                 and t not in grouted)
+                if pending:
+                    raise NotImplementedError(
+                        f"construction_history[{ev.index}]: tendon(s) "
+                        f"{pending} are stressed but not yet grouted "
+                        f"across this 'interval'.  A post-tensioned "
+                        f"tendon is a demand-side load until grouting, "
+                        f"so it is inactive in the resolved state and "
+                        f"the loss walk cannot see it: its intrinsic "
+                        f"relaxation over [stress, grout] would be "
+                        f"applied nowhere, and the grouting "
+                        f"reconciliation is time-blind too (it re-solves "
+                        f"at the jacking stress with no elapsed time).  "
+                        f"The loss is permanent, not deferred: the first "
+                        f"interval after grouting resumes the increment "
+                        f"from rho(t_now - t_stress), so rho(t_grout) - "
+                        f"rho(0) is never charged.  Either grout before "
+                        f"the interval, or move the interval after the "
+                        f"grout; if the stressed-but-ungrouted window is "
+                        f"real, compute its relaxation externally and "
+                        f"declare the reduced stress at 'stress'.  "
+                        f"(Scope boundary F-B, sibling of D8.)"
+                    )
                 days = ev.payload.get("days", ev.payload.get("value"))
                 spec = ev.payload.get("losses")
                 stage = {"name": f"interval[{ev.index}]", "components": [],
@@ -1736,6 +1811,65 @@ def _posttension_union_indices(timeline, section) -> List[int]:
         except ValueError:
             pass
     return sorted(out)
+
+
+def _classify_pre_post(events, section) -> Dict[str, str]:
+    r"""
+    Pre/post classification of every stressed tendon — **the one home**.
+
+    A tendon is *post-tensioned* when its parent bulk zone already exists
+    at the moment it is stressed (the base zone, index 0, always exists),
+    and *pre-tensioned* when it does not: the strand is stressed against
+    the abutments and the concrete is cast around it afterwards.  The
+    distinction is **temporal** and derived from the history itself;
+    :attr:`Tendon.system`, if present, is deliberately not consulted — a
+    declared system contradicting the history would be a second,
+    divergent home for one fact.
+
+    The walk is purely syntactic: only ``cast`` and ``stress`` events are
+    read and no equilibrium is solved, so
+    :meth:`ConstructionTimeline.validate` — which runs before any solver
+    exists — and :meth:`ConstructionTimeline.resolve` obtain the
+    identical answer *by construction* rather than by agreement.
+
+    Parameters
+    ----------
+    events : sequence of TimelineEvent
+        The timeline's physical events, in order.
+    section : GenericSection or RectSection
+        Supplies :attr:`zone_names` and the tendon-to-parent-zone
+        containment map.
+
+    Returns
+    -------
+    dict
+        ``{tendon_name: "pre" | "post"}``, one entry per tendon carrying
+        at least one ``stress`` event.  A tendon that is never stressed
+        is absent (grouting it is caught downstream, by
+        :meth:`ConstructionTimeline._reconcile_grout`, with its own
+        message).
+
+    Raises
+    ------
+    ValueError
+        Unknown tendon or zone reference.  Callers that need the
+        reference errors reported in their own words must check them
+        first.
+    """
+    zone_names = list(getattr(section, "zone_names", []) or [])
+    cast_so_far: set = set()
+    out: Dict[str, str] = {}
+    for ev in events:
+        if ev.kind == "cast":
+            zref = ev.payload.get("zone")
+            if zref is not None:
+                cast_so_far.add(_resolve_zone(zref, zone_names))
+        elif ev.kind == "stress":
+            for t in _event_tendon_refs(ev):
+                parent = _tendon_parent_zone(section, t)
+                out[t] = ("post" if (parent in cast_so_far or parent == 0)
+                          else "pre")
+    return out
 
 
 def _n_zones(mgr) -> int:

@@ -643,3 +643,276 @@ def test_a_model_without_losses_is_unchanged():
     from gensec.solver.timeline import ConstructionTimeline
     tl = ConstructionTimeline.from_block([{"interval": {"days": 100}}])
     assert tl.losses_models == {}
+
+
+# ======================================================================
+#  F-B / F-C(1) -- the [stress, grout] window and the orphan drop
+# ======================================================================
+
+class TestStressedNotGrouted:
+    r"""
+    12_0b F-B.  A post-tensioned tendon that is stressed but not yet
+    grouted is ``active=False``: invisible to the D8 unbonded guard
+    (``losses.py`` ~824, which tests ``active and not bonded``) and
+    invisible to the relaxation walk (``_interval_losses`` ~846, ``if not
+    state.active[...]: continue``).  Its relaxation over the window is
+    charged nowhere, and it is not recovered later either -- the first
+    post-grout interval initialises ``relax_from`` at
+    ``T = t_now - t_stress``.
+    """
+
+    @pytest.fixture
+    def gap(self):
+        """The flagship with `grout` moved after the first interval."""
+        from gensec.io_yaml import load_yaml
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        for cand in ("examples/example_composite_losses_fb_gap.yaml",
+                     "../examples/example_composite_losses_fb_gap.yaml"):
+            p = os.path.normpath(os.path.join(here, cand))
+            if os.path.exists(p):
+                return load_yaml(p)
+        pytest.skip("example_composite_losses_fb_gap.yaml not found")
+
+    # -- the fixture can exhibit the bug (rule 3) ----------------------
+
+    def test_the_gap_fixture_differs_from_the_flagship_by_ONE_event(self):
+        """Rule 3 has a converse: a fixture that changes more than one
+        thing cannot attribute the difference either.  These two files
+        must be the same timeline with `grout` in a different place."""
+        from gensec.io_yaml import load_yaml
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+
+        def _hist(fn):
+            for cand in (f"examples/{fn}", f"../examples/{fn}"):
+                p = os.path.normpath(os.path.join(here, cand))
+                if os.path.exists(p):
+                    return load_yaml(p)["construction_history"]
+            pytest.skip(f"{fn} not found")
+
+        a = _hist("example_composite_losses.yaml")
+        b = _hist("example_composite_losses_fb_gap.yaml")
+        assert len(a) == len(b)
+        # same multiset of events, different order
+        key = lambda e: repr(sorted(e.items()))          # noqa: E731
+        assert sorted(map(key, a)) == sorted(map(key, b))
+        assert [key(e) for e in a] != [key(e) for e in b]
+        # and the ONE displaced event is the grout
+        moved = [i for i, (x, y) in enumerate(zip(a, b)) if key(x) != key(y)]
+        assert moved, "the two histories are identical -- no gap"
+        assert any("grout" in e for e in (a[moved[0]], b[moved[0]]))
+
+    # -- the guard --------------------------------------------------------
+
+    def test_the_flagship_gap_fixture_dies_fail_loud(self, gap):
+        """The acceptance case of the whole C5 arc, with its stress and
+        grout no longer adjacent.  Before the fix it ran and returned a
+        wrong number; now it must refuse."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block(
+            gap["construction_history"],
+            losses_models=gap["losses_models"])
+        ddb = {d["name"]: d for d in gap["demands"]}
+        with pytest.raises(NotImplementedError,
+                           match="stressed but not yet grouted"):
+            tl.resolve(gap["section"], ddb)
+
+    def test_it_raises_at_the_FIRST_interval_not_a_later_one(self, gap):
+        """The event index in the message must name the interval that is
+        crossed, not the one that happens to fail downstream."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block(
+            gap["construction_history"],
+            losses_models=gap["losses_models"])
+        ddb = {d["name"]: d for d in gap["demands"]}
+        first = min(ev.index for ev in tl.events if ev.kind == "interval")
+        with pytest.raises(NotImplementedError,
+                           match=rf"construction_history\[{first}\]"):
+            tl.resolve(gap["section"], ddb)
+
+    def test_a_BARE_interval_raises_too(self, flagship):
+        """The gap is opened by the *clock*, not by the losses block: a
+        bare `interval` advances t_now just the same, and the first
+        post-grout interval then starts its relaxation increment at
+        T = t_now - t_stress.  A guard that only fired on intervals
+        carrying `losses` would leave the silence fully reachable."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"interval": {"days": 62}},
+            {"grout": {"tendons": ["P1"]}},
+            {"point": "after"}])
+        with pytest.raises(NotImplementedError,
+                           match="stressed but not yet grouted"):
+            tl.resolve(flagship["section"], {})
+
+    def test_adjacent_stress_and_grout_still_pass(self, flagship):
+        """The guard must not fire on the ordinary sequence -- the whole
+        flagship is that sequence."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block(
+            flagship["construction_history"],
+            losses_models=flagship["losses_models"])
+        ddb = {d["name"]: d for d in flagship["demands"]}
+        res = tl.resolve(flagship["section"], ddb)
+        assert len(res.losses_ops) == 3
+
+    def test_an_interval_BEFORE_any_stress_still_passes(self, flagship):
+        """`stressed` is populated by the walk, not up front: a tendon
+        stressed *after* an interval is not pending *at* it."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block([
+            {"interval": {"days": 30}},
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"grout": {"tendons": ["P1"]}},
+            {"point": "after"}])
+        res = tl.resolve(flagship["section"], {})
+        assert res.pre_post == {"P1": "post"}
+
+    # -- what the silence was worth ---------------------------------------
+
+    def test_the_dropped_relaxation_is_not_negligible(self, flagship):
+        """Rule 2: the reference does not share the implementation's
+        inputs -- the increment is read straight off the provider, not
+        off the timeline.  Over the flagship's own 62-day first interval
+        the skipped increment is ~1 % of sigma_p0, and it is the steep
+        part of the curve: rho(1 d) alone is ~40 % of it."""
+        from gensec.solver.losses import _tendon_steel
+        sec = flagship["section"]
+        st = _tendon_steel(sec.tendons[0])
+        prov = flagship["losses_models"]["rheo_precast"].provider
+        prov = prov.with_geometry(A_c=600 * 1400.0, u=2 * (600 + 1400.0))
+        prov = prov.with_steel(st["f_pk"],
+                               relaxation_class=st["relaxation_class"],
+                               rho_1000=st["rho_1000"])
+        mu0 = 1300.0 / st["f_pk"]
+        dropped = prov.relaxation(62.0, mu0) - prov.relaxation(0.0, mu0)
+        assert dropped < 0.0                      # a relaxation is a loss
+        assert abs(dropped) / 1300.0 > 5e-3       # ~1.04 %, not round-off
+        knee = prov.relaxation(1.0, mu0) - prov.relaxation(0.0, mu0)
+        assert abs(knee) > 0.30 * abs(dropped)    # the window is the knee
+
+
+class TestGroutOfAPretensionedTendon:
+    r"""
+    12_0b F-C(1).  ``_stress_actions`` emits a demand-side action only for
+    ``pre_post == "post"``; ``_grout_stage`` drops one for **any** tendon
+    with a recorded ``stress_sigma``, ``pre_post`` unchecked.  A history
+    that stresses a tendon before its parent zone is cast and then grouts
+    it therefore subtracts an action that was never added.
+    """
+
+    @pytest.fixture
+    def pretensioned(self):
+        """A tendon lying inside a CASTABLE zone.  Whether it is pre- or
+        post-tensioned is therefore not a property of this section at
+        all: it depends on where the `stress` event sits relative to the
+        `cast`.  The explicit `parent=` override is deliberately absent
+        -- for an embedded tendon the section rejects it, the parent
+        being fixed by containment."""
+        from gensec.geometry.geometry import GenericSection
+        from gensec.geometry.fiber import Tendon
+        from gensec.materials.ec2_bridge import (
+            concrete_from_class, prestress_from_ec2)
+        from shapely.geometry import Polygon
+        b, h = 400.0, 800.0
+        conc = concrete_from_class("C35/45", ls="S")
+        ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
+                                Ep=195000.0)
+        t = Tendon(y=700.0, x=b / 2, Ap=1000.0, material=ps,
+                   eps_pe=1200.0 / 195000.0, bonded=True, embedded=True,
+                   name="P1")
+        return GenericSection(
+            polygon=Polygon([(0, 0), (b, 0), (b, h), (0, h)]),
+            bulk_material=conc, rebars=[], tendons=[t], mesh_size=50.0,
+            bulk_materials=[(Polygon([(0, 600), (b, 600), (b, h), (0, h)]),
+                             conc, "topping")])
+
+    def test_the_classification_FLIPS_with_the_event_order(
+            self, pretensioned):
+        """The same section and the same tendon, twice.  Only the order
+        of `stress` and `cast` differs -- and that is the entire
+        definition of pre- versus post-tensioning.  `Tendon.system`, if
+        it were consulted, could contradict this; it is not."""
+        from gensec.solver.timeline import (
+            ConstructionTimeline, _classify_pre_post)
+        before = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"cast": {"zone": "topping", "datum": "auto"}},
+            {"point": "p"}])
+        after = ConstructionTimeline.from_block([
+            {"cast": {"zone": "topping", "datum": "auto"}},
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"point": "p"}])
+        assert _classify_pre_post(before.events, pretensioned) == {"P1": "pre"}
+        assert _classify_pre_post(after.events, pretensioned) == {"P1": "post"}
+
+    def test_resolve_and_validate_classify_IDENTICALLY(self, flagship):
+        """Rule 5 made testable: the map `resolve` returns is the map the
+        classifier `validate` uses.  Two homes could not be asserted
+        equal -- they would only happen to agree."""
+        from gensec.solver.timeline import (
+            ConstructionTimeline, _classify_pre_post)
+        tl = ConstructionTimeline.from_block(
+            flagship["construction_history"],
+            losses_models=flagship["losses_models"])
+        sec = flagship["section"]
+        ddb = {d["name"]: d for d in flagship["demands"]}
+        assert tl.resolve(sec, ddb).pre_post == _classify_pre_post(
+            tl.events, sec)
+
+    def test_grouting_it_is_refused(self, pretensioned):
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"cast": {"zone": "topping", "datum": "auto"}},
+            {"grout": {"tendons": ["P1"]}},
+            {"point": "p"}])
+        with pytest.raises(ValueError, match="PRE-tensioned"):
+            tl.validate(pretensioned)
+
+    def test_it_is_refused_at_VALIDATE_time_before_any_solve(
+            self, pretensioned):
+        """The rejection must not need the resolution walk: `validate`
+        has no solver, and an absurd history should die before anything
+        expensive runs."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 1300.0}},
+            {"cast": {"zone": "topping", "datum": "auto"}},
+            {"grout": {"tendons": ["P1"]}},
+            {"point": "p"}])
+        with pytest.raises(ValueError, match="orphan NEGATIVE"):
+            tl.resolve(pretensioned, {})
+
+    def test_the_unknown_tendon_message_still_wins(self, pretensioned):
+        """Ordering: reference errors are reported in their own words,
+        not swallowed by the classifier raising on a bad name."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block([
+            {"grout": {"tendons": ["nope"]}}, {"point": "p"}])
+        with pytest.raises(ValueError, match="unknown tendon"):
+            tl.validate(pretensioned)
+
+    def test_post_tensioned_grouting_is_untouched(self, flagship):
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block(
+            flagship["construction_history"],
+            losses_models=flagship["losses_models"])
+        tl.validate(flagship["section"])          # must not raise
+
+
+@pytest.fixture
+def flagship():
+    """Module-level twin of `TestTimelineC5.flagship` (class fixtures do
+    not cross class boundaries)."""
+    from gensec.io_yaml import load_yaml
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in ("examples/example_composite_losses.yaml",
+                 "../examples/example_composite_losses.yaml"):
+        p = os.path.normpath(os.path.join(here, cand))
+        if os.path.exists(p):
+            return load_yaml(p)
+    pytest.skip("example_composite_losses.yaml not found")
