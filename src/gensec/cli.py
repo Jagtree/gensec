@@ -131,6 +131,35 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
+    # A refusal is a result, not a crash.  ``NotImplementedError`` marks
+    # a scope boundary the library states in words (D2, D8, F-B) and
+    # ``ValueError`` a rejected input; neither deserves a stack trace
+    # with ``<frozen runpy>`` frames in it.  Anything else still raises,
+    # because an unexpected exception is a bug and hiding it would be
+    # the opposite of fail-loud.
+    try:
+        return _dispatch(args, argv, parser)
+    except NotImplementedError as exc:
+        print(f"\nERROR (outside GenSec's modelled scope): {exc}")
+        sys.exit(1)
+    except ValueError as exc:
+        print(f"\nERROR: {exc}")
+        sys.exit(1)
+
+
+def _dispatch(args, argv, parser):
+    r"""
+    Route a parsed command to its handler.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments.
+    argv : list of str or None
+        Raw argument vector; the no-subcommand fallback re-reads it.
+    parser : argparse.ArgumentParser
+        Used by the same fallback to print help.
+    """
     if args.command == "run":
         _run(args)
     elif args.command == "plot":
@@ -190,6 +219,22 @@ def _run(args):
     demands = data["demands"]
     combinations = data.get("combinations", [])
     envelopes = data.get("envelopes", [])
+
+    # --- Construction-history pre-flight ------------------------------
+    # ``run_timeline`` is called at the far end of this function, after
+    # the N-M diagrams, the 3D resistance surface and a printed
+    # verification verdict.  A history the library must refuse would
+    # therefore be refused *after* the user has read a green banner —
+    # one that reports on the raw demands, not on the anchored
+    # combinations, which have not been evaluated at that point.
+    # ``validate`` is a syntactic walk with no solver in it: run it now.
+    if data.get("construction_history"):
+        from .solver.timeline import ConstructionTimeline
+        ConstructionTimeline.from_block(
+            data["construction_history"],
+            losses_models=data.get("losses_models")).validate(section)
+        print(f"  Construction history: "
+              f"{len(data['construction_history'])} events, pre-flight OK.")
 
     # Output flags (v2.1, with defaults applied by io_yaml).
     output_opts = data.get("output_options", {})

@@ -10,4 +10,5 @@ uv run gensec run examples/example_prestress.yaml --output-dir results/example_p
 uv run gensec run examples/example_staged_construction.yaml --output-dir results/example_staged_construction
 uv run gensec run examples/example_composite_topping.yaml --output-dir results/example_composite_topping
 uv run gensec run examples/example_composite_timeline.yaml --output-dir results/example_composite_timeline
+uv run gensec run examples/example_composite_losses_fb_gap.yaml --output-dir results/example_composite_losses_fb_gap
 uv run gensec run examples/yaml_reference_example.yaml --output-dir results/yaml_reference_example

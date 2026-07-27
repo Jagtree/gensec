@@ -288,8 +288,11 @@ class ConstructionTimeline:
         tendon; ``grout`` of a **pre-tensioned** tendon (F-C(1) — it has
         no duct, and it never emitted the demand-side action a grout
         stage exists to cancel, so grouting it would inject an orphan
-        negative prestress demand).  Demand references are checked by
-        :meth:`resolve` /
+        negative prestress demand); an ``interval`` crossed while a
+        stressed tendon is not yet live in the resistance state
+        (**F-B**, ``NotImplementedError`` — a scope boundary rather than
+        a malformed input, so the type differs deliberately).  Demand
+        references are checked by :meth:`resolve` /
         :meth:`compile_combination` against the demand database (not
         available here), so only geometry references are checked at this
         stage.
@@ -339,6 +342,74 @@ class ConstructionTimeline:
         # cannot raise on a bad name and mask this message.  The rule it
         # applies is the same one ``resolve`` uses -- one home (rule 5).
         pre_post = _classify_pre_post(self.events, section)
+
+        # -- F-B: a stressed tendon that is not yet LIVE ----------------
+        # The question is not "is it post-tensioned", it is "is it in the
+        # resistance state yet".  Both answers are one line each, and
+        # both windows are silent by the same mechanism: an inactive
+        # tendon is skipped by ``_interval_losses``
+        # (``if not state.active[...]: continue``), and the first
+        # interval in which it *is* active initialises ``relax_from`` at
+        # T = t_now - t_stress, so the window is dropped rather than
+        # deferred.  Statically decidable -- hence checked here, before
+        # any solver exists, rather than in ``resolve``.
+        cast_so_far: set = set()
+        stressed_so_far: set = set()
+        grouted_so_far: set = set()
+        for ev in self.events:
+            if ev.kind == "cast":
+                zref = ev.payload.get("zone")
+                if zref is not None:
+                    cast_so_far.add(_resolve_zone(zref, zone_names))
+            elif ev.kind == "stress":
+                stressed_so_far.update(_event_tendon_refs(ev))
+            elif ev.kind == "grout":
+                grouted_so_far.update(_event_tendon_refs(ev))
+            elif ev.kind == "interval":
+                pending = []
+                for t in sorted(stressed_so_far):
+                    if pre_post.get(t) == "post":
+                        live = t in grouted_so_far
+                        window, remedy = "grout", "grout"
+                    else:
+                        live = (_tendon_parent_zone(section, t)
+                                in cast_so_far)
+                        window, remedy = "cast", "cast of its parent zone"
+                    if not live:
+                        pending.append((t, window, remedy))
+                if pending:
+                    names = sorted(p[0] for p in pending)
+                    window = pending[0][1]
+                    remedy = pending[0][2]
+                    raise NotImplementedError(
+                        f"construction_history[{ev.index}]: tendon(s) "
+                        f"{names} are stressed but not yet live across "
+                        f"this 'interval' — their '{window}' has not "
+                        f"happened.  A tendon is a demand-side load "
+                        f"until it enters the resistance state (a "
+                        f"post-tensioned one at grouting, a "
+                        f"pre-tensioned one at the cast of the concrete "
+                        f"around it), so it is inactive here and the "
+                        f"loss walk cannot see it: its intrinsic "
+                        f"relaxation over the window would be applied "
+                        f"nowhere.  The loss is permanent, not "
+                        f"deferred — the first interval in which the "
+                        f"tendon IS live resumes the increment from "
+                        f"rho(t_now - t_stress), so rho(t_live) - "
+                        f"rho(0) is never charged; and for a "
+                        f"post-tensioned tendon the grouting "
+                        f"reconciliation is time-blind too, re-solving "
+                        f"at the jacking stress with no elapsed time.  "
+                        f"This is a real physical window that GenSec "
+                        f"does not integrate — it is not a modelling "
+                        f"error on your part, and it is refused rather "
+                        f"than silently priced at zero.  Either move "
+                        f"the '{remedy}' before the interval, or, if "
+                        f"the window is real, compute its relaxation "
+                        f"externally and declare the reduced stress at "
+                        f"'stress'.  (Scope boundary F-B, sibling of "
+                        f"D8.)"
+                    )
         for ev in self.events:
             if ev.kind != "grout":
                 continue
@@ -435,11 +506,14 @@ class ConstructionTimeline:
             cannot carry its own construction loads is a real finding);
             unknown demand reference in a ``load`` event.
         NotImplementedError
-            An ``interval`` is crossed while a post-tensioned tendon is
-            stressed but not yet grouted (F-B).  The scope boundary is
-            D8's sibling: the tendon is inactive, hence invisible to both
-            the unbonded guard and the relaxation walk, and the window's
-            relaxation would be lost rather than deferred.
+            Raised through :meth:`validate`: an ``interval`` is crossed
+            while a stressed tendon is not yet live in the resistance
+            state — a post-tensioned one not yet grouted, or a
+            pre-tensioned one whose parent zone is not yet cast (F-B).
+            The scope boundary is D8's sibling: the tendon is inactive,
+            hence invisible to both the unbonded guard and the
+            relaxation walk, and the window's relaxation is lost rather
+            than deferred.
         """
         self.validate(section)
         zone_names = list(getattr(section, "zone_names", []) or [])
@@ -573,40 +647,9 @@ class ConstructionTimeline:
                        "section_ops": gops})
 
             elif ev.kind == "interval":
-                # -- F-B: the [stress, grout] window is integrated by no
-                # one.  A post-tensioned tendon is a demand-side load
-                # until it is grouted, hence ``active=False``, hence
-                # invisible to the D8 unbonded guard AND to the
-                # relaxation walk.  The window is not deferred to the
-                # next interval either: the first post-grout interval
-                # initialises relax_from at T = t_now - t_stress, so
-                # rho(T_grout) - rho(0) is skipped for good.  This is a
-                # scope boundary, not a malformed input -> the D8 type.
-                pending = sorted(t for t in stressed
-                                 if pre_post.get(t) == "post"
-                                 and t not in grouted)
-                if pending:
-                    raise NotImplementedError(
-                        f"construction_history[{ev.index}]: tendon(s) "
-                        f"{pending} are stressed but not yet grouted "
-                        f"across this 'interval'.  A post-tensioned "
-                        f"tendon is a demand-side load until grouting, "
-                        f"so it is inactive in the resolved state and "
-                        f"the loss walk cannot see it: its intrinsic "
-                        f"relaxation over [stress, grout] would be "
-                        f"applied nowhere, and the grouting "
-                        f"reconciliation is time-blind too (it re-solves "
-                        f"at the jacking stress with no elapsed time).  "
-                        f"The loss is permanent, not deferred: the first "
-                        f"interval after grouting resumes the increment "
-                        f"from rho(t_now - t_stress), so rho(t_grout) - "
-                        f"rho(0) is never charged.  Either grout before "
-                        f"the interval, or move the interval after the "
-                        f"grout; if the stressed-but-ungrouted window is "
-                        f"real, compute its relaxation externally and "
-                        f"declare the reduced stress at 'stress'.  "
-                        f"(Scope boundary F-B, sibling of D8.)"
-                    )
+                # F-B is decided statically, in ``validate``:
+                # it needs no equilibrium, only the event
+                # bookkeeping.  Nothing to check here.
                 days = ev.payload.get("days", ev.payload.get("value"))
                 spec = ev.payload.get("losses")
                 stage = {"name": f"interval[{ev.index}]", "components": [],

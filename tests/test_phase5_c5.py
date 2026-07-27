@@ -714,8 +714,9 @@ class TestStressedNotGrouted:
             gap["construction_history"],
             losses_models=gap["losses_models"])
         ddb = {d["name"]: d for d in gap["demands"]}
+        # the window named must be the grout: P1 is post-tensioned
         with pytest.raises(NotImplementedError,
-                           match="stressed but not yet grouted"):
+                           match=r"not yet live.*'grout' has not"):
             tl.resolve(gap["section"], ddb)
 
     def test_it_raises_at_the_FIRST_interval_not_a_later_one(self, gap):
@@ -731,6 +732,82 @@ class TestStressedNotGrouted:
                            match=rf"construction_history\[{first}\]"):
             tl.resolve(gap["section"], ddb)
 
+    def test_a_PRE_tensioned_bed_window_raises_too(self):
+        """The symmetric window.  A pre-tensioned strand is inactive
+        until the concrete is cast around it, so the 30 days it spends
+        tensioned on the bed are skipped by exactly the line that skips
+        an ungrouted duct.  Measured before this guard existed:
+        `interval[1] eps_override = None`, `interval[3] eps_override =
+        {0: 0.004609...}` -- the bed window charged to no one."""
+        from shapely.geometry import Polygon
+        from gensec.geometry.geometry import GenericSection
+        from gensec.geometry.fiber import Tendon
+        from gensec.materials.ec2_bridge import (
+            concrete_from_class, prestress_from_ec2)
+        from gensec.materials.rheology import EC2RheologicalModel
+        from gensec.solver.losses import LossModel
+        from gensec.solver.timeline import ConstructionTimeline
+        b, h = 600.0, 1000.0
+        conc = concrete_from_class("C35/45", ls="S")
+        ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
+                                Ep=195000.0)
+        t = Tendon(y=850.0, x=b / 2, Ap=600.0, material=ps,
+                   eps_pe=900.0 / 195000.0, name="P1")
+        sec = GenericSection(
+            polygon=Polygon([(0, 0), (b, 0), (b, h), (0, h)]),
+            bulk_material=conc, rebars=[], tendons=[t], mesh_size=50.0,
+            bulk_materials=[(Polygon([(0, 800), (b, 800), (b, h), (0, h)]),
+                             conc, "deck")])
+        lm = {"rheo": LossModel(provider=EC2RheologicalModel(
+            fck=35.0, cement_class="N", RH=70.0))}
+        base = {"model": "rheo", "age": 28, "curing": 3}
+        tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 900.0}},
+            {"interval": {"days": 30, "losses": {"base": base}}},
+            {"cast": {"zone": "deck", "datum": "auto"}},
+            {"point": "svc"}], losses_models=lm)
+        with pytest.raises(NotImplementedError, match="not yet live"):
+            tl.validate(sec)
+
+    def test_a_pre_tensioned_tendon_AFTER_its_cast_is_fine(self):
+        """The predicate must let the ordinary pre-tensioning sequence
+        through: once the concrete is cast the strand is live, and no
+        grout event will ever exist for it."""
+        from shapely.geometry import Polygon
+        from gensec.geometry.geometry import GenericSection
+        from gensec.geometry.fiber import Tendon
+        from gensec.materials.ec2_bridge import (
+            concrete_from_class, prestress_from_ec2)
+        from gensec.solver.timeline import ConstructionTimeline
+        b, h = 600.0, 1000.0
+        conc = concrete_from_class("C35/45", ls="S")
+        ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
+                                Ep=195000.0)
+        t = Tendon(y=850.0, x=b / 2, Ap=600.0, material=ps,
+                   eps_pe=900.0 / 195000.0, name="P1")
+        sec = GenericSection(
+            polygon=Polygon([(0, 0), (b, 0), (b, h), (0, h)]),
+            bulk_material=conc, rebars=[], tendons=[t], mesh_size=50.0,
+            bulk_materials=[(Polygon([(0, 800), (b, 800), (b, h), (0, h)]),
+                             conc, "deck")])
+        tl = ConstructionTimeline.from_block([
+            {"stress": {"tendons": ["P1"], "sigma_p0": 900.0}},
+            {"cast": {"zone": "deck", "datum": "auto"}},
+            {"interval": {"days": 30}},
+            {"point": "svc"}])
+        tl.validate(sec)                              # must not raise
+
+    def test_it_is_refused_before_any_solver_runs(self, gap):
+        """F-B is statically decidable, so it must not need `resolve`.
+        This is what lets the CLI pre-flight a history in milliseconds
+        instead of after a 3D resistance surface."""
+        from gensec.solver.timeline import ConstructionTimeline
+        tl = ConstructionTimeline.from_block(
+            gap["construction_history"],
+            losses_models=gap["losses_models"])
+        with pytest.raises(NotImplementedError, match="not yet live"):
+            tl.validate(gap["section"])
+
     def test_a_BARE_interval_raises_too(self, flagship):
         """The gap is opened by the *clock*, not by the losses block: a
         bare `interval` advances t_now just the same, and the first
@@ -743,8 +820,8 @@ class TestStressedNotGrouted:
             {"interval": {"days": 62}},
             {"grout": {"tendons": ["P1"]}},
             {"point": "after"}])
-        with pytest.raises(NotImplementedError,
-                           match="stressed but not yet grouted"):
+        # a bare interval: no losses block, same refusal
+        with pytest.raises(NotImplementedError, match="not yet live"):
             tl.resolve(flagship["section"], {})
 
     def test_adjacent_stress_and_grout_still_pass(self, flagship):
