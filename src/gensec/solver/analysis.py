@@ -60,6 +60,7 @@ import contextlib
 
 import numpy as np
 from .integrator import FiberSolver
+from .check import VerificationEngine
 
 
 # ==================================================================
@@ -101,6 +102,21 @@ def _build_material_name_map(solver):
         if mid not in name_map:
             name_map[mid] = getattr(
                 rb.material, "name", type(rb.material).__name__) or type(rb.material).__name__
+
+    # Tendon materials (N-13).  Phase 16 gave ``_decompose`` its tendon
+    # branch when it closed N-1; that branch reads *this* map, which
+    # walked bulk and rebar only, so the lookup missed on every tendon
+    # and fell back silently to ``type(mat).__name__``.  A report that
+    # names two materials out of three and labels the third by its class
+    # is the same blindness N-1 was, one layer further out.
+    for td in sec.tendons:
+        mat = td.material
+        if mat is None:
+            continue
+        mid = id(mat)
+        if mid not in name_map:
+            name_map[mid] = getattr(
+                mat, "name", type(mat).__name__) or type(mat).__name__
 
     return name_map
 
@@ -303,7 +319,7 @@ class AnalysisEngine:
                     name, combo["stages"], demand_db,
                     tol, max_iter)
             else:
-                res = _resolve_components(
+                res = VerificationEngine.resolve_components(
                     combo["components"], demand_db)
                 ar = self.analyze(
                     res["N"], res["Mx"], res["My"],
@@ -466,8 +482,13 @@ class AnalysisEngine:
         components = []
 
         # ---- Bulk zones ----
+        # Each law is evaluated at the argument ``integrate`` evaluates
+        # it at — the section strain plus the zone's imposed-strain
+        # field.  Without the offset the components do not sum back to
+        # the total on any staged section (F-M3): a decomposition that
+        # does not reproduce what it decomposes is not one.
         for zone_idx, (mat, idx) in enumerate(sv._bulk_groups):
-            sb = mat.stress_array(eb[idx])
+            sb = mat.stress_array(eb[idx] + sv.bulk_strain_offset(idx))
             a = sec.A_fibers[idx]
             ly = sv._ly_bulk[idx]
             lx = sv._lx_bulk[idx]
@@ -496,7 +517,11 @@ class AnalysisEngine:
         for mat, bulk_mat, idx in sv._rebar_groups:
             er_g = er[idx]
             s_rebar = mat.stress_array(er_g)
-            sb_at_rebars = bulk_mat.stress_array(er_g)
+            # The rebar's own law reads the section strain; the bulk it
+            # DISPLACES reads the bulk's argument, offset included —
+            # exactly as ``integrate`` does it (F-M3).
+            sb_at_rebars = bulk_mat.stress_array(
+                er_g + sv._rebar_offset(idx))
             a = sec.A_rebars[idx]
             emb = embedded[idx]
             ly_r = sv._ly_rebar[idx]
@@ -538,6 +563,76 @@ class AnalysisEngine:
                 "My_kNm": round(My_s / 1e6, 6),
                 "layers": layers,
             })
+
+        # ---- Tendons (N-1, Phase 16) ----
+        #
+        # Until Phase 16 this method enumerated two of the section's
+        # three element classes.  ``integrate`` has always accumulated
+        # the tendons (``_tendon_forces``), so on a prestressed view the
+        # components did not sum back to the resultant they claim to
+        # decompose: measured at +2.791768e+06 N and -1.535e+09 N.mm on
+        # the flagship's service view.  A decomposition that does not
+        # reproduce what it decomposes is not one.
+        #
+        # The arithmetic mirrors ``FiberSolver._tendon_forces`` exactly,
+        # and mirrors it for a reason: the tendon evaluates its own law
+        # at the OFFSET TOTAL strain eps_sec + eps_init, while the bulk
+        # it displaces is evaluated at eps_sec plus the bulk's own
+        # imposed field.  Two arguments, two laws, one net stress.  Any
+        # simplification here would reintroduce F-M3 in a new place.
+        if sv._has_tendons:
+            et_sec = sv._tendon_section_strain(eps0, chi_x, chi_y)
+            embedded_t = getattr(sec, "embedded_tendons",
+                                 np.ones(len(sec.A_tendons), dtype=bool))
+            for mat, bulk_mat, idx, eps_init in sv._tendon_groups:
+                e_sec_g = et_sec[idx]
+                e_tot_g = e_sec_g + eps_init
+                s_tendon = mat.stress_array(e_tot_g)
+                s_bulk = bulk_mat.stress_array(
+                    e_sec_g + sv._tendon_offset(idx))
+                emb = embedded_t[idx]
+
+                s_net = s_tendon.copy()
+                s_net[emb] -= s_bulk[emb]
+                a = sec.A_tendons[idx]
+                ly_t = sv._ly_tendon[idx]
+                lx_t = sv._lx_tendon[idx]
+                fA = s_net * a
+
+                N_p = float(np.sum(fA))
+                Mx_p = float(np.sum(fA * ly_t))
+                My_p = -float(np.sum(fA * lx_t))
+
+                mat_name = self._name_map.get(
+                    id(mat), type(mat).__name__)
+
+                strands = []
+                for j, gi in enumerate(idx):
+                    strands.append({
+                        "index": int(gi),
+                        "x": float(sec.x_tendons[gi]),
+                        "y": float(sec.y_tendons[gi]),
+                        "Ap": float(a[j]),
+                        "eps_sec": float(e_sec_g[j]),
+                        "eps_init": float(eps_init[j]),
+                        "eps_tot": float(e_tot_g[j]),
+                        "sigma_gross": float(s_tendon[j]),
+                        "sigma_net": float(s_net[j]),
+                        "F_net_kN": round(
+                            float(s_net[j] * a[j]) / 1e3, 4),
+                    })
+
+                components.append({
+                    "type": "tendon",
+                    "material_name": mat_name,
+                    "N": N_p,
+                    "Mx": Mx_p,
+                    "My": My_p,
+                    "N_kN": round(N_p / 1e3, 4),
+                    "Mx_kNm": round(Mx_p / 1e6, 6),
+                    "My_kNm": round(My_p / 1e6, 6),
+                    "strands": strands,
+                })
 
         return components
 
@@ -610,7 +705,7 @@ class AnalysisEngine:
             bundle = bundles[k]
             prev_N, prev_Mx, prev_My = cum_N, cum_Mx, cum_My
 
-            res = _resolve_components(
+            res = VerificationEngine.resolve_components(
                 stage.get("components", []), demand_db)
             dN, dMx, dMy = res["N"], res["Mx"], res["My"]
 
@@ -664,47 +759,4 @@ class AnalysisEngine:
             },
             "stages": stage_results,
         }
-
-
-# ==================================================================
-#  Standalone helpers
-# ==================================================================
-
-def _resolve_components(components, demand_db):
-    r"""
-    Sum factored components into a single force triple.
-
-    .. math::
-
-        \mathbf{S} = \sum_i f_i \, \mathbf{d}_i
-
-    Parameters
-    ----------
-    components : list of dict
-        Each dict has ``ref`` (str) and optionally ``factor``
-        (float, default 1.0).
-    demand_db : dict
-        ``{name: {"N": ..., "Mx": ..., "My": ...}}``.
-
-    Returns
-    -------
-    dict
-        ``{"N": float, "Mx": float, "My": float}``
-        in [N, N·mm, N·mm].
-
-    Raises
-    ------
-    KeyError
-        If a referenced demand name is not found.
-    """
-    N_sum = 0.0
-    Mx_sum = 0.0
-    My_sum = 0.0
-    for comp in components:
-        ref = comp["ref"]
-        f = float(comp.get("factor", 1.0))
-        d = demand_db[ref]
-        N_sum += f * d["N"]
-        Mx_sum += f * d["Mx"]
-        My_sum += f * d["My"]
-    return {"N": N_sum, "Mx": Mx_sum, "My": My_sum}
+# GENSEC-COMPLETE phase=34 utc=2026-09-06T10:33:16Z sha256=bdd63a9c952fb3f032073abad3454282e284e385f57b368900b6877ef90c1cd3 body_lines=761

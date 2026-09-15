@@ -38,12 +38,137 @@ from gensec.solver.timeline import (
 )
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_EXAMPLE = os.path.join(_HERE, "..", "examples\\example_composite_topping.yaml")
-if not os.path.exists(_EXAMPLE):
-    _EXAMPLE = "example_composite_topping.yaml"
-_PRESTRESS = os.path.join(_HERE, "..", "examples\\example_prestress.yaml")
-if not os.path.exists(_PRESTRESS):
-    _PRESTRESS = "example_prestress.yaml"
+
+
+def _example(name):
+    r"""
+    The absolute path of a distributed example, or a loud failure.
+
+    F-P00-1, closed in Phase 18.  This module used to hold two copies
+    of::
+
+        _X = os.path.join(_HERE, "..", "examples", "x.yaml")
+        if not os.path.exists(_X):
+            _X = "x.yaml"                       # silent fallback
+
+    The fallback substituted a **bare relative name** when the example
+    was not where it should be, so the file was then looked for in
+    whatever the current working directory happened to be.  Run from
+    the repository root it worked by coincidence; run from anywhere
+    else it produced a ``FileNotFoundError`` naming ``x.yaml`` with no
+    path, several frames away from the assumption that failed.  Both
+    fallbacks were measured **alive** in Phase 18 (both examples
+    present, so neither had ever fired), which is why they had survived
+    five phases unnoticed: a substituting default that never
+    substitutes is invisible until the day it does.
+
+    The single home replaces both, and it fails where the assumption
+    is, naming the path it looked at — the same rule the ``getattr``
+    inventory enforces on the package.
+
+    Parameters
+    ----------
+    name : str
+        File name inside ``examples/``.
+
+    Returns
+    -------
+    str
+        Absolute path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the example is absent, naming the resolved path.
+    """
+    path = os.path.abspath(os.path.join(_HERE, "..", "examples", name))
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"distributed example {name!r} not found at {path}. "
+            f"The examples/ directory is part of the package, not an "
+            f"optional extra: this test measures GenSec against the "
+            f"documents it ships.")
+    return path
+
+
+_EXAMPLE = _example("example_composite_topping.yaml")
+_PRESTRESS = _example("example_prestress.yaml")
+
+
+def _zone_materials(section):
+    r"""
+    ``[material]`` per bulk zone, index-aligned with the state.
+
+    ``section.bulk_materials`` holds ``(polygon, material)`` pairs; the
+    material is the second element.
+
+    Parameters
+    ----------
+    section : GenericSection
+
+    Returns
+    -------
+    list of Material
+    """
+    out = [section.bulk_material]
+    for entry in (getattr(section, "bulk_materials", []) or []):
+        out.append(entry[1] if isinstance(entry, tuple) else entry)
+    return out
+
+
+def _reference_E(material):
+    r"""
+    The conventional 28-day modulus of *material*, assembled
+    **independently** of the resolver.
+
+    Rule 2: a reference must not read the implementation's own inputs.
+    The shipped rule is
+    :class:`~gensec.materials.rheology.EC2ReferenceModulus`, which
+    reads the material's EC2 bridge; this reads
+    :class:`~gensec.materials.rheology.EC2RheologicalModel` at
+    :math:`t = 28` d instead -- a different class, a different code
+    path, the same clause (EN 1992-1-1 Table 3.1).  The two agreeing is
+    itself a result, asserted in
+    :meth:`TestAutoDatum.test_the_two_assemblies_of_Ecm_agree`.
+
+    Parameters
+    ----------
+    material : Material
+
+    Returns
+    -------
+    float
+        :math:`E_{cm}(28\,\mathrm{d})` [MPa].
+    """
+    from gensec.materials.rheology import EC2RheologicalModel
+    return EC2RheologicalModel(fck=float(material.fck),
+                               cement_class="N").E_c(28.0)
+
+
+def _service_bundle(section, state):
+    r"""
+    A linear service view of *section* at *state*, built by hand.
+
+    Assembled from :func:`~gensec.solver.sls.sls_view` over an
+    explicit modulus per zone, so it shares no code with
+    :meth:`ConstructionTimeline._datum_moduli` beyond the resolver
+    every SLS path already uses.
+
+    Parameters
+    ----------
+    section : GenericSection
+    state : SectionState
+
+    Returns
+    -------
+    FiberSolver
+    """
+    from gensec.solver.sls import SlsPolicy, resolve_moduli, sls_view
+    from gensec.solver.section_state import materialize_view
+    mats = _zone_materials(section)
+    explicit = {("zone", z): _reference_E(m) for z, m in enumerate(mats)}
+    modmap = resolve_moduli(section, SlsPolicy(), explicit=explicit)
+    return FiberSolver(sls_view(materialize_view(section, state), modmap))
 
 
 def _load():
@@ -57,10 +182,22 @@ class TestTimelineParse(unittest.TestCase):
     r"""Parsing and structural validation of the timeline block."""
 
     def test_event_kinds_frozen(self):
+        r"""
+        The event vocabulary is pinned, and grows only deliberately.
+
+        ``retrofit`` joins in Phase 34 (D1b-3).  It is not an ordinary
+        event: it declares the state the member is **already** in when
+        the history opens, which is why
+        :func:`~gensec.solver.timeline._parse_retrofit_event` refuses
+        it anywhere but first.  It is listed here all the same,
+        because this test exists to make a widening of the vocabulary
+        visible rather than to say which kinds are events in the
+        physical sense.
+        """
         self.assertEqual(
             EVENT_KINDS,
             frozenset({"cast", "stress", "grout", "interval",
-                       "load", "point"}))
+                       "load", "point", "retrofit"}))
 
     def test_point_scalar_and_mapping(self):
         tl = ConstructionTimeline.from_block(
@@ -139,11 +276,25 @@ class TestAutoDatum(unittest.TestCase):
               "components": [{"ref": "G1", "factor": 1.0}],
               "section_ops": {"deactivate": nonbase, "release": False}}],
             initially_inactive=[1])
-        _hh, bundle, _bb = mgr.get_bundle(states[-1])
+        # P3: the datum is drawn on the SERVICE response, so the
+        # independent assembly must be too.  Reading the design bundle
+        # here would once again be a reference that shares the
+        # implementation's error -- which is precisely how F5 survived
+        # every phase before this one.
         g = self.ddb["G1"]
-        s = bundle.solver.solve_equilibrium(g["N"], g["Mx"], g["My"],
-                                            tol=1e-10, max_iter=100)
+        s = _service_bundle(self.section, states[-1]).solve_equilibrium(
+            g["N"], g["Mx"], g["My"], tol=1e-10, max_iter=100)
         return (-s["eps0"], -s["chi_x"], -s["chi_y"])
+
+    def test_the_two_assemblies_of_Ecm_agree(self):
+        r"""The shipped reference rule and the rheological provider must
+        give the same 28-day modulus; if they diverge, the datum and
+        the reference below are measuring two different concretes."""
+        from gensec.materials.rheology import default_reference_modulus
+        rule = default_reference_modulus()
+        for mat in _zone_materials(self.section):
+            self.assertAlmostEqual(rule.E_c(mat), _reference_E(mat),
+                                   places=9)
 
     def test_auto_datum_matches_substrate_plane(self):
         tl = ConstructionTimeline.from_block([
@@ -324,16 +475,37 @@ class TestPrestressReconciliation(unittest.TestCase):
 
     def _driver_eps_init(self):
         from gensec.solver.posttension import (
+    grout_selfconsistent,
             solve_posttension_sequence, grout)
         from gensec.solver.timeline import _tendon_local_index
         li = _tendon_local_index(self.section, self.T)
         sig = [0.0] * len(self.section.tendons)
         sig[li] = self.sigma
+        # P3: the timeline stresses against the SERVICE view, so the
+        # bare driver call must be put on the same footing or the two
+        # paths are no longer comparable.  The modulus is assembled
+        # independently (``_reference_E``), not read back from the
+        # timeline.
+        from gensec.solver.sls import SlsPolicy, resolve_moduli
+        modmap = resolve_moduli(
+            self.section, SlsPolicy(),
+            explicit={("zone", 0): _reference_E(
+                self.section.bulk_material)})
         result = solve_posttension_sequence(
             self.section, sigma_p0=sig, order=[li],
-            base_N=0.0, base_Mx=0.0, base_My=0.0)
-        return grout(self.section, result, indices=[li]).report[
-            "reconciliation"][0]["eps_init"]
+            base_N=0.0, base_Mx=0.0, base_My=0.0, modmap=modmap)
+        # P3/F5: the reference is the *self-consistent* grout, because
+        # that is what the timeline now compiles.  Single-pass ``grout``
+        # reads the concrete strain on a section in which the tendon is
+        # still an external load, so its datum makes the bonded tendon
+        # read back a stress that is not the jack -- an O(n*rho) residue
+        # (measured -0.772 MPa at Ap=1500 on a 400x800).  Comparing the
+        # compiled path against the single pass would assert equivalence
+        # to the defect.
+        _gres, by_local, _it, _res = grout_selfconsistent(
+            self.section, result, [li],
+            demand_after=(0.0, 0.0, 0.0), modmap=modmap)
+        return by_local[li]
 
     def test_reconciled_eps_init_byte_equivalent_to_driver(self):
         self.assertAlmostEqual(

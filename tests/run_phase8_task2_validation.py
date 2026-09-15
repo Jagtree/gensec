@@ -96,10 +96,31 @@ def axis_A1_auto_datum(section, ddb) -> bool:
         [{"name": "g1", "components": [{"ref": "G1", "factor": 1.0}],
           "section_ops": {"deactivate": nonbase, "release": False}}],
         initially_inactive=[1])
-    _hh, bundle, _bb = mgr.get_bundle(states[-1])
+    # P3: the datum is drawn on the SERVICE response, so the second
+    # assembly must be too -- otherwise this axis measures the F5
+    # defect and calls it a disagreement.  The modulus is assembled
+    # independently, by asking the material for its own conventional
+    # value (Material.reference_modulus), never read back from the
+    # timeline: two ways that share an input are one way.
+    #
+    # Measured before this change: way1=(+1.9641e-05, ...) against
+    # way2=(-5.8684e-05, ...) -- opposite signs, because the design
+    # view has no tension branch and cracks under G1 while the linear
+    # service view does not.  Not a scale factor: a different section.
+    from gensec.solver.sls import SlsPolicy, resolve_moduli, sls_view
+    from gensec.solver.section_state import materialize_view
+    from gensec.solver.integrator import FiberSolver
+    from gensec.solver.losses import _UNCAST_PLACEHOLDER_E
+
+    E_ref = float(section.bulk_material.reference_modulus().value)
+    modmap = resolve_moduli(
+        section, SlsPolicy(),
+        explicit={("zone", 0): E_ref,
+                  ("zone", 1): _UNCAST_PLACEHOLDER_E})
+    view = sls_view(materialize_view(section, states[-1]), modmap)
     g = ddb["G1"]
-    s = bundle.solver.solve_equilibrium(g["N"], g["Mx"], g["My"],
-                                        tol=1e-10, max_iter=100)
+    s = FiberSolver(view).solve_equilibrium(g["N"], g["Mx"], g["My"],
+                                            tol=1e-10, max_iter=100)
     way2 = (-s["eps0"], -s["chi_x"], -s["chi_y"])
 
     ok = all(abs(a - b) <= TOL for a, b in zip(way1, way2))
@@ -284,8 +305,16 @@ def axis_A6_prestress_equivalence() -> bool:
     result = solve_posttension_sequence(
         section, sigma_p0=sig, order=[li], base_N=0.0, base_Mx=0.0,
         base_My=0.0)
-    w2 = grout(section, result, indices=[li]).report[
-        "reconciliation"][0]["eps_init"]
+    # P3/F5: the reference is the self-consistent grout, because that
+    # is what the timeline compiles.  Single-pass ``grout`` reads the
+    # concrete strain on a section where the tendon is still an
+    # external load, so the bonded tendon reads back a stress that is
+    # not the jack -- an O(n*rho) residue.  Comparing against it would
+    # assert byte-equivalence to the defect.
+    from gensec.solver.posttension import grout_selfconsistent
+    _g, by_local, _it, _r = grout_selfconsistent(
+        section, result, [li], demand_after=(0.0, 0.0, 0.0))
+    w2 = by_local[li]
     byte_eq = abs(w1 - w2) <= 1e-15
 
     _pt, stages, _i = tl.compile_combination(

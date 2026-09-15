@@ -36,7 +36,7 @@ def _make_rc_section():
     from gensec.geometry import RebarLayer, RectSection
     from gensec.solver import FiberSolver
 
-    conc = Concrete(fck=25.0)
+    conc = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     conc.name = "C25/30"
     steel = Steel(fyk=450.0)
     steel.name = "B450C"

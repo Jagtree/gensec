@@ -45,7 +45,7 @@ from gensec.solver import DomainChecker, MxMyContour, VerificationEngine
 
 def _biaxial_section():
     """300×500 column with 4 corner bars — biaxial fixture."""
-    concrete = Concrete(fck=25.0)
+    concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450.0)
     As = np.pi / 4 * 16 ** 2
     rb = [
@@ -60,7 +60,7 @@ def _biaxial_section():
 
 def _uniaxial_section():
     """300×600 beam/column with 2 rebar layers — uniaxial fixture."""
-    concrete = Concrete(fck=25.0)
+    concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450.0)
     rb = [
         RebarLayer(y=40,  As=942.5, material=steel),

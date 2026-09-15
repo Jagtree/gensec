@@ -67,6 +67,98 @@ def _draw_polygon_outline(ax, sec, **kwargs):
         ax.add_patch(Rectangle((0, 0), sec.B, sec.H, **defaults))
 
 
+def _draw_cast_zones(ax, sec, cast_steps):
+    r"""
+    Fill each bulk zone in the colour of **when it was cast**.
+
+    The colour encodes the construction timeline, not the material and
+    not any magnitude: a zone cast at :math:`T_0` and a zone cast at
+    :math:`T_1` get different colours even when they are the same
+    concrete, because what the drawing is answering is *"what existed
+    when?"*.
+
+    Deliberately **not a scale.**  The palette is qualitative and the
+    legend names the event (``cast[4] · topping``); there is no
+    colorbar, because a continuous ramp would invite the reader to
+    interpolate and there is nothing between two castings to
+    interpolate.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    sec : GenericSection
+        Must expose ``bulk_materials`` and ``zone_names``.
+    cast_steps : dict
+        ``{zone index: step index or None}``, as
+        :func:`gensec.output.timeline_projections.cast_steps_from_dump`
+        reads it off a timeline dump.  A zone absent from the mapping,
+        or mapped to ``None``, is drawn as never cast.
+
+    Notes
+    -----
+    Zone 0 (``base``) has no polygon of its own — it is the whole
+    section minus the explicit zones — so it is drawn first, as the
+    outline fill, and the explicit zones are painted over it in
+    declaration order.  That reproduces the containment the mesher
+    applies, without a second geometry computation here.
+    """
+    from .timeline_projections import cast_colour, UNCAST_COLOUR
+
+    steps = {int(k): v for k, v in (cast_steps or {}).items()}
+    # Zone 0 is the base: never the target of a ``cast``, but present
+    # from T0, which is the earliest position on the timeline and not
+    # the absence of one.  See ``timeline_projections._cast_order``.
+    ranked = sorted((s, z) for z, s in steps.items()
+                    if s is not None and z != 0)
+    order = {z: k + 1 for k, (_s, z) in enumerate(ranked)}
+    if 0 in steps:
+        order[0] = 0
+
+    names = list(getattr(sec, "zone_names", None) or ["base"])
+    base_colour = cast_colour(order.get(0))
+    _draw_polygon_outline(ax, sec, facecolor=base_colour,
+                          edgecolor='black', linewidth=2, zorder=1)
+    _cast_legend_entry(ax, base_colour, names[0], steps.get(0),
+                       is_base=True)
+
+    for k, (zone_poly, _mat) in enumerate(
+            getattr(sec, "bulk_materials", None) or []):
+        zi = k + 1
+        colour = (cast_colour(order[zi]) if zi in order
+                  else UNCAST_COLOUR)
+        draw_polygon(ax, zone_poly, facecolor=colour,
+                     edgecolor='black', linewidth=1.2, zorder=2)
+        label = names[zi] if zi < len(names) else f"zone_{zi}"
+        _cast_legend_entry(ax, colour, label, steps.get(zi))
+
+
+def _cast_legend_entry(ax, colour, zone_name, step, is_base=False):
+    r"""
+    Register one legend proxy for a cast-coloured zone.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    colour : str
+    zone_name : str
+    step : int or None
+    is_base : bool, optional
+        Zone 0.  It is labelled *"in place at T0"* rather than
+        *"never cast"*: it is never cast because it is what the
+        section already is, which is a statement about the timeline
+        and not a gap in it.
+    """
+    if is_base:
+        when = "in place at T0"
+    elif step is None:
+        when = "never cast by this history"
+    else:
+        when = f"cast[{step}]"
+    ax.add_patch(Rectangle((0, 0), 0, 0, facecolor=colour,
+                           edgecolor='black', linewidth=0.8,
+                           label=f"{when} · {zone_name}"))
+
+
 def _section_axis_limits(ax, sec):
     r"""
     Set axis limits from section bounding box with margins.
@@ -420,7 +512,7 @@ def plot_section_state(sec, fiber_results, field='eps', title=""):
 #  Section geometry (no results — just outline + numbered rebars)
 # ==================================================================
 
-def plot_section(sec, fiber_results=None, title=""):
+def plot_section(sec, fiber_results=None, title="", cast_steps=None):
     r"""
     Draw the cross-section geometry with rebars.
 
@@ -433,6 +525,17 @@ def plot_section(sec, fiber_results=None, title=""):
     sec : GenericSection or RectSection
     fiber_results : dict, optional
     title : str, optional
+    cast_steps : dict, optional
+        ``{zone index: step index or None}``.  When given, each bulk
+        zone is filled in the colour of **when it was cast** rather
+        than in the neutral default, and the legend names the casting
+        event.  Read off a timeline dump with
+        :func:`gensec.output.timeline_projections.cast_steps_from_dump`;
+        the drawing never sees a
+        :class:`~gensec.solver.timeline.TimelineResolution`.
+
+        The colour is a timeline code, not a scale — see
+        :func:`_draw_cast_zones`.
 
     Returns
     -------
@@ -440,23 +543,32 @@ def plot_section(sec, fiber_results=None, title=""):
     """
     if fiber_results is not None:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 8))
-        _draw_geometry_panel(ax1, sec, fiber_results)
+        _draw_geometry_panel(ax1, sec, fiber_results,
+                             cast_steps=cast_steps)
         _draw_field_panel(ax2, sec, fiber_results, field='sigma')
     else:
         fig, ax1 = plt.subplots(1, 1, figsize=(7, 8))
-        _draw_geometry_panel(ax1, sec, fiber_results=None)
+        _draw_geometry_panel(ax1, sec, fiber_results=None,
+                             cast_steps=cast_steps)
 
     fig.suptitle(title or "Cross-Section", fontsize=14)
     fig.tight_layout()
     return fig
 
 
-def _draw_geometry_panel(ax, sec, fiber_results=None):
+def _draw_geometry_panel(ax, sec, fiber_results=None, cast_steps=None):
     """
     Draw section outline with numbered rebars and optional
     neutral axis.
+
+    When *cast_steps* is given the bulk zones are filled by casting
+    order (:func:`_draw_cast_zones`); otherwise the outline is drawn in
+    the neutral default, exactly as before.
     """
-    _draw_polygon_outline(ax, sec)
+    if cast_steps:
+        _draw_cast_zones(ax, sec, cast_steps)
+    else:
+        _draw_polygon_outline(ax, sec)
 
     for i, rb in enumerate(sec.rebars):
         d = rb.diameter if rb.diameter > 0 else 16
@@ -477,9 +589,13 @@ def _draw_geometry_panel(ax, sec, fiber_results=None):
     if fiber_results is not None:
         _draw_neutral_axis(ax, sec, fiber_results)
         _legend_if_any(ax, fontsize=9, loc='best')
-        ax.set_title('Geometry + Neutral Axis')
+        ax.set_title('Geometry + Neutral Axis'
+                     + (' + casting order' if cast_steps else ''))
     else:
-        ax.set_title('Geometry')
+        if cast_steps:
+            _legend_if_any(ax, fontsize=9, loc='best')
+        ax.set_title('Geometry'
+                     + (' + casting order' if cast_steps else ''))
 
     _draw_reference_axes(ax, sec)
     _section_axis_limits(ax, sec)
@@ -683,18 +799,36 @@ def plot_moment_curvature(mc_data, title=""):
     legend_lines = []
 
     # First cracking markers.
+    #
+    # An absent marker is reported, not passed over in silence (F-M2).
+    # ``generate_moment_curvature`` already names the cause in
+    # ``diagnostics_*['cracking_reason']`` — a plot that dropped it
+    # left the reader with a diagram that is missing a point and no way
+    # to tell an uncracked section from a section whose material
+    # declares no tensile strength.  The zone is reported alongside,
+    # because on a composite section «which concrete cracked» is not
+    # recoverable from the marker's position.
     for suffix, marker in [("_pos", "D"), ("_neg", "D")]:
         cc = mc_data.get(f"cracking_chi{suffix}")
         cm = mc_data.get(f"cracking_M{suffix}")
+        sign = "+" if suffix == "_pos" else "−"
         if cc is not None and cm is not None:
             ax.plot(cc * 1e6, cm / 1e6, color='#FF8C00',
                     marker=marker, ms=9, zorder=5,
                     label="First cracking" if suffix == "_pos"
                     else None)
-            sign = "+" if suffix == "_pos" else "−"
+            zone = (mc_data.get(f"diagnostics{suffix}") or {}).get(
+                "cracking_zone")
+            where = "" if zone is None else f" [zone {zone}]"
             legend_lines.append(
                 f"Cracking ({sign}): {M_label}={cm/1e6:.1f} kNm,"
-                f" χ={cc*1e6:.1f} 1/km")
+                f" χ={cc*1e6:.1f} 1/km{where}")
+        else:
+            reason = (mc_data.get(f"diagnostics{suffix}") or {}).get(
+                "cracking_reason")
+            if reason is not None:
+                legend_lines.append(
+                    f"Cracking ({sign}): none — {reason}")
 
     for suffix, color, marker in [("_pos", "green", "^"),
                                    ("_neg", "green", "v")]:
@@ -1344,6 +1478,13 @@ def plot_polar_ductility(nm_gen, N_fixed, n_angles=72,
             eps0_prev = eps0  # warm-start within this angle
 
             eb, er = nm_gen.solver.strain_field(eps0, chi_x, chi_y)
+            # The ultimate is a material limit, so the bulk is measured
+            # at the argument its own law reads; the rebar at the
+            # section strain, which is what its law reads (F-M3).  This
+            # must agree with ``_scan_chi_vectorized``: a polar diagram
+            # that disagrees with the moment-curvature it is drawn
+            # beside is two answers to one question.
+            eb = eb + nm_gen.solver.bulk_strain_offset()
             all_eps = np.concatenate([eb, er]) if len(er) > 0 else eb
 
             if (all_eps.min() <= emb * 0.99

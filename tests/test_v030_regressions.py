@@ -99,7 +99,7 @@ class TestA1_CenteredSectionSymmetry(unittest.TestCase):
         coords = [(b, a), (-b, a), (-a, b), (-a, -b),
                   (-b, -a), (b, -a), (a, -b), (a, b)]
         poly = Polygon(coords)
-        conc = Concrete(fck=fck, gamma_c=1.4)
+        conc = Concrete(fck=fck, gamma_c=1.4, long_term_reduction_factor=0.85)
         steel = Steel(fyk=fyk, gamma_s=1.15, eps_su=0.075)
 
         # Symmetric 8-bar pattern at d = 0.7*a from centre.
@@ -174,7 +174,7 @@ class TestA1_CenteredSectionSymmetry(unittest.TestCase):
         from gensec.solver import FiberSolver
         from gensec.solver import NMDiagram
 
-        conc = Concrete(fck=30.0, gamma_c=1.5)
+        conc = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0, gamma_s=1.15)
         rebars = [
             RebarLayer(y=50,  x=50,  As=314, material=steel),
@@ -207,7 +207,7 @@ class TestB1_SymmetricUniaxialFastPath(unittest.TestCase):
         from gensec.geometry import RectSection, RebarLayer
         from gensec.materials import Concrete, Steel
 
-        conc = Concrete(fck=30.0, gamma_c=1.5)
+        conc = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0, gamma_s=1.15)
         rebars = [
             RebarLayer(y=50,  x=50,  As=314, material=steel),
@@ -262,7 +262,7 @@ class TestB2_UniaxialDetectionBothAxes(unittest.TestCase):
         from gensec.materials import Concrete
 
         sec = RectSection(B=300, H=600,
-                          bulk_material=Concrete(fck=30.0),
+                          bulk_material=Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                           rebars=[],
                           n_fibers_y=20, n_fibers_x=20)
         solver = FiberSolver(sec)
@@ -292,7 +292,7 @@ class TestB3_ElasticInitialGuessIsSymmetric(unittest.TestCase):
         from gensec.solver import FiberSolver
 
         sec = RectSection(B=300, H=600,
-                          bulk_material=Concrete(fck=30.0),
+                          bulk_material=Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                           rebars=[],
                           n_fibers_y=20, n_fibers_x=20)
         solver = FiberSolver(sec)
@@ -334,7 +334,7 @@ class TestF1_ZoneAwareRebarSubtraction(unittest.TestCase):
         from gensec.geometry import RectSection, RebarLayer
         from gensec.materials import Concrete, Steel
 
-        conc = Concrete(fck=30.0)
+        conc = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rebars = [
             RebarLayer(y=50, x=50, As=314, material=steel),
@@ -356,7 +356,7 @@ class TestF1_ZoneAwareRebarSubtraction(unittest.TestCase):
         from gensec.materials import Concrete, Steel
         from gensec.solver import FiberSolver
 
-        conc = Concrete(fck=30.0)
+        conc = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rebars = [RebarLayer(y=50, x=50, As=314, material=steel)]
         sec = RectSection(B=300, H=600, bulk_material=conc,
@@ -383,7 +383,7 @@ class TestF1_ZoneAwareRebarSubtraction(unittest.TestCase):
         from gensec.materials import Concrete, Steel
         from gensec.solver import FiberSolver
 
-        conc = Concrete(fck=30.0)
+        conc = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rebars = [
             RebarLayer(y=50,  x=50,  As=314, material=steel),
@@ -891,7 +891,7 @@ class TestB4_AxialLimitRobustness(unittest.TestCase):
             RebarLayer(y=455, x=45,  As=As, material=steel),
             RebarLayer(y=455, x=255, As=As, material=steel),
         ]
-        sec = RectSection(B=300, H=500, bulk_material=Concrete(fck=30.0),
+        sec = RectSection(B=300, H=500, bulk_material=Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                           rebars=rb, n_fibers_y=30, n_fibers_x=15)
         cls.gen = NMDiagram(FiberSolver(sec))
 

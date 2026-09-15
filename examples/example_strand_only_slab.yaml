@@ -1,0 +1,140 @@
+# =====================================================================
+#  GenSec - a STRAND-ONLY pretensioned slab (hollow-core family).
+#
+#  Why this example is distributed
+#  ------------------------------------------------------------------
+#  Every prestressed model in ``examples/`` before this one carries
+#  ordinary reinforcement *as well as* strands.  That is not a
+#  cosmetic difference.  On a section with rebar the axial peak falls
+#  at the rebar limit, so two whole families of behaviour are
+#  unreachable from the distributed battery:
+#
+#    * the tensile end of the zero-curvature axial scan, which before
+#      Phase 19 collapsed to eps_hi = 0.0 on a strand-only section
+#      because only rebars ever raised it (defect N-15).  Measured
+#      band without a bracket: 26.37 % of the true axial tensile
+#      capacity on THIS geometry, ~0 % on every distributed example
+#      of Phase 19 (``19_0 §3``);
+#
+#    * the pure-tension corridor of ``solve_equilibrium``, in which an
+#      eccentric strand makes a zero-curvature state carry a residual
+#      moment, the fast path is correctly refused on ``abs(Mx) <
+#      M_tol``, and the uniaxial solve that inherits the case has to
+#      find a state that -- measured, not assumed -- does not exist
+#      (item N-17).
+#
+#  Both lived only inside ``tests/test_phase19_hull.py`` until this
+#  file.  A defect visible to one fixture and to no instrument of the
+#  battery is a defect whose repair cannot be attributed: the numeric
+#  fingerprint could not move, so an INERT on that path was silence
+#  rather than evidence.
+#
+#  Geometry: unchanged from the Phase 19 fixture, on purpose
+#  ------------------------------------------------------------------
+#  The section below is byte-for-byte the geometry of
+#  ``_strand_only_slab`` in ``tests/test_phase19_hull.py``:
+#
+#      1200 x 200 mm, C45/55, 40 strips
+#      one bonded strand group, Ap = 700 mm^2, y = 40 mm,
+#      eps_pe = 0.0060
+#
+#  It is kept identical so that every number Phase 19 measured on that
+#  fixture transfers to this file without being re-measured:
+#
+#      true axial tensile capacity   N_true  = 1 112 287.8610 N
+#      band with no bracket (pre-19)         =        26.37 %
+#      N-17 target (0.95 N_true)             = 1 056 673.4679 N
+#
+#  A hollow-core slab has voids; this one does not.  The voids would
+#  change N_true and would therefore invalidate the transfer above for
+#  no gain: what this file has to exhibit is the *element census* -- a
+#  section whose only tension element is a strand -- and a solid slab
+#  exhibits it exactly.  The name says the family the case belongs to,
+#  the comment says what was left out and why.
+#
+#  Eccentricity
+#  ------------------------------------------------------------------
+#  With ``y_ref`` at the gross centroid, y = 100 mm, the strand sits at
+#  a lever arm of -60 mm.  That eccentricity is what makes the pure
+#  axial corridor non-trivial: at zero curvature the strand's force
+#  produces Mx = N x (-60), which no zero-curvature state can cancel.
+# =====================================================================
+
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
+materials:
+
+  # Class-based concrete, so the EC2 property object exists and the
+  # first-cracking marker has an eps_cr to resolve.  A ``type:
+  # concrete`` declaration with a bare fck would read
+  # ``no_ec2_properties`` on every cracking key, which is the cause
+  # Phase 19 measured behind N-3.
+  c45:
+    type: concrete_ec2_gen1
+    class: C45/55
+    ls: F
+
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
+  # Prestressing steel, EN 10138 designation.
+  y1860:
+    type: prestressing_steel_ec2
+    class: Y1860S7          # f_p01k=1600, f_pk=1860, eps_uk=0.035, Ep=195000
+    ls: F
+    diagram: inclined
+
+    NA: "EC2"
+    eps_ud_factor: 0.9
+section:
+  B: 1200
+  H: 200
+  bulk_material: c45
+  n_fibers_y: 40
+
+  # No ``rebars`` block.  Its absence is the point of the file and is
+  # declared here so that a future edit which adds one has to delete
+  # this comment first.
+
+  tendons:
+    - name: S1
+      x: 600
+      y: 40
+      material: y1860
+      Ap: 700             # mm^2, 5 strands of 140 mm^2
+      eps_pe: 0.0060      # effective prestrain after losses (tension +)
+      bonded: true
+
+#  Demands
+#  --------------------------------------------------------------------
+#  Two of the four are pure axial (Mx = 0) and exist to drive the
+#  corridor described at the top of this file through the distributed
+#  battery.  The two axial levels straddle a measured boundary:
+#
+#    the largest axial force this section can carry with |Mx| <= M_tol
+#    is  317 016 N,  reached at eps0 = 8.4793e-03, chi_x = 1.1690e-04.
+#
+#  Measured by scanning the Mx = 0 locus (121 curvatures, 427 verified
+#  roots) on the Phase 19 tree; the scan and its resolution are
+#  reported in ``handoff/20_1``.  Hence:
+#
+#    T_in   =  +250 kN   inside that reach   -> a state exists
+#    T_out  = +1000 kN   outside it          -> no state exists, and
+#                                               the refusal must name
+#                                               the reason
+#
+#  ``T_out`` is deliberately below the section's zero-curvature axial
+#  tensile capacity of 1 112 kN: it is reachable in pure tension and
+#  unreachable at zero moment, which is exactly the distinction the
+#  refusal has to draw.
+demands:
+  - {name: G,      N_kN:    0.0, Mx_kNm: -40.0}
+  - {name: Q,      N_kN:    0.0, Mx_kNm: -25.0}
+  - {name: T_in,   N_kN:  250.0, Mx_kNm:   0.0}
+  - {name: T_out,  N_kN: 1000.0, Mx_kNm:   0.0}

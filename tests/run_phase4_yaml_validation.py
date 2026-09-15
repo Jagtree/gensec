@@ -88,8 +88,11 @@ GEN_KW = dict(n_angles=24, n_points_per_angle=40)
 #: reference path (stage 0 deactivates by name, stage 1 re-activates by
 #: union index — both spellings of the same mechanism).
 TOY_YAML = """
+# Declared because GenSec derives nothing from an undeclared
+# model: the code is not inferred from a material type.
+code: ec2
 materials:
-  conc:  {type: concrete_ec2_gen1, class: 'C25/30'}
+  conc: {type: concrete_ec2_gen1, class: 'C25/30', ls: F, loadtype: slow, TypeConc: R, NA: French, time: 28}
   steel: {type: steel, fyk: 450, gamma_s: 1.15}
 
 section:

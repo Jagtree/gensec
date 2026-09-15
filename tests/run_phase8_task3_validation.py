@@ -184,7 +184,11 @@ def t1_transfer(sec):
     M = -1.20e8
     s = _state(sec, active=[True], bonded=[True], eps_t=EPS_PE,
                bulk_active=[True, False], label="transfer")
-    lim = StressLimits(name="tr", sigma_c_comp=30.0)
+    # Phase 32: transfer strength is declared, never derived.  f_ck(t)
+    # is not the material's 28-day value, so it enters through the
+    # custom block and the record will read provenance="custom".
+    lim = StressLimits(name="tr", k_c=0.6,
+                       custom_zone_strengths={"base": {"f_ck": 50.0}})
     res = verify_sls_staged(
         sec, [{"name": "transfer", "state": s, "increment": (0.0, M, 0.0),
                "limits": lim}],
@@ -273,10 +277,17 @@ def t3_decompression(sec):
         u = _solve(_with_tendon(_fiber_stiffness(sec, [True, False]), True),
                    (0.0, Mg), _F0(True))
         yp = dec[0]["probe_at"][1]                 # evaluate at real probe
-        check("T3 probe stress matches closed form at probe_at",
-              abs(dec[0]["sigma_probe_MPa"] - _sig_c(u, yp, E1)) < 1e-2,
-              f"probe={dec[0]['sigma_probe_MPa']:.4f} "
-              f"exp={_sig_c(u, yp, E1):.4f} @y={yp:.1f}")
+        # Phase 29: the record publishes the STRAIN the verdict is
+        # taken on and no stress beside it.  The closed form is
+        # divided by the zone modulus so the comparison is the same
+        # statement, at the same point, in the unit the record now uses.
+        exp = _sig_c(u, yp, E1) / E1
+        check("T3 probe strain matches closed form at probe_at",
+              abs(dec[0]["value"] - exp) < 1e-2 / E1,
+              f"probe={dec[0]['value']:.6e} "
+              f"exp={exp:.6e} @y={yp:.1f}")
+        check("T3 no second number beside the verdict",
+              "sigma_probe_MPa" not in dec[0])
 
 
 def t4_present_mask(sec):
@@ -342,3 +353,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+# GENSEC-COMPLETE phase=32 utc=2026-09-05T13:56:13Z sha256=c1d953edd772bdb090a9ccfbd5a456b0634a015ab1808dab5ba659c28ff06004 body_lines=355

@@ -224,7 +224,7 @@ class TestExport(unittest.TestCase):
     """Numerical export: CSV and JSON."""
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rb = [RebarLayer(y=40, As=942.5, material=steel),
               RebarLayer(y=560, As=942.5, material=steel)]
@@ -335,7 +335,7 @@ class TestDomainChecker2D(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rb = [RebarLayer(y=40, As=942.5, material=steel),
               RebarLayer(y=560, As=942.5, material=steel)]
@@ -401,7 +401,7 @@ class TestSectionPlot(unittest.TestCase):
         import matplotlib
         matplotlib.use("Agg")
         from gensec.output import plot_section
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         sec = RectSection(B=300, H=600, bulk_material=concrete,
                           rebars=[
@@ -417,7 +417,7 @@ class TestSectionPlot(unittest.TestCase):
         import matplotlib
         matplotlib.use("Agg")
         from gensec.output import plot_section
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         A20 = np.pi / 4 * 20 ** 2
         sec = RectSection(B=300, H=600, bulk_material=concrete,

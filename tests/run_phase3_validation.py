@@ -49,7 +49,7 @@ def _domain_extent(bundle):
 def build_section():
     """300x500 RC section. Group A (bottom) + group B (top)."""
     poly = box(0, 0, 300, 500)
-    conc = Concrete(fck=25)
+    conc = Concrete(fck=25, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450, gamma_s=1.15)
     A = [RebarLayer(x=40, y=40, As=400.0, material=steel),
          RebarLayer(x=260, y=40, As=400.0, material=steel)]

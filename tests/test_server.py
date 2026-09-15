@@ -73,7 +73,14 @@ def test_analyze_round_trip(client):
     import yaml as _yaml
     data = _yaml.safe_load(src.read_text())
     data.setdefault("output", {})
-    data["output"]["n_points"] = 40
+    # Phase 38: ``data["output"]["n_points"] = 40`` used to sit here, put
+    # there to keep this smoke test quick.  It never did anything --
+    # nothing reads ``n_points`` from the output block; the solver takes
+    # it from CLI arguments and gen_kwargs -- so the five flags below are
+    # what has been making this test fast all along.  The line is gone
+    # rather than wired, because wiring it would change what this test
+    # computes.  It was found by the refusal added in this phase, which
+    # is the refusal doing its job on the project's own suite.
     data["output"]["generate_3d_surface"] = False
     data["output"]["generate_mx_my"] = False
     data["output"]["generate_moment_curvature"] = False
@@ -101,7 +108,14 @@ def test_second_analyze_is_cached(client):
     import yaml as _yaml
     data = _yaml.safe_load(src.read_text())
     data.setdefault("output", {})
-    data["output"]["n_points"] = 40
+    # Phase 38: ``data["output"]["n_points"] = 40`` used to sit here, put
+    # there to keep this smoke test quick.  It never did anything --
+    # nothing reads ``n_points`` from the output block; the solver takes
+    # it from CLI arguments and gen_kwargs -- so the five flags below are
+    # what has been making this test fast all along.  The line is gone
+    # rather than wired, because wiring it would change what this test
+    # computes.  It was found by the refusal added in this phase, which
+    # is the refusal doing its job on the project's own suite.
     data["output"]["generate_3d_surface"] = False
     data["output"]["generate_mx_my"] = False
     data["output"]["generate_moment_curvature"] = False

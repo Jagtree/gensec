@@ -152,7 +152,9 @@ import numpy as np
 from ..materials.base import RheologicalModel, aging_coefficient
 from .integrator import FiberSolver
 from .section_state import QUANT_EPS, materialize_view
-from .sls import resolve_sls_moduli, sls_view
+from .sls import (DatumPolicy, covered_zone_slots, resolve_moduli,
+                  resolve_sls_moduli, sls_view,
+                  _UNCAST_PLACEHOLDER_E as _SLS_UNCAST_PLACEHOLDER_E)
 
 __all__ = [
     "EC2_LUMP_CHI",
@@ -174,14 +176,13 @@ __all__ = [
 EC2_LUMP_CHI: float = 0.8
 EC2_LUMP_RELAXATION_REDUCTION: float = 0.8
 
-#: Placeholder modulus [MPa] handed to a concrete zone that has **not yet
-#: been cast** at an interval.  Its fibres are masked out of the stage
-#: view, so the value cannot reach any result -- an invariant the
-#: validator asserts by perturbing it six orders of magnitude and
-#: checking the answer does not move.  It exists only because
-#: :func:`~gensec.solver.sls.resolve_sls_moduli` enumerates every
-#: material of the *base* section, cast or not.
-_UNCAST_PLACEHOLDER_E: float = 1.0
+#: Placeholder modulus [MPa] handed to a concrete zone that does not
+#: exist at the instant being resolved.  **Defined in**
+#: :mod:`gensec.solver.sls`, beside :func:`~gensec.solver.sls.resolve_moduli`
+#: -- the mechanism that requires it, because it enumerates every slot of
+#: the base section, cast or not.  Re-exported here under the name the
+#: module has always published: one fact, one home (rule 5).
+_UNCAST_PLACEHOLDER_E = _SLS_UNCAST_PLACEHOLDER_E
 
 
 # ==================================================================
@@ -355,6 +356,14 @@ class IntervalLosses:
         tendon level at the start of the interval — the
         :math:`\sigma_{c,QP}` of EN 1992-1-1 (5.46), exposed for the
         closed-form cross-check.
+    d_sigma_load : numpy.ndarray or None
+        Shape ``(n_zones, 3)``: the **elastic** stress-plane increment
+        that the demand applied since the history was last synchronised
+        put into each zone, dated at the start of this interval.  Zero
+        on every row whose zone had no history to add to (its seed
+        already carries the whole standing demand) and on every row of a
+        walk in which the demand did not move.  The caller appends it to
+        the Boltzmann history; see :func:`compute_interval_losses`.
     """
 
     u: np.ndarray
@@ -370,6 +379,7 @@ class IntervalLosses:
     d_sigma_zone: Optional[np.ndarray] = None
     eps_imp_zone: Optional[np.ndarray] = None
     sigma_zone0: Optional[np.ndarray] = None
+    d_sigma_load: Optional[np.ndarray] = None
 
     @property
     def loss_fraction(self) -> Dict[str, float]:
@@ -403,17 +413,47 @@ def _check_linearity(provider, zone_name, t0_zone, sigma_c_min):
     ValueError
         If ``|sigma_c_min|`` exceeds the provider's
         :meth:`~gensec.materials.base.RheologicalModel.linearity_limit`.
+    ~gensec.materials.base.OutOfDeclaredDomain
+        If the zone carries compression at an age for which the
+        provider states no limit and no rule has been declared.
+        Propagated unchanged: the provider's own citation is a better
+        message than anything this function could compose.
+
+    Notes
+    -----
+    The provider is asked **only when the zone actually carries
+    compression**.  A stress-free or wholly tensile zone satisfies
+    linear viscoelasticity trivially, so there is nothing to bound and
+    no reason to walk to the edge of a provider's declared domain to
+    find that out.  Asking unconditionally would make a freshly cast
+    zone — stress-free at its own casting, by construction — raise on
+    the sign of a numerical residue.
     """
+    sigma_comp = abs(min(0.0, float(sigma_c_min)))
+    if sigma_comp == 0.0:
+        return
     lim = provider.linearity_limit(t0_zone)
     if lim is None:
         return
-    if abs(min(0.0, float(sigma_c_min))) > float(lim):
+    if sigma_comp > float(lim):
+        # Name where the limit came from.  When an engineer has
+        # declared a rule the number is theirs, not the Eurocode's, and
+        # a message that cites §3.1.4(4) regardless would misattribute
+        # it -- the same provenance failure the explain() hook exists
+        # to prevent one layer up.
+        rule = getattr(provider, "declared", {}).get("linearity_limit")
+        if rule is not None and rule.covers(t0_zone):
+            declared_by = f"declared by the analyst: {rule.source}"
+        else:
+            declared_by = provider.domain_source("linearity_limit") \
+                if hasattr(provider, "domain_source") \
+                else "the provider's own range"
         raise ValueError(
             f"losses: zone '{zone_name}' is compressed to "
             f"{abs(sigma_c_min):.2f} MPa at the start of the interval, "
             f"beyond the {float(lim):.2f} MPa linear-viscoelasticity "
-            f"limit its rheological model declares (EN 1992-1-1 "
-            f"§3.1.4(4): 0.45 f_ck(t0)).  Above it the creep compliance "
+            f"limit in force at t = {float(t0_zone):g} d "
+            f"({declared_by}).  Above it the creep compliance "
             f"is no longer stress-independent, so J, chi and the whole "
             f"age-adjusted formulation are out of range.  Non-linear "
             f"creep is not modelled: reduce the prestress, or supply a "
@@ -716,8 +756,8 @@ def _point_elements(base_section, state, solver, models, zone_provider,
 
 def compute_interval_losses(base_section, state, *, models, demand,
                             zone_ages_t0, zone_ages_t, zone_curing_ages,
-                            tendon_ages, history=None, relax_from=None,
-                            service_datums=None, moduli=None, tol=1e-6,
+                            tendon_ages, history=None, history_demand=None,
+                            relax_from=None, moduli=None, tol=1e-6,
                             max_iter=100):
     r"""
     One AAEM interval on the section: solve, and emit the section ops.
@@ -781,6 +821,39 @@ def compute_interval_losses(base_section, state, *, models, demand,
         stress is taken as established at :math:`t_0`.  Seeding the
         history with ``[(t0, E_c(t0) * p_mech)]`` reproduces that case
         identically, so the single-interval path is unchanged.
+    history_demand : tuple of float, optional
+        The ``(N, Mx, My)`` at which *history* was last synchronised.
+        A ``load`` event standing between two intervals moves the
+        demand, hence the mechanical strain plane of every zone, hence
+        the stress each zone carries — and that stress increment has an
+        age of application like any other.  Without it the increment
+        never enters the superposition integral and the load flows
+        **zero days**, which is what it did until Phase 15 (measured in
+        ``handoff/12_10`` §7, re-measured in ``handoff/15_0``).
+
+        The increment is isolated as the *difference of two service
+        solves on one view*,
+
+        .. math::
+
+            \Delta\sigma_z = E_{c,z}(t_0)\,
+                \bigl[\mathbf{p}(\mathcal{D}) -
+                      \mathbf{p}(\mathcal{D}_{\mathrm{hist}})\bigr] ,
+
+        so the view's own self-equilibrated prestrain response cancels
+        instead of being charged again as if it were an applied load.
+        The datum and ``bulk_eps_init`` are untouched by a load, so the
+        difference of the *sectional* planes is the difference of the
+        *mechanical* planes of every zone.
+
+        ``load`` does not advance the clock, so the age of application
+        is exactly :math:`t_0` and :math:`E_{c,z}(t_0)` is the very
+        modulus the service view of this interval already uses.
+
+        ``None`` (default) means *do not date anything*: the seed of an
+        empty history already carries the whole standing demand, so a
+        zone reached for the first time must not also receive the
+        increment — it would be counted twice.
     relax_from : dict, optional
         ``{tendon_name: (T_start, mu_0)}`` — the duration under load at
         the **start** of the interval and the stress ratio at stressing.
@@ -854,38 +927,48 @@ def compute_interval_losses(base_section, state, *, models, demand,
         zone_provider[z] = (p if p.A_c is not None
                             else p.with_geometry(A_c, u_dry))
 
-    # resolve_sls_moduli keys its *input* by material instance (or name);
-    # only its output map is keyed by id().  Phase-7 D3 forbids deriving an
-    # SLS modulus silently — here the derivation is explicit and auditable:
-    # it is the loss model's own E_c(t0), the very modulus whose creep the
-    # eigenstrain phi*sigma_c/E_c is written against.
-    # resolve_sls_moduli keys its *input* by material instance, name, or
-    # id() (the last added by Phase-5 finding F3: a Concrete is an
-    # unfrozen dataclass, hence unhashable, and its name is empty unless
-    # declared).  Phase-7 D3 forbids deriving an SLS modulus silently --
-    # here every derivation is explicit and auditable:
+    # The modulus map is keyed by **slot**, never by material (12_0d
+    # S1).  Two zones may share one material object -- io_yaml hands
+    # ``materials[name]`` to every zone declaring that name -- and
+    # still carry different E_c(t), because the modulus belongs to the
+    # pair (zone, instant).  Keying by material collapsed the two onto
+    # whichever zone the ascending walk visited last (12_0d D-1,
+    # measured at -39 % on the substrate).
+    #
+    # Phase-7 D3 forbids deriving an SLS modulus silently; here every
+    # derivation is explicit and auditable:
     #
     #   * a zone WITH a loss model      -> its own provider's E_c(t0), the
     #     very modulus the creep eigenstrain phi*sigma_c/E_c is written
     #     against.  Self-consistent by construction.
-    #   * a zone NOT YET CAST           -> a placeholder.  The state masks
-    #     its fibres out of the view, so the value cannot reach any
-    #     result; the asserted invariant is that the answer is invariant
-    #     to it (the validator perturbs it by 10^6 and checks).
+    #   * a zone NOT YET CAST           -> a placeholder, written into
+    #     that zone's own slot and unable to reach any other zone.  The
+    #     state masks its fibres out of the view, so the value cannot
+    #     reach any result; the asserted invariant is that the answer is
+    #     invariant to it (the validator perturbs it by 10^6 and checks).
     #   * an ACTIVE zone with no model  -> raise.  Such a zone does not
     #     creep, but it keeps its stiffness and therefore *restrains* the
     #     zones that do -- often the governing effect.  Guessing its
     #     modulus would be exactly the silent normative choice D3 forbids.
     mod = dict(moduli or {})
     n_zones_sec = 1 + len(getattr(base_section, "bulk_materials", []))
+    covered = covered_zone_slots(base_section, mod)
     for z in range(n_zones_sec):
-        mat = _zone_material(base_section, z)
-        if id(mat) in mod or getattr(mat, "name", "") in mod:
+        if z in covered:
             continue
         if z in models:
-            mod[id(mat)] = zone_provider[z].E_c(zone_ages_t0[z])
+            # The zone's own law at its own age, not a number.  Asking
+            # for E_c(t) here and for service_law(t) at the grout datum
+            # gave the same zone two different constitutive laws at the
+            # same instant, and the read-back of a jacked tendon --
+            # which must return the jack exactly, since nothing
+            # mechanical happens at grouting -- came back 2.335 MPa
+            # high on a 1250 MPa jack.  Both solves now read the same
+            # law from the same provider.
+            mod[("zone", z)] = zone_provider[z].service_law(
+                zone_ages_t0[z])
         elif not bool(np.asarray(state.bulk_active)[z]):
-            mod[id(mat)] = _UNCAST_PLACEHOLDER_E
+            mod[("zone", z)] = _UNCAST_PLACEHOLDER_E
         else:
             raise ValueError(
                 f"losses: zone {z} "
@@ -901,6 +984,11 @@ def compute_interval_losses(base_section, state, *, models, demand,
     # -- 2. the linear (service) state at t0 --------------------------
     view = materialize_view(base_section, state)
     modmap = resolve_sls_moduli(base_section, mod)
+    # Cheap always-on cover check (rule 1): the MaterialMap is
+    # zone-indexed like every other per-zone array here, so E0_z[z]
+    # below reads zone z and nothing else -- the property 12_0d D-1
+    # says the material-keyed map could not offer.
+    modmap.require_cover(n_zones, 0, where="losses")
     solver = FiberSolver(sls_view(view, modmap))
     N, Mx, My = (float(v) for v in demand)
     sol = solver.solve_equilibrium(N, Mx, My, tol=tol, max_iter=max_iter)
@@ -919,19 +1007,16 @@ def compute_interval_losses(base_section, state, *, models, demand,
     # the same basis b = [1, ly, -lx] -> a plane, in closed form.  No
     # fitting.
     #
-    # The datum is the *service* one, not ``state.bulk_planes``.  Those
-    # two are different objects and conflating them is a real error
-    # (Phase-5 finding F4): ``bulk_planes`` carries the datum written at
-    # casting by ``ConstructionTimeline._auto_datum``, which solves the
-    # substrate with the **ULS** view (design laws, non-linear).  The
-    # losses need the plane of the **service** view (linear, at E_c(t)).
-    # The two differ by ~1e-4 of strain, so negating one against the other
-    # leaves a freshly-cast zone reading a few MPa of spurious stress --
-    # when "a zone is unstressed at its own casting" is a statement of
-    # physics, not an artefact of whichever solver drew the plane.
-    datums = planes0 if service_datums is None else np.array(
-        [service_datums.get(z, planes0[z]) for z in range(n_zones)],
-        dtype=float)
+    # The datum is ``state.bulk_planes``, and there is only one.  Until
+    # Phase 12 there were two -- the ULS datum here and a parallel
+    # *service* datum computed by a stopgap -- because ``_auto_datum``
+    # drew its plane with the design law, 30-41 % too soft, and negating
+    # a ULS-drawn plane against a service-drawn one left a freshly-cast
+    # zone reading a few MPa of stress it does not carry (finding F4).
+    # P3 retargeted the draw itself onto the service response, so the
+    # single datum is now the right one for both domains and the second
+    # object -- two chances to be wrong, none to notice -- is gone.
+    datums = planes0
     p_mech = datums + p_sec[None, :]
     p_mech[:, 0] += float(state.bulk_eps_init)
 
@@ -943,7 +1028,7 @@ def compute_interval_losses(base_section, state, *, models, demand,
     esh_z = np.zeros(n_zones)
     for z in range(n_zones):
         if z not in models:
-            E0_z[z] = float(modmap[id(_zone_material(base_section, z))][1])
+            E0_z[z] = float(modmap.E_bulk[z])
             Ebar_z[z] = E0_z[z]
             continue
         lm, p = models[z], zone_provider[z]
@@ -975,6 +1060,49 @@ def compute_interval_losses(base_section, state, *, models, demand,
     # plane, in closed form.  With no history the single increment
     # (t0, E_c(t0) * p_mech) reproduces phi * eps_mech exactly.
     hist = dict(history or {})
+    # -- 6a. the stress increment the demand applied since the history
+    #        was last synchronised, dated at t0 -----------------------
+    # A ``load`` between two intervals moves p_sec and therefore the
+    # mechanical plane of every zone.  Its stress increment is elastic
+    # and instantaneous; what it needs is a DATE, so that the integral
+    # below charges it J(t1, t0) - J(t0, t0) instead of nothing.
+    #
+    # Isolated as the difference of two solves on the SAME view: the
+    # view is affine, not linear (the bonded tendon's prestrain gives a
+    # non-zero response to a zero demand), so solving the demand
+    # *difference* on its own would re-charge the prestress as if it
+    # were an applied load.  The difference of two solves cancels it.
+    #
+    # A zone whose history is still empty must NOT receive it: its seed
+    # a few lines below is E_c(t0) * p_mech, which already carries the
+    # whole standing demand.  Adding the increment there would count the
+    # load twice.
+    d_sigma_load = np.zeros((n_zones, 3), dtype=float)
+    if history_demand is not None:
+        d_demand = (np.asarray([float(v) for v in demand], dtype=float)
+                    - np.asarray([float(v) for v in history_demand],
+                                 dtype=float))
+        if np.any(d_demand != 0.0) and any(hist.get(z) for z in models):
+            Np, Mxp, Myp = (float(v) for v in history_demand)
+            sol_h = solver.solve_equilibrium(Np, Mxp, Myp, tol=tol,
+                                             max_iter=max_iter)
+            if not sol_h["converged"]:
+                raise ValueError(
+                    f"losses: the linear service solve for the demand "
+                    f"the stress history was last synchronised at "
+                    f"(N={Np / 1e3:.1f} kN, Mx={Mxp / 1e6:.1f} kN·m, "
+                    f"My={Myp / 1e6:.1f} kN·m) did not converge on the "
+                    f"view of this interval.  Without it the load "
+                    f"applied since cannot be dated, and an undated "
+                    f"load flows zero days."
+                )
+            dp_sec = p_sec - np.array(
+                [sol_h["eps0"], sol_h["chi_x"], sol_h["chi_y"]],
+                dtype=float)
+            for z in models:
+                if hist.get(z):
+                    d_sigma_load[z] = E0_z[z] * dp_sec
+
     eps_imp_p = np.zeros((n_zones, 3), dtype=float)
     for z in models:
         p = zone_provider[z]
@@ -982,6 +1110,8 @@ def compute_interval_losses(base_section, state, *, models, demand,
         entries = hist.get(z)
         if not entries:
             entries = [(a0, E0_z[z] * p_mech[z])]
+        elif np.any(d_sigma_load[z]):
+            entries = list(entries) + [(a0, d_sigma_load[z])]
         acc = np.zeros(3, dtype=float)
         for tau, d_sig in entries:
             tau = float(tau)
@@ -1048,6 +1178,11 @@ def compute_interval_losses(base_section, state, *, models, demand,
     # emitted onto the state, i.e. exactly at the first loading).
     out.sigma_zone0 = np.array(
         [E0_z[z] * p_mech[z] for z in range(n_zones)], dtype=float)
+    # The dated elastic increment of the demand applied since the
+    # history was last synchronised.  Consumed by this step's own
+    # integral above AND handed to the caller, which owns the history:
+    # one home for the bookkeeping, one home for the physics.
+    out.d_sigma_load = d_sigma_load
 
     for k in range(pt["A"].size):
         j = int(pt["tendon_j"][k])
@@ -1074,8 +1209,9 @@ def compute_interval_losses(base_section, state, *, models, demand,
 
 def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
                   zone_ages_t, zone_curing_ages, tendon_ages_t0,
-                  interval_days, steps=None, history=None, relax_from=None,
-                  service_datums=None, moduli=None, label="interval"):
+                  interval_days, steps=None, history=None,
+                  history_demand=None, relax_from=None,
+                  moduli=None, label="interval"):
     r"""
     Lower one ``interval`` with a ``losses`` reference into
     ``section_ops``.
@@ -1126,6 +1262,15 @@ def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
         at an interval boundary any more than it does at a sub-step
         boundary).  ``None`` on the first interval.
 
+    history_demand : tuple of float, optional
+        The ``(N, Mx, My)`` at which *history* was last synchronised,
+        carried in from the previous interval.  Everything the demand
+        gained since — every ``load`` event standing between the two
+        intervals — is dated at this interval's start and appended to
+        the history before the superposition integral runs.  ``None`` on
+        the first interval, where the seed carries the whole standing
+        demand by itself.  See :func:`compute_interval_losses`.
+
     relax_from : dict, optional
         ``{tendon: (T_start [days], mu_0)}`` carried in from the previous
         intervals.  ``mu_0`` is the stress ratio **at stressing** and
@@ -1135,12 +1280,14 @@ def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
     Returns
     -------
     tuple
-        ``(section_ops, [IntervalLosses, ...], history, relax_from)`` — the ops dict
-        carries ``eps_override`` (``{union_index: eps}``) and
-        ``bulk_plane_delta`` (``{zone_index: [d_eps0, d_chi_x,
-        d_chi_y]}``); the list is the per-step trace (one entry when
-        ``steps`` is ``None``); ``history`` is the updated stress history,
-        to be handed to the next interval.
+        ``(section_ops, [IntervalLosses, ...], history, history_demand,
+        relax_from)`` — the ops dict carries ``eps_override``
+        (``{union_index: eps}``) and ``bulk_plane_delta``
+        (``{zone_index: [d_eps0, d_chi_x, d_chi_y]}``); the list is the
+        per-step trace (one entry when ``steps`` is ``None``);
+        ``history`` is the updated stress history and ``history_demand``
+        the demand it is now synchronised at, both to be handed to the
+        next interval.
 
     Raises
     ------
@@ -1183,12 +1330,19 @@ def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
         a0 = {z: zone_ages_t0[z] + elapsed_prev for z in zone_ages_t0}
         a1 = {z: zone_ages_t0[z] + dt for z in zone_ages_t0}
         tend = {n: tendon_ages_t0[n] + dt for n in tendon_ages_t0}
+        # The demand is frozen across the sub-steps of one interval, so
+        # only the FIRST sub-step can have anything to date: after it
+        # the history is synchronised at ``demand`` and the difference
+        # is identically zero.  Saying so explicitly costs one linear
+        # solve per interval instead of one per sub-step.
         res = compute_interval_losses(
             base_section, st, models=models, demand=demand,
             zone_ages_t0=a0, zone_ages_t=a1,
             zone_curing_ages=zone_curing_ages, tendon_ages=tend,
-            history=(history or None), relax_from=(relax_from or None),
-            service_datums=service_datums, moduli=moduli,
+            history=(history or None),
+            history_demand=(history_demand if k == 0 else demand),
+            relax_from=(relax_from or None),
+            moduli=moduli,
         )
         if len(cuts) > 1:
             probe = [res.eps_override[i] - st.eps_init[i]
@@ -1206,6 +1360,14 @@ def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
             h = history.setdefault(z, [])
             if not h:
                 h.append((a0[z], res.sigma_zone0[z].copy()))
+            elif res.d_sigma_load is not None \
+                    and np.any(res.d_sigma_load[z]):
+                # The demand moved between the previous interval and
+                # this one.  The increment is elastic and lands at a0,
+                # exactly where ``compute_interval_losses`` charged it
+                # for its own integral -- recorded here so the NEXT
+                # interval superposes on it too.
+                h.append((a0[z], res.d_sigma_load[z].copy()))
             h.append((float(np.sqrt(a0[z] * a1[z])),
                       res.d_sigma_zone[z].copy()))
         for name, sp0 in res.sigma_p0.items():
@@ -1234,7 +1396,12 @@ def expand_losses(base_section, state, *, models, demand, zone_ages_t0,
     nz = np.flatnonzero(np.abs(beta_tot).sum(axis=1) > 0.0)
     if nz.size:
         ops["bulk_plane_delta"] = {int(z): beta_tot[z].tolist() for z in nz}
-    return ops, trace, history, relax_from
+    # The history now stands at THIS interval's demand, whatever it was
+    # when the call started.  Returning it beside the history keeps the
+    # two in one place: a history and the demand it is synchronised at
+    # are one fact, and splitting them across two owners is how a load
+    # goes missing.
+    return ops, trace, history, tuple(float(v) for v in demand), relax_from
 
 
 def _apply_bulk_delta(state, delta):

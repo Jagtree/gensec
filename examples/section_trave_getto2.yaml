@@ -1,0 +1,769 @@
+# ======================================================================
+#  GenSec input -- circular RC member with second-phase casting
+#  Revision 2: symmetric geometry, class fck, NTC 2018 Es, demands.
+# ======================================================================
+#
+#  Source : Excel sheet (Trave / Getto2aFase / Foro / Armature
+#           ordinarie / Sollecitazioni SLE / Sollecitazioni SLV).
+#  Units  : mm, MPa, kN, kN*m.
+#
+#  Frame
+#  -----
+#  All coordinates are the Excel ones shifted by
+#      (x, y) = (x_xls + 5211.755, y_xls + 5211.75)
+#  so that the bounding box starts at the origin (GenSec convention).
+#  The symmetry axis is x = 5211.755.  Each bar carries its Excel-frame
+#  position in a trailing comment.  Moments are taken by GenSec about
+#  the gross-polygon centroid: in the Excel frame (0, 101.84) mm for
+#  concrete only.  If the sheet moments refer to another point (e.g.
+#  the homogenised centroid, about y = 73.5 mm with n = 15, or the
+#  origin) they must be transported: dMx = N * dy.
+#
+#  Zones
+#  -----
+#  zone 0 "base"   : beam "Trave", C20/25 (exterior - hole - zone 1).
+#  zone 1 "getto2" : second-phase casting "Getto2aFase", C32/40.
+#  hole            : "Foro", R = 3500 mm, 32-gon (void).
+#  No construction_history, deliberately: both bulk zones are taken as
+#  active from the same instant and carry every demand from zero.
+#  All SLE demands are treated as permanent.  Short-term analysis:
+#  no creep, no shrinkage (see the SLE block in `combinations`).
+#
+#  Geometry corrections (ratified, rev. 2)
+#  --------------------------------------
+#  * Polygons and ring-2 bars mirrored exactly about the axis (sheet
+#    asymmetries <= 0.02 mm).
+#  * Inner ring R3560: 111 bars rotated by 90 deg (a bar on the axis at
+#    90 deg).  With an odd count the sheet layout (bar at 0 deg) was
+#    symmetric about x, not about the vertical axis.
+#  * Outer ring R4140: 99 bars, 135 deg -> 45 deg (mirror of bar 112
+#    added; the two coincident bars removed).
+#  * Diagonal rows: parallel to the face, cover 60 mm (tangent line of
+#    R4140 at 45 deg), from the 45 deg bar to the corner bar
+#    (+-1064.85, 4790); 12 bars per side.
+#  * Top row: y = 4790 (cover 60 mm to the free top face), 10 bars
+#    between the corner bars at 193.6 mm (the two touching bars at
+#    x = +-10 replaced by a regular row).
+#  * Ear apices: bars 246/395 moved from the free face onto the
+#    bisector, 60 mm from both faces: (-+1797.165, 5472.21).
+#  Total 395 x D20 (sheet: 396 listed, 394 distinct).
+#
+#  Declared here, absent from the sheet -- to be ratified
+#  ------------------------------------------------------
+#  gamma_c, long_term_reduction_factor, n_parabola, eps_c2, eps_cu2,
+#  fct, k_hardening, eps_su, works_in_compression.
+#
+#  Verification layout (rev. 3)
+#  ----------------------------
+#  SLV_xx (demands)      : resistance-domain check only, once each.
+#  SLE_xx_car / SLE_xx_qp (combinations): SLS stress checks (sls
+#  block).  They reference the d_SLE_xx demands, and every demand is
+#  also checked on
+#  the resistance domain: those 10 eta values are NOT meaningful and
+#  are to be ignored.  The current schema has no way to declare a
+#  combination's limit state nor to keep a demand out of the domain
+#  check.
+# ======================================================================
+
+schema_version: 1
+code: ntc18
+
+materials:
+
+  c_trave:                       # C20/25
+    type: concrete
+    fck: 20.0                    # [MPa] class value
+    gamma_c: 1.5                 # [-]
+    long_term_reduction_factor: 0.85   # alpha_cc [-]
+    n_parabola: 2.0
+    eps_c2: -0.0020
+    eps_cu2: -0.0035
+    fct: 0.0                     # no tension branch
+    Ec: 29962.0                  # [MPa] 22000 (fcm/10)^0.3, fcm = fck + 8
+
+  c_getto2:                      # C32/40
+    type: concrete
+    fck: 32.0                    # [MPa] class value
+    gamma_c: 1.5
+    long_term_reduction_factor: 0.85
+    n_parabola: 2.0
+    eps_c2: -0.0020
+    eps_cu2: -0.0035
+    fct: 0.0
+    Ec: 33346.0                  # [MPa] 22000 (fcm/10)^0.3
+
+  steel_B450C:
+    type: steel
+    fyk: 450.0                   # [MPa]
+    gamma_s: 1.15                # fyd = 391.3 MPa
+    Es: 210000.0                 # [MPa] NTC 2018 11.3.4.x
+    k_hardening: 1.0             # elastic - perfectly plastic
+    eps_su: 0.0675               # 0.9 * eps_uk, eps_uk = 7.5 %
+    works_in_compression: true
+
+section:
+  shape: custom
+  params:
+    exterior:                    # outer boundary of Trave U Getto2a
+        - [10026.79, 7206.21]
+        - [10423.51, 5211.76]
+        - [10026.79, 3217.31]
+        - [8897.02, 1526.49]
+        - [7206.205, 396.73]
+        - [5211.755, 0]
+        - [3217.305, 396.73]
+        - [1526.49, 1526.49]
+        - [396.72, 3217.31]
+        - [0, 5211.76]
+        - [396.72, 7206.21]
+        - [1493, 8846.91]
+        - [3414.59, 10768.81]
+        - [4121.755, 10061.76]
+        - [6301.755, 10061.76]
+        - [7008.92, 10768.81]
+        - [8930.51, 8846.91]
+    holes:
+      - # "Foro" (void)
+          - [5211.755, 8711.75]
+          - [4528.94, 8644.51]
+          - [3872.365, 8445.34]
+          - [3267.26, 8121.9]
+          - [2736.88, 7686.63]
+          - [2301.61, 7156.26]
+          - [1978.175, 6551.15]
+          - [1779.005, 5894.58]
+          - [1711.755, 5211.76]
+          - [1779.005, 4528.94]
+          - [1978.175, 3872.37]
+          - [2301.61, 3267.26]
+          - [2736.88, 2736.89]
+          - [3267.26, 2301.62]
+          - [3872.365, 1978.18]
+          - [4528.94, 1779.01]
+          - [5211.755, 1711.76]
+          - [5894.57, 1779.01]
+          - [6551.145, 1978.18]
+          - [7156.25, 2301.62]
+          - [7686.63, 2736.89]
+          - [8121.9, 3267.26]
+          - [8445.335, 3872.37]
+          - [8644.505, 4528.94]
+          - [8711.755, 5211.76]
+          - [8644.505, 5894.58]
+          - [8445.335, 6551.15]
+          - [8121.9, 7156.26]
+          - [7686.63, 7686.63]
+          - [7156.25, 8121.9]
+          - [6551.145, 8445.34]
+          - [5894.57, 8644.51]
+  bulk_material: c_trave         # zone 0 "base"
+  material_zones:
+    - name: getto2
+      shape: custom
+      material: c_getto2
+      params:
+        exterior:                # Getto2aFase, Excel vertex order 1..42
+          - [10026.79, 7206.21]
+          - [10423.51, 5211.76]
+          - [10026.79, 3217.31]
+          - [8897.02, 1526.49]
+          - [7206.205, 396.73]
+          - [5211.755, 0]
+          - [3217.305, 396.73]
+          - [1526.49, 1526.49]
+          - [396.72, 3217.31]
+          - [0, 5211.76]
+          - [396.72, 7206.21]
+          - [1493, 8846.91]
+          - [3414.59, 10768.81]
+          - [4121.755, 10061.76]
+          - [2241.905, 8181.61]
+          - [1719.585, 7545.15]
+          - [1331.46, 6819.03]
+          - [1092.455, 6031.14]
+          - [1011.755, 5211.76]
+          - [1092.455, 4392.38]
+          - [1331.46, 3604.49]
+          - [1719.585, 2878.36]
+          - [2241.905, 2241.91]
+          - [2878.36, 1719.59]
+          - [3604.485, 1331.47]
+          - [4392.375, 1092.46]
+          - [5211.755, 1011.76]
+          - [6031.135, 1092.46]
+          - [6819.025, 1331.47]
+          - [7545.15, 1719.59]
+          - [8181.605, 2241.91]
+          - [8703.925, 2878.36]
+          - [9092.05, 3604.49]
+          - [9331.055, 4392.38]
+          - [9411.755, 5211.76]
+          - [9331.055, 6031.14]
+          - [9092.05, 6819.03]
+          - [8703.925, 7545.15]
+          - [8181.605, 8181.61]
+          - [6301.755, 10061.76]
+          - [7008.92, 10768.81]
+          - [8930.51, 8846.91]
+  mesh_size: 50                  # [mm]  ~18 400 fibres
+  mesh_method: grid
+  rebars:                        # 395 x D20, As = 314 mm^2 (sheet value)
+    # --- beam inner ring R3560, 111 bars, one bar on the symmetry axis at 90 deg
+    - {name: B001, x: 5211.755, y: 8771.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (0, 3560)
+    - {name: B002, x: 5010.348, y: 8766.048, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-201.41, 3554.3)
+    - {name: B003, x: 4809.586, y: 8748.961, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-402.17, 3537.21)
+    - {name: B004, x: 4610.112, y: 8720.543, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-601.64, 3508.79)
+    - {name: B005, x: 4412.566, y: 8680.885, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-799.19, 3469.13)
+    - {name: B006, x: 4217.579, y: 8630.114, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-994.18, 3418.36)
+    - {name: B007, x: 4025.777, y: 8568.394, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1185.98, 3356.64)
+    - {name: B008, x: 3837.775, y: 8495.921, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1373.98, 3284.17)
+    - {name: B009, x: 3654.173, y: 8412.928, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1557.58, 3201.18)
+    - {name: B010, x: 3475.561, y: 8319.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1736.19, 3107.93)
+    - {name: B011, x: 3302.51, y: 8216.477, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1909.24, 3004.73)
+    - {name: B012, x: 3135.576, y: 8103.649, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2076.18, 2891.9)
+    - {name: B013, x: 2975.292, y: 7981.557, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2236.46, 2769.81)
+    - {name: B014, x: 2822.172, y: 7850.593, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2389.58, 2638.84)
+    - {name: B015, x: 2676.706, y: 7711.176, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2535.05, 2499.43)
+    - {name: B016, x: 2539.362, y: 7563.752, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2672.39, 2352)
+    - {name: B017, x: 2410.577, y: 7408.794, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2801.18, 2197.04)
+    - {name: B018, x: 2290.766, y: 7246.798, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2920.99, 2035.05)
+    - {name: B019, x: 2180.311, y: 7078.284, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3031.44, 1866.53)
+    - {name: B020, x: 2079.567, y: 6903.79, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3132.19, 1692.04)
+    - {name: B021, x: 1988.857, y: 6723.877, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3222.9, 1512.13)
+    - {name: B022, x: 1908.47, y: 6539.119, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3303.28, 1327.37)
+    - {name: B023, x: 1838.665, y: 6350.11, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3373.09, 1138.36)
+    - {name: B024, x: 1779.665, y: 6157.454, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3432.09, 945.7)
+    - {name: B025, x: 1731.658, y: 5961.768, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3480.1, 750.02)
+    - {name: B026, x: 1694.8, y: 5763.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3516.96, 551.93)
+    - {name: B027, x: 1669.207, y: 5563.824, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3542.55, 352.07)
+    - {name: B028, x: 1654.963, y: 5362.841, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3556.79, 151.09)
+    - {name: B029, x: 1652.111, y: 5161.373, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3559.64, -50.38)
+    - {name: B030, x: 1660.663, y: 4960.067, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3551.09, -251.68)
+    - {name: B031, x: 1680.589, y: 4759.567, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3531.17, -452.18)
+    - {name: B032, x: 1711.827, y: 4560.515, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3499.93, -651.24)
+    - {name: B033, x: 1754.277, y: 4363.549, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3457.48, -848.2)
+    - {name: B034, x: 1807.801, y: 4169.301, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3403.95, -1042.45)
+    - {name: B035, x: 1872.23, y: 3978.392, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3339.53, -1233.36)
+    - {name: B036, x: 1947.356, y: 3791.433, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3264.4, -1420.32)
+    - {name: B037, x: 2032.939, y: 3609.025, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3178.82, -1602.73)
+    - {name: B038, x: 2128.705, y: 3431.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3083.05, -1780)
+    - {name: B039, x: 2234.346, y: 3260.177, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2977.41, -1951.57)
+    - {name: B040, x: 2349.525, y: 3094.856, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2862.23, -2116.89)
+    - {name: B041, x: 2473.873, y: 2936.316, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2737.88, -2275.43)
+    - {name: B042, x: 2606.991, y: 2785.064, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2604.76, -2426.69)
+    - {name: B043, x: 2748.453, y: 2641.586, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2463.3, -2570.16)
+    - {name: B044, x: 2897.805, y: 2506.341, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2313.95, -2705.41)
+    - {name: B045, x: 3054.57, y: 2379.763, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2157.19, -2831.99)
+    - {name: B046, x: 3218.245, y: 2262.256, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1993.51, -2949.49)
+    - {name: B047, x: 3388.305, y: 2154.197, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1823.45, -3057.55)
+    - {name: B048, x: 3564.207, y: 2055.932, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1647.55, -3155.82)
+    - {name: B049, x: 3745.387, y: 1967.777, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1466.37, -3243.97)
+    - {name: B050, x: 3931.263, y: 1890.012, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1280.49, -3321.74)
+    - {name: B051, x: 4121.241, y: 1822.889, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1090.51, -3388.86)
+    - {name: B052, x: 4314.713, y: 1766.621, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-897.04, -3445.13)
+    - {name: B053, x: 4511.058, y: 1721.388, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-700.7, -3490.36)
+    - {name: B054, x: 4709.648, y: 1687.337, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-502.11, -3524.41)
+    - {name: B055, x: 4909.846, y: 1664.575, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-301.91, -3547.18)
+    - {name: B056, x: 5111.011, y: 1653.176, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-100.74, -3558.57)
+    - {name: B057, x: 5312.499, y: 1653.176, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (100.74, -3558.57)
+    - {name: B058, x: 5513.664, y: 1664.575, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (301.91, -3547.18)
+    - {name: B059, x: 5713.862, y: 1687.337, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (502.11, -3524.41)
+    - {name: B060, x: 5912.452, y: 1721.388, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (700.7, -3490.36)
+    - {name: B061, x: 6108.797, y: 1766.621, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (897.04, -3445.13)
+    - {name: B062, x: 6302.269, y: 1822.889, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1090.51, -3388.86)
+    - {name: B063, x: 6492.247, y: 1890.012, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1280.49, -3321.74)
+    - {name: B064, x: 6678.123, y: 1967.777, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1466.37, -3243.97)
+    - {name: B065, x: 6859.303, y: 2055.932, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1647.55, -3155.82)
+    - {name: B066, x: 7035.205, y: 2154.197, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1823.45, -3057.55)
+    - {name: B067, x: 7205.265, y: 2262.256, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1993.51, -2949.49)
+    - {name: B068, x: 7368.94, y: 2379.763, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2157.19, -2831.99)
+    - {name: B069, x: 7525.705, y: 2506.341, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2313.95, -2705.41)
+    - {name: B070, x: 7675.057, y: 2641.586, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2463.3, -2570.16)
+    - {name: B071, x: 7816.519, y: 2785.064, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2604.76, -2426.69)
+    - {name: B072, x: 7949.637, y: 2936.316, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2737.88, -2275.43)
+    - {name: B073, x: 8073.985, y: 3094.856, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2862.23, -2116.89)
+    - {name: B074, x: 8189.164, y: 3260.177, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2977.41, -1951.57)
+    - {name: B075, x: 8294.805, y: 3431.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3083.05, -1780)
+    - {name: B076, x: 8390.571, y: 3609.025, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3178.82, -1602.73)
+    - {name: B077, x: 8476.154, y: 3791.433, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3264.4, -1420.32)
+    - {name: B078, x: 8551.28, y: 3978.392, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3339.53, -1233.36)
+    - {name: B079, x: 8615.709, y: 4169.301, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3403.95, -1042.45)
+    - {name: B080, x: 8669.233, y: 4363.549, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3457.48, -848.2)
+    - {name: B081, x: 8711.683, y: 4560.515, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3499.93, -651.24)
+    - {name: B082, x: 8742.921, y: 4759.567, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3531.17, -452.18)
+    - {name: B083, x: 8762.847, y: 4960.067, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3551.09, -251.68)
+    - {name: B084, x: 8771.399, y: 5161.373, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3559.64, -50.38)
+    - {name: B085, x: 8768.547, y: 5362.841, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3556.79, 151.09)
+    - {name: B086, x: 8754.303, y: 5563.824, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3542.55, 352.07)
+    - {name: B087, x: 8728.71, y: 5763.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3516.96, 551.93)
+    - {name: B088, x: 8691.852, y: 5961.768, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3480.1, 750.02)
+    - {name: B089, x: 8643.845, y: 6157.454, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3432.09, 945.7)
+    - {name: B090, x: 8584.845, y: 6350.11, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3373.09, 1138.36)
+    - {name: B091, x: 8515.04, y: 6539.119, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3303.28, 1327.37)
+    - {name: B092, x: 8434.653, y: 6723.877, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3222.9, 1512.13)
+    - {name: B093, x: 8343.943, y: 6903.79, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3132.19, 1692.04)
+    - {name: B094, x: 8243.199, y: 7078.284, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3031.44, 1866.53)
+    - {name: B095, x: 8132.744, y: 7246.798, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2920.99, 2035.05)
+    - {name: B096, x: 8012.933, y: 7408.794, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2801.18, 2197.04)
+    - {name: B097, x: 7884.148, y: 7563.752, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2672.39, 2352)
+    - {name: B098, x: 7746.804, y: 7711.176, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2535.05, 2499.43)
+    - {name: B099, x: 7601.338, y: 7850.593, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2389.58, 2638.84)
+    - {name: B100, x: 7448.218, y: 7981.557, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2236.46, 2769.81)
+    - {name: B101, x: 7287.934, y: 8103.649, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2076.18, 2891.9)
+    - {name: B102, x: 7121, y: 8216.477, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1909.24, 3004.73)
+    - {name: B103, x: 6947.949, y: 8319.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1736.19, 3107.93)
+    - {name: B104, x: 6769.337, y: 8412.928, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1557.58, 3201.18)
+    - {name: B105, x: 6585.735, y: 8495.921, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1373.98, 3284.17)
+    - {name: B106, x: 6397.733, y: 8568.394, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1185.98, 3356.64)
+    - {name: B107, x: 6205.931, y: 8630.114, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (994.18, 3418.36)
+    - {name: B108, x: 6010.944, y: 8680.885, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (799.19, 3469.13)
+    - {name: B109, x: 5813.398, y: 8720.543, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (601.64, 3508.79)
+    - {name: B110, x: 5613.924, y: 8748.961, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (402.17, 3537.21)
+    - {name: B111, x: 5413.162, y: 8766.048, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (201.41, 3554.3)
+    # --- beam outer ring R4140, 99 bars from 135 deg to 45 deg
+    - {name: B112, x: 2284.333, y: 8139.172, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2927.42, 2927.42)
+    - {name: B113, x: 2147.004, y: 7995.076, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3064.75, 2783.33)
+    - {name: B114, x: 2016.76, y: 7844.545, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3194.99, 2632.79)
+    - {name: B115, x: 1893.903, y: 7687.928, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3317.85, 2476.18)
+    - {name: B116, x: 1778.715, y: 7525.586, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3433.04, 2313.84)
+    - {name: B117, x: 1671.464, y: 7357.895, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3540.29, 2146.15)
+    - {name: B118, x: 1572.397, y: 7185.243, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3639.36, 1973.49)
+    - {name: B119, x: 1481.744, y: 7008.029, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3730.01, 1796.28)
+    - {name: B120, x: 1399.714, y: 6826.662, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3812.04, 1614.91)
+    - {name: B121, x: 1326.496, y: 6641.561, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3885.26, 1429.81)
+    - {name: B122, x: 1262.26, y: 6453.156, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3949.5, 1241.41)
+    - {name: B123, x: 1207.154, y: 6261.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4004.6, 1050.13)
+    - {name: B124, x: 1161.306, y: 6068.177, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4050.45, 856.43)
+    - {name: B125, x: 1124.822, y: 5872.494, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4086.93, 660.74)
+    - {name: B126, x: 1097.786, y: 5675.283, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4113.97, 463.53)
+    - {name: B127, x: 1080.261, y: 5477.001, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4131.49, 265.25)
+    - {name: B128, x: 1072.287, y: 5278.105, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4139.47, 66.36)
+    - {name: B129, x: 1073.882, y: 5079.056, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4137.87, -132.69)
+    - {name: B130, x: 1085.043, y: 4880.314, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4126.71, -331.44)
+    - {name: B131, x: 1105.744, y: 4682.339, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4106.01, -529.41)
+    - {name: B132, x: 1135.938, y: 4485.587, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4075.82, -726.16)
+    - {name: B133, x: 1175.553, y: 4290.513, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4036.2, -921.24)
+    - {name: B134, x: 1224.5, y: 4097.57, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3987.26, -1114.18)
+    - {name: B135, x: 1282.664, y: 3907.202, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3929.09, -1304.55)
+    - {name: B136, x: 1349.912, y: 3719.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3861.84, -1491.9)
+    - {name: B137, x: 1426.087, y: 3535.947, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3785.67, -1675.8)
+    - {name: B138, x: 1511.014, y: 3355.918, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3700.74, -1855.83)
+    - {name: B139, x: 1604.496, y: 3180.179, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3607.26, -2031.57)
+    - {name: B140, x: 1706.317, y: 3009.137, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3505.44, -2202.61)
+    - {name: B141, x: 1816.242, y: 2843.187, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3395.51, -2368.56)
+    - {name: B142, x: 1934.017, y: 2682.712, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3277.74, -2529.04)
+    - {name: B143, x: 2059.369, y: 2528.084, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3152.39, -2683.67)
+    - {name: B144, x: 2192.008, y: 2379.66, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3019.75, -2832.09)
+    - {name: B145, x: 2331.629, y: 2237.784, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2880.13, -2973.97)
+    - {name: B146, x: 2477.908, y: 2102.782, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2733.85, -3108.97)
+    - {name: B147, x: 2630.507, y: 1974.968, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2581.25, -3236.78)
+    - {name: B148, x: 2789.074, y: 1854.636, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2422.68, -3357.11)
+    - {name: B149, x: 2953.241, y: 1742.065, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2258.51, -3469.68)
+    - {name: B150, x: 3122.629, y: 1637.516, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2089.13, -3574.23)
+    - {name: B151, x: 3296.846, y: 1541.229, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1914.91, -3670.52)
+    - {name: B152, x: 3475.491, y: 1453.428, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1736.26, -3758.32)
+    - {name: B153, x: 3658.15, y: 1374.315, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1553.61, -3837.44)
+    - {name: B154, x: 3844.4, y: 1304.073, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1367.36, -3907.68)
+    - {name: B155, x: 4033.811, y: 1242.865, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1177.94, -3968.88)
+    - {name: B156, x: 4225.945, y: 1190.832, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-985.81, -4020.92)
+    - {name: B157, x: 4420.358, y: 1148.095, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-791.4, -4063.65)
+    - {name: B158, x: 4616.601, y: 1114.752, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-595.15, -4097)
+    - {name: B159, x: 4814.22, y: 1090.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-397.54, -4120.87)
+    - {name: B160, x: 5012.757, y: 1076.535, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-199, -4135.21)
+    - {name: B161, x: 5211.755, y: 1071.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (0, -4140)
+    - {name: B162, x: 5410.753, y: 1076.535, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (199, -4135.21)
+    - {name: B163, x: 5609.29, y: 1090.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (397.54, -4120.87)
+    - {name: B164, x: 5806.909, y: 1114.752, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (595.15, -4097)
+    - {name: B165, x: 6003.152, y: 1148.095, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (791.4, -4063.65)
+    - {name: B166, x: 6197.565, y: 1190.832, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (985.81, -4020.92)
+    - {name: B167, x: 6389.699, y: 1242.865, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1177.94, -3968.88)
+    - {name: B168, x: 6579.11, y: 1304.073, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1367.36, -3907.68)
+    - {name: B169, x: 6765.36, y: 1374.315, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1553.61, -3837.44)
+    - {name: B170, x: 6948.019, y: 1453.428, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1736.26, -3758.32)
+    - {name: B171, x: 7126.664, y: 1541.229, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1914.91, -3670.52)
+    - {name: B172, x: 7300.881, y: 1637.516, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2089.13, -3574.23)
+    - {name: B173, x: 7470.269, y: 1742.065, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2258.51, -3469.68)
+    - {name: B174, x: 7634.436, y: 1854.636, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2422.68, -3357.11)
+    - {name: B175, x: 7793.003, y: 1974.968, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2581.25, -3236.78)
+    - {name: B176, x: 7945.602, y: 2102.782, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2733.85, -3108.97)
+    - {name: B177, x: 8091.881, y: 2237.784, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2880.13, -2973.97)
+    - {name: B178, x: 8231.502, y: 2379.66, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3019.75, -2832.09)
+    - {name: B179, x: 8364.141, y: 2528.084, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3152.39, -2683.67)
+    - {name: B180, x: 8489.493, y: 2682.712, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3277.74, -2529.04)
+    - {name: B181, x: 8607.268, y: 2843.187, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3395.51, -2368.56)
+    - {name: B182, x: 8717.193, y: 3009.137, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3505.44, -2202.61)
+    - {name: B183, x: 8819.014, y: 3180.179, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3607.26, -2031.57)
+    - {name: B184, x: 8912.496, y: 3355.918, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3700.74, -1855.83)
+    - {name: B185, x: 8997.423, y: 3535.947, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3785.67, -1675.8)
+    - {name: B186, x: 9073.598, y: 3719.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3861.84, -1491.9)
+    - {name: B187, x: 9140.846, y: 3907.202, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3929.09, -1304.55)
+    - {name: B188, x: 9199.01, y: 4097.57, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3987.26, -1114.18)
+    - {name: B189, x: 9247.957, y: 4290.513, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4036.2, -921.24)
+    - {name: B190, x: 9287.572, y: 4485.587, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4075.82, -726.16)
+    - {name: B191, x: 9317.766, y: 4682.339, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4106.01, -529.41)
+    - {name: B192, x: 9338.467, y: 4880.314, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4126.71, -331.44)
+    - {name: B193, x: 9349.628, y: 5079.056, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4137.87, -132.69)
+    - {name: B194, x: 9351.223, y: 5278.105, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4139.47, 66.36)
+    - {name: B195, x: 9343.249, y: 5477.001, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4131.49, 265.25)
+    - {name: B196, x: 9325.724, y: 5675.283, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4113.97, 463.53)
+    - {name: B197, x: 9298.688, y: 5872.494, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4086.93, 660.74)
+    - {name: B198, x: 9262.204, y: 6068.177, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4050.45, 856.43)
+    - {name: B199, x: 9216.356, y: 6261.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4004.6, 1050.13)
+    - {name: B200, x: 9161.25, y: 6453.156, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3949.5, 1241.41)
+    - {name: B201, x: 9097.014, y: 6641.561, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3885.26, 1429.81)
+    - {name: B202, x: 9023.796, y: 6826.662, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3812.04, 1614.91)
+    - {name: B203, x: 8941.766, y: 7008.029, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3730.01, 1796.28)
+    - {name: B204, x: 8851.113, y: 7185.243, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3639.36, 1973.49)
+    - {name: B205, x: 8752.046, y: 7357.895, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3540.29, 2146.15)
+    - {name: B206, x: 8644.795, y: 7525.586, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3433.04, 2313.84)
+    - {name: B207, x: 8529.607, y: 7687.928, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3317.85, 2476.18)
+    - {name: B208, x: 8406.75, y: 7844.545, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3194.99, 2632.79)
+    - {name: B209, x: 8276.506, y: 7995.076, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3064.75, 2783.33)
+    - {name: B210, x: 8139.177, y: 8139.172, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2927.42, 2927.42)
+    # --- beam diagonal rows, 12 bars per side, cover 60 mm (parallel to face)
+    - {name: B211, x: 7983.962, y: 8294.387, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2772.21, 3082.64)
+    - {name: B212, x: 7828.747, y: 8449.602, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2616.99, 3237.85)
+    - {name: B213, x: 7673.533, y: 8604.817, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2461.78, 3393.07)
+    - {name: B214, x: 7518.318, y: 8760.031, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2306.56, 3548.28)
+    - {name: B215, x: 7363.103, y: 8915.246, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2151.35, 3703.5)
+    - {name: B216, x: 7207.888, y: 9070.461, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1996.13, 3858.71)
+    - {name: B217, x: 7052.673, y: 9225.676, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1840.92, 4013.93)
+    - {name: B218, x: 6897.458, y: 9380.891, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1685.7, 4169.14)
+    - {name: B219, x: 6742.244, y: 9536.106, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1530.49, 4324.36)
+    - {name: B220, x: 6587.029, y: 9691.32, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1375.27, 4479.57)
+    - {name: B221, x: 6431.814, y: 9846.535, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1220.06, 4634.79)
+    - {name: B222, x: 6276.599, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1064.84, 4790)
+    - {name: B223, x: 2439.548, y: 8294.387, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2772.21, 3082.64)
+    - {name: B224, x: 2594.763, y: 8449.602, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2616.99, 3237.85)
+    - {name: B225, x: 2749.977, y: 8604.817, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2461.78, 3393.07)
+    - {name: B226, x: 2905.192, y: 8760.031, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2306.56, 3548.28)
+    - {name: B227, x: 3060.407, y: 8915.246, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2151.35, 3703.5)
+    - {name: B228, x: 3215.622, y: 9070.461, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1996.13, 3858.71)
+    - {name: B229, x: 3370.837, y: 9225.676, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1840.92, 4013.93)
+    - {name: B230, x: 3526.052, y: 9380.891, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1685.7, 4169.14)
+    - {name: B231, x: 3681.266, y: 9536.106, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1530.49, 4324.36)
+    - {name: B232, x: 3836.481, y: 9691.32, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1375.27, 4479.57)
+    - {name: B233, x: 3991.696, y: 9846.535, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1220.06, 4634.79)
+    - {name: B234, x: 4146.911, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1064.84, 4790)
+    # --- beam top row y=4790 (cover 60 mm), 10 bars between the corner bars
+    - {name: B235, x: 4340.519, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-871.24, 4790)
+    - {name: B236, x: 4534.127, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-677.63, 4790)
+    - {name: B237, x: 4727.735, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-484.02, 4790)
+    - {name: B238, x: 4921.343, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-290.41, 4790)
+    - {name: B239, x: 5114.951, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-96.8, 4790)
+    - {name: B240, x: 5308.559, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (96.8, 4790)
+    - {name: B241, x: 5502.167, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (290.41, 4790)
+    - {name: B242, x: 5695.775, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (484.02, 4790)
+    - {name: B243, x: 5889.383, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (677.63, 4790)
+    - {name: B244, x: 6082.991, y: 10001.75, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (871.24, 4790)
+    # --- second-phase ring, 151 bars, cover 60 mm (ear-apex bars on the bisector)
+    - {name: B245, x: 3414.59, y: 10683.957, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1797.16, 5472.21)
+    - {name: B246, x: 3318.295, y: 10587.64, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1893.46, 5375.89)
+    - {name: B247, x: 3179.565, y: 10448.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2032.19, 5237.13)
+    - {name: B248, x: 3040.835, y: 10310.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2170.92, 5098.38)
+    - {name: B249, x: 2902.11, y: 10171.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2309.64, 4959.63)
+    - {name: B250, x: 2763.38, y: 10032.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2448.38, 4820.88)
+    - {name: B251, x: 2624.65, y: 9893.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2587.11, 4682.13)
+    - {name: B252, x: 2485.925, y: 9755.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2725.83, 4543.38)
+    - {name: B253, x: 2347.195, y: 9616.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2864.56, 4404.63)
+    - {name: B254, x: 2208.465, y: 9477.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3003.29, 4265.88)
+    - {name: B255, x: 2069.74, y: 9338.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3142.02, 4127.13)
+    - {name: B256, x: 1931.01, y: 9200.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3280.74, 3988.38)
+    - {name: B257, x: 1792.28, y: 9061.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3419.47, 3849.63)
+    - {name: B258, x: 1653.555, y: 8922.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3558.2, 3710.88)
+    - {name: B259, x: 1520.135, y: 8779.52, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3691.62, 3567.77)
+    - {name: B260, x: 1411.125, y: 8616.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3800.63, 3404.63)
+    - {name: B261, x: 1302.12, y: 8453.24, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3909.64, 3241.49)
+    - {name: B262, x: 1193.115, y: 8290.1, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4018.64, 3078.35)
+    - {name: B263, x: 1084.105, y: 8126.96, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4127.65, 2915.21)
+    - {name: B264, x: 975.1, y: 7963.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4236.65, 2752.07)
+    - {name: B265, x: 866.095, y: 7800.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4345.66, 2588.93)
+    - {name: B266, x: 757.085, y: 7637.54, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4454.67, 2425.79)
+    - {name: B267, x: 648.08, y: 7474.4, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4563.68, 2262.65)
+    - {name: B268, x: 539.07, y: 7311.26, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4672.68, 2099.51)
+    - {name: B269, x: 445.1, y: 7141.89, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4766.65, 1930.14)
+    - {name: B270, x: 406.825, y: 6949.45, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4804.93, 1737.7)
+    - {name: B271, x: 368.545, y: 6757.01, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4843.21, 1545.26)
+    - {name: B272, x: 330.27, y: 6564.58, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4881.48, 1352.83)
+    - {name: B273, x: 291.99, y: 6372.14, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4919.77, 1160.39)
+    - {name: B274, x: 253.71, y: 6179.7, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4958.05, 967.95)
+    - {name: B275, x: 215.435, y: 5987.27, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4996.32, 775.52)
+    - {name: B276, x: 177.155, y: 5794.83, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5034.6, 583.08)
+    - {name: B277, x: 138.875, y: 5602.39, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5072.88, 390.64)
+    - {name: B278, x: 100.6, y: 5409.95, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5111.15, 198.2)
+    - {name: B279, x: 62.32, y: 5217.52, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5149.43, 5.77)
+    - {name: B280, x: 98.31, y: 5025.08, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5113.44, -186.67)
+    - {name: B281, x: 136.585, y: 4832.64, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5075.17, -379.11)
+    - {name: B282, x: 174.865, y: 4640.21, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-5036.89, -571.54)
+    - {name: B283, x: 213.145, y: 4447.77, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4998.61, -763.98)
+    - {name: B284, x: 251.42, y: 4255.33, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4960.34, -956.42)
+    - {name: B285, x: 289.7, y: 4062.89, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4922.06, -1148.86)
+    - {name: B286, x: 327.975, y: 3870.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4883.78, -1341.29)
+    - {name: B287, x: 366.255, y: 3678.02, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4845.5, -1533.73)
+    - {name: B288, x: 404.535, y: 3485.58, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4807.22, -1726.17)
+    - {name: B289, x: 442.81, y: 3293.15, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4768.94, -1918.6)
+    - {name: B290, x: 532.55, y: 3122.02, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4679.2, -2089.73)
+    - {name: B291, x: 641.555, y: 2958.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4570.2, -2252.87)
+    - {name: B292, x: 750.565, y: 2795.74, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4461.19, -2416.01)
+    - {name: B293, x: 859.57, y: 2632.6, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4352.18, -2579.15)
+    - {name: B294, x: 968.575, y: 2469.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4243.18, -2742.29)
+    - {name: B295, x: 1077.585, y: 2306.32, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4134.17, -2905.43)
+    - {name: B296, x: 1186.59, y: 2143.18, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-4025.16, -3068.57)
+    - {name: B297, x: 1295.595, y: 1980.04, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3916.16, -3231.71)
+    - {name: B298, x: 1404.605, y: 1816.9, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3807.15, -3394.85)
+    - {name: B299, x: 1513.61, y: 1653.76, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3698.14, -3557.99)
+    - {name: B300, x: 1648.875, y: 1516.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3562.88, -3694.87)
+    - {name: B301, x: 1812.015, y: 1407.87, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3399.74, -3803.88)
+    - {name: B302, x: 1975.155, y: 1298.86, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3236.6, -3912.89)
+    - {name: B303, x: 2138.295, y: 1189.86, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-3073.46, -4021.89)
+    - {name: B304, x: 2301.435, y: 1080.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2910.32, -4130.9)
+    - {name: B305, x: 2464.575, y: 971.84, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2747.18, -4239.91)
+    - {name: B306, x: 2627.715, y: 862.84, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2584.04, -4348.91)
+    - {name: B307, x: 2790.855, y: 753.83, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2420.9, -4457.92)
+    - {name: B308, x: 2954, y: 644.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2257.76, -4566.93)
+    - {name: B309, x: 3117.14, y: 535.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-2094.61, -4675.93)
+    - {name: B310, x: 3287.385, y: 443.96, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1924.37, -4767.79)
+    - {name: B311, x: 3479.82, y: 405.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1731.93, -4806.07)
+    - {name: B312, x: 3672.26, y: 367.41, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1539.49, -4844.34)
+    - {name: B313, x: 3864.695, y: 329.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1347.06, -4882.62)
+    - {name: B314, x: 4057.13, y: 290.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-1154.62, -4920.9)
+    - {name: B315, x: 4249.57, y: 252.57, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-962.18, -4959.18)
+    - {name: B316, x: 4442.005, y: 214.29, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-769.75, -4997.46)
+    - {name: B317, x: 4634.445, y: 176.01, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-577.31, -5035.74)
+    - {name: B318, x: 4826.88, y: 137.74, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-384.88, -5074.01)
+    - {name: B319, x: 5019.32, y: 99.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (-192.44, -5112.29)
+    - {name: B320, x: 5211.755, y: 61.18, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (0, -5150.57)
+    - {name: B321, x: 5404.19, y: 99.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (192.44, -5112.29)
+    - {name: B322, x: 5596.63, y: 137.74, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (384.88, -5074.01)
+    - {name: B323, x: 5789.065, y: 176.01, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (577.31, -5035.74)
+    - {name: B324, x: 5981.505, y: 214.29, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (769.75, -4997.46)
+    - {name: B325, x: 6173.94, y: 252.57, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (962.18, -4959.18)
+    - {name: B326, x: 6366.38, y: 290.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1154.62, -4920.9)
+    - {name: B327, x: 6558.815, y: 329.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1347.06, -4882.62)
+    - {name: B328, x: 6751.25, y: 367.41, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1539.49, -4844.34)
+    - {name: B329, x: 6943.69, y: 405.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1731.93, -4806.07)
+    - {name: B330, x: 7136.125, y: 443.96, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1924.37, -4767.79)
+    - {name: B331, x: 7306.37, y: 535.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2094.61, -4675.93)
+    - {name: B332, x: 7469.51, y: 644.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2257.76, -4566.93)
+    - {name: B333, x: 7632.655, y: 753.83, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2420.9, -4457.92)
+    - {name: B334, x: 7795.795, y: 862.84, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2584.04, -4348.91)
+    - {name: B335, x: 7958.935, y: 971.84, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2747.18, -4239.91)
+    - {name: B336, x: 8122.075, y: 1080.85, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2910.32, -4130.9)
+    - {name: B337, x: 8285.215, y: 1189.86, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3073.46, -4021.89)
+    - {name: B338, x: 8448.355, y: 1298.86, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3236.6, -3912.89)
+    - {name: B339, x: 8611.495, y: 1407.87, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3399.74, -3803.88)
+    - {name: B340, x: 8774.635, y: 1516.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3562.88, -3694.87)
+    - {name: B341, x: 8909.9, y: 1653.76, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3698.14, -3557.99)
+    - {name: B342, x: 9018.905, y: 1816.9, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3807.15, -3394.85)
+    - {name: B343, x: 9127.915, y: 1980.04, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3916.16, -3231.71)
+    - {name: B344, x: 9236.92, y: 2143.18, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4025.16, -3068.57)
+    - {name: B345, x: 9345.925, y: 2306.32, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4134.17, -2905.43)
+    - {name: B346, x: 9454.935, y: 2469.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4243.18, -2742.29)
+    - {name: B347, x: 9563.94, y: 2632.6, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4352.18, -2579.15)
+    - {name: B348, x: 9672.945, y: 2795.74, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4461.19, -2416.01)
+    - {name: B349, x: 9781.955, y: 2958.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4570.2, -2252.87)
+    - {name: B350, x: 9890.96, y: 3122.02, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4679.2, -2089.73)
+    - {name: B351, x: 9980.7, y: 3293.15, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4768.94, -1918.6)
+    - {name: B352, x: 10018.975, y: 3485.58, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4807.22, -1726.17)
+    - {name: B353, x: 10057.255, y: 3678.02, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4845.5, -1533.73)
+    - {name: B354, x: 10095.535, y: 3870.46, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4883.78, -1341.29)
+    - {name: B355, x: 10133.81, y: 4062.89, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4922.06, -1148.86)
+    - {name: B356, x: 10172.09, y: 4255.33, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4960.34, -956.42)
+    - {name: B357, x: 10210.365, y: 4447.77, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4998.61, -763.98)
+    - {name: B358, x: 10248.645, y: 4640.21, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5036.89, -571.54)
+    - {name: B359, x: 10286.925, y: 4832.64, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5075.17, -379.11)
+    - {name: B360, x: 10325.2, y: 5025.08, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5113.44, -186.67)
+    - {name: B361, x: 10361.19, y: 5217.52, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5149.43, 5.77)
+    - {name: B362, x: 10322.91, y: 5409.95, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5111.15, 198.2)
+    - {name: B363, x: 10284.635, y: 5602.39, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5072.88, 390.64)
+    - {name: B364, x: 10246.355, y: 5794.83, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (5034.6, 583.08)
+    - {name: B365, x: 10208.075, y: 5987.27, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4996.32, 775.52)
+    - {name: B366, x: 10169.8, y: 6179.7, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4958.05, 967.95)
+    - {name: B367, x: 10131.52, y: 6372.14, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4919.77, 1160.39)
+    - {name: B368, x: 10093.24, y: 6564.58, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4881.48, 1352.83)
+    - {name: B369, x: 10054.965, y: 6757.01, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4843.21, 1545.26)
+    - {name: B370, x: 10016.685, y: 6949.45, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4804.93, 1737.7)
+    - {name: B371, x: 9978.41, y: 7141.89, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4766.65, 1930.14)
+    - {name: B372, x: 9884.44, y: 7311.26, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4672.68, 2099.51)
+    - {name: B373, x: 9775.43, y: 7474.4, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4563.68, 2262.65)
+    - {name: B374, x: 9666.425, y: 7637.54, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4454.67, 2425.79)
+    - {name: B375, x: 9557.415, y: 7800.68, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4345.66, 2588.93)
+    - {name: B376, x: 9448.41, y: 7963.82, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4236.65, 2752.07)
+    - {name: B377, x: 9339.405, y: 8126.96, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4127.65, 2915.21)
+    - {name: B378, x: 9230.395, y: 8290.1, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (4018.64, 3078.35)
+    - {name: B379, x: 9121.39, y: 8453.24, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3909.64, 3241.49)
+    - {name: B380, x: 9012.385, y: 8616.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3800.63, 3404.63)
+    - {name: B381, x: 8903.375, y: 8779.52, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3691.62, 3567.77)
+    - {name: B382, x: 8769.955, y: 8922.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3558.2, 3710.88)
+    - {name: B383, x: 8631.23, y: 9061.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3419.47, 3849.63)
+    - {name: B384, x: 8492.5, y: 9200.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3280.74, 3988.38)
+    - {name: B385, x: 8353.77, y: 9338.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3142.02, 4127.13)
+    - {name: B386, x: 8215.045, y: 9477.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (3003.29, 4265.88)
+    - {name: B387, x: 8076.315, y: 9616.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2864.56, 4404.63)
+    - {name: B388, x: 7937.585, y: 9755.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2725.83, 4543.38)
+    - {name: B389, x: 7798.86, y: 9893.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2587.11, 4682.13)
+    - {name: B390, x: 7660.13, y: 10032.63, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2448.38, 4820.88)
+    - {name: B391, x: 7521.4, y: 10171.38, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2309.64, 4959.63)
+    - {name: B392, x: 7243.945, y: 10448.88, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2032.19, 5237.13)
+    - {name: B393, x: 7105.215, y: 10587.64, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1893.46, 5375.89)
+    - {name: B394, x: 7008.92, y: 10683.957, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (1797.16, 5472.21)
+    - {name: B395, x: 7382.675, y: 10310.13, diameter: 20, As: 314.0, n_bars: 1, material: steel_B450C, embedded: true}   # Excel frame (2170.92, 5098.38)
+
+# ----------------------------------------------------------------------
+#  Demands.  GenSec: N > 0 tension.  The sheet lists compressions as
+#  positive, so N is negated.  Mx, My copied with the sheet sign:
+#  GenSec Mx > 0 compresses the BOTTOM edge, My > 0 the LEFT edge
+#  (see sign_conventions).  SLV is sign-symmetric in Mx and My; SLE
+#  is not (Mx >= 0 only) -> sheet convention to be confirmed.
+# ----------------------------------------------------------------------
+demands:
+  # SLE (sheet N > 0 = compression -> sign flipped)
+  - {name: d_SLE_01, N_kN: -25000, Mx_kNm: 53680, My_kNm: 0}
+  - {name: d_SLE_02, N_kN: -33370, Mx_kNm: 2, My_kNm: 53680}
+  - {name: d_SLE_03, N_kN: -33370, Mx_kNm: 56680, My_kNm: 0}
+  - {name: d_SLE_04, N_kN: -25170, Mx_kNm: 56680, My_kNm: 0}
+  - {name: d_SLE_05, N_kN: -33370, Mx_kNm: 0, My_kNm: 62220}
+  - {name: d_SLE_06, N_kN: -25170, Mx_kNm: 0, My_kNm: 62220}
+  - {name: d_SLE_07, N_kN: -33370, Mx_kNm: 65220, My_kNm: 0}
+  - {name: d_SLE_08, N_kN: -25170, Mx_kNm: 65220, My_kNm: 0}
+  - {name: d_SLE_09, N_kN: -29300, Mx_kNm: 8540, My_kNm: 0}
+  - {name: d_SLE_10, N_kN: -29300, Mx_kNm: 0, My_kNm: 0}
+  # SLV (design values, sheet Nd > 0 = compression -> sign flipped)
+  - {name: SLV_01, N_kN: -33978, Mx_kNm: 135262, My_kNm: -489596}
+  - {name: SLV_02, N_kN: -25155, Mx_kNm: 135262, My_kNm: -489596}
+  - {name: SLV_03, N_kN: -33978, Mx_kNm: -135262, My_kNm: -489596}
+  - {name: SLV_04, N_kN: -25155, Mx_kNm: -135262, My_kNm: -489596}
+  - {name: SLV_05, N_kN: -33978, Mx_kNm: 450872, My_kNm: -146879}
+  - {name: SLV_06, N_kN: -25155, Mx_kNm: 450872, My_kNm: -146879}
+  - {name: SLV_07, N_kN: -33978, Mx_kNm: 450872, My_kNm: 146879}
+  - {name: SLV_08, N_kN: -25155, Mx_kNm: 450872, My_kNm: 146879}
+  - {name: SLV_09, N_kN: -33978, Mx_kNm: 135262, My_kNm: 489596}
+  - {name: SLV_10, N_kN: -25155, Mx_kNm: 135262, My_kNm: 489596}
+  - {name: SLV_11, N_kN: -33978, Mx_kNm: -135262, My_kNm: 489596}
+  - {name: SLV_12, N_kN: -25155, Mx_kNm: -135262, My_kNm: 489596}
+  - {name: SLV_13, N_kN: -33978, Mx_kNm: -450872, My_kNm: -146879}
+  - {name: SLV_14, N_kN: -25155, Mx_kNm: -450872, My_kNm: -146879}
+  - {name: SLV_15, N_kN: -33978, Mx_kNm: -450872, My_kNm: 146879}
+  - {name: SLV_16, N_kN: -25155, Mx_kNm: -450872, My_kNm: 146879}
+  - {name: SLV_17, N_kN: -44271, Mx_kNm: 135262, My_kNm: -146879}
+  - {name: SLV_18, N_kN: -14862, Mx_kNm: 135262, My_kNm: -146879}
+  - {name: SLV_19, N_kN: -44271, Mx_kNm: -135262, My_kNm: -146879}
+  - {name: SLV_20, N_kN: -14862, Mx_kNm: -135262, My_kNm: -146879}
+  - {name: SLV_21, N_kN: -44271, Mx_kNm: 135262, My_kNm: 146879}
+  - {name: SLV_22, N_kN: -14862, Mx_kNm: 135262, My_kNm: 146879}
+  - {name: SLV_23, N_kN: -44271, Mx_kNm: -135262, My_kNm: 146879}
+  - {name: SLV_24, N_kN: -14862, Mx_kNm: -135262, My_kNm: 146879}
+
+combinations:
+  # --- SLE: stress verification ---------------------------------
+  # Short-term, declared as such: moduli = Ecm per zone (NTC 2018
+  # 11.2.10.3, fcm = fck + 8), no creep.  An honest lower bound on the
+  # long-term redistribution, NOT a long-term verification.
+  #
+  # All SLE actions are permanent, so each SLE case is at the same time
+  # the characteristic and the quasi-permanent combination
+  # (NTC 2018 4.1.2.2.5.1).  Both limit families are therefore
+  # checked, one combination each:
+  #   *_car : sigma_c <= 0.60 fck (per zone), sigma_s <= 0.80 fyk
+  #   *_qp  : sigma_c <= 0.45 fck (per zone)
+  # The qp concrete limit governs; the car one is kept for the steel.
+  - name: SLE_01_car
+    components: [{ref: d_SLE_01, factor: 1.0}]
+    sls: &sls_car
+      moduli: &moduli_st {base: 29962.0, getto2: 33346.0}
+      limits:
+        kind: characteristic
+        fyk: 450.0
+        decompression: false
+        overrides: {k1: 0.60, k3: 0.80}
+  - name: SLE_01_qp
+    components: [{ref: d_SLE_01, factor: 1.0}]
+    sls: &sls_qp
+      moduli: *moduli_st
+      limits:
+        kind: quasi_permanent
+        decompression: false
+        overrides: {k2: 0.45}
+  - name: SLE_02_car
+    components: [{ref: d_SLE_02, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_02_qp
+    components: [{ref: d_SLE_02, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_03_car
+    components: [{ref: d_SLE_03, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_03_qp
+    components: [{ref: d_SLE_03, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_04_car
+    components: [{ref: d_SLE_04, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_04_qp
+    components: [{ref: d_SLE_04, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_05_car
+    components: [{ref: d_SLE_05, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_05_qp
+    components: [{ref: d_SLE_05, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_06_car
+    components: [{ref: d_SLE_06, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_06_qp
+    components: [{ref: d_SLE_06, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_07_car
+    components: [{ref: d_SLE_07, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_07_qp
+    components: [{ref: d_SLE_07, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_08_car
+    components: [{ref: d_SLE_08, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_08_qp
+    components: [{ref: d_SLE_08, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_09_car
+    components: [{ref: d_SLE_09, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_09_qp
+    components: [{ref: d_SLE_09, factor: 1.0}]
+    sls: *sls_qp
+  - name: SLE_10_car
+    components: [{ref: d_SLE_10, factor: 1.0}]
+    sls: *sls_car
+  - name: SLE_10_qp
+    components: [{ref: d_SLE_10, factor: 1.0}]
+    sls: *sls_qp
+  # SLV: no combination. The d_SLV_xx demands are verified on the
+  # resistance domain directly; a combination would verify them twice.
+
+output:
+
+  # ── Utilization ratio flags (v0.3.0) ──
+  eta_norm: true               # default: true  — principal 3-D linear-distance metric
+  eta_norm_beta: true          # default: true  — composite ratio (cross-software comparison)
+  eta_norm_ray: true           # default: false — proportional load amplification
+  eta_2D: true                 # default: false — Mx-My ray at fixed N (biaxial only)
+  eta_path_norm_ray: false     # default: false — staged 3-D ray
+  eta_path_norm_beta: false    # default: false — staged composite ratio
+  eta_path_2D: false           # default: false — staged Mx-My ray
+  delta_N_tol: 0.001           # tightened tolerance: demand at N = 0 (pure flexure)
+
+  # ── Domain generation ──
+  generate_mx_my: true
+  generate_3d_surface: true
+  #n_angles_mx_my: 360
+
+  # ── Moment-curvature and ductility ──
+  generate_moment_curvature: true
+  generate_polar_ductility: false
+  generate_3d_moment_curvature: false
+
+  # ── N-level strategy ──
+  n_levels_mode: demands
+  # n_levels_count: 10
+  # n_levels_values: [-3000, -1500, 0]

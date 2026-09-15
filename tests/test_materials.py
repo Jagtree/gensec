@@ -17,7 +17,7 @@ class TestConcreteStressStrain(unittest.TestCase):
     """Pointwise verification of the parabola-rectangle law."""
 
     def setUp(self):
-        self.c = Concrete(fck=25.0, gamma_c=1.5, alpha_cc=0.85)
+        self.c = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.fcd = 0.85 * 25.0 / 1.5  # 14.1667
 
     def test_zero_strain(self):
@@ -72,7 +72,7 @@ class TestConcreteTension(unittest.TestCase):
         # C25 with tension: fct=2.0 MPa, Ec=30000 MPa
         # => eps_ct = 2.0 / 30000 = 6.6667e-5
         self.c_t = Concrete(
-            fck=25.0, gamma_c=1.5, alpha_cc=0.85,
+            fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85,
             fct=2.0, Ec=30000.0,
         )
         self.eps_ct = 2.0 / 30000.0
@@ -80,7 +80,7 @@ class TestConcreteTension(unittest.TestCase):
 
     def test_tension_enabled_flag(self):
         self.assertTrue(self.c_t.tension_enabled)
-        c_no = Concrete(fck=25.0)
+        c_no = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.assertFalse(c_no.tension_enabled)
 
     def test_eps_ct_computed(self):
@@ -92,7 +92,7 @@ class TestConcreteTension(unittest.TestCase):
 
     def test_eps_max_without_tension(self):
         """eps_max must remain 0.0 when tension is disabled."""
-        c = Concrete(fck=25.0)
+        c = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.assertEqual(c.eps_max, 0.0)
 
     def test_tension_linear_midpoint(self):
@@ -138,13 +138,13 @@ class TestConcreteTension(unittest.TestCase):
 
     def test_disabled_tension_ignored(self):
         """With fct=0, positive strains must give sigma=0."""
-        c = Concrete(fck=25.0, fct=0.0, Ec=30000.0)
+        c = Concrete(fck=25.0, fct=0.0, Ec=30000.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.assertFalse(c.tension_enabled)
         self.assertAlmostEqual(c.stress(1e-4), 0.0)
 
     def test_only_fct_without_Ec(self):
         """fct > 0 but Ec = 0 must disable tension."""
-        c = Concrete(fck=25.0, fct=2.0, Ec=0.0)
+        c = Concrete(fck=25.0, fct=2.0, Ec=0.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.assertFalse(c.tension_enabled)
         self.assertEqual(c.eps_max, 0.0)
 
@@ -153,7 +153,7 @@ class TestEC2BridgeTension(unittest.TestCase):
     """Tests for the enable_tension flag in EC2 bridge factories."""
 
     def test_tension_off_by_default(self):
-        c = concrete_from_ec2(fck=30, ls='F')
+        c = concrete_from_ec2(fck=30, ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertFalse(c.tension_enabled)
         self.assertEqual(c.fct, 0.0)
         self.assertEqual(c.Ec, 0.0)
@@ -161,7 +161,7 @@ class TestEC2BridgeTension(unittest.TestCase):
 
     def test_tension_on_fctd(self):
         """enable_tension=True with default tension_fct='fctd'."""
-        c = concrete_from_ec2(fck=30, ls='F', enable_tension=True)
+        c = concrete_from_ec2(fck=30, ls='F', enable_tension=True, loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertTrue(c.tension_enabled)
         self.assertGreater(c.fct, 0.0)
         self.assertGreater(c.Ec, 0.0)
@@ -173,25 +173,25 @@ class TestEC2BridgeTension(unittest.TestCase):
     def test_tension_on_fctm(self):
         """tension_fct='fctm' must use the mean tensile strength."""
         c = concrete_from_ec2(fck=30, ls='F', enable_tension=True,
-                              tension_fct='fctm')
+                              tension_fct='fctm', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertAlmostEqual(c.fct, c.ec2.fctm, places=6)
 
     def test_tension_on_fctk(self):
         """tension_fct='fctk' must use fctk_005."""
         c = concrete_from_ec2(fck=30, ls='F', enable_tension=True,
-                              tension_fct='fctk')
+                              tension_fct='fctk', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertAlmostEqual(c.fct, c.ec2.fctk_005, places=6)
 
     def test_tension_invalid_fct_source(self):
         with self.assertRaises(ValueError):
             concrete_from_ec2(fck=30, enable_tension=True,
-                              tension_fct='bogus')
+                              tension_fct='bogus', ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
 
     def test_from_class_tension(self):
         """concrete_from_class must propagate enable_tension."""
         from gensec.materials import concrete_from_class
         c = concrete_from_class('C25/30', ls='F',
-                                enable_tension=True, tension_fct='fctm')
+                                enable_tension=True, tension_fct='fctm', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertTrue(c.tension_enabled)
         self.assertAlmostEqual(c.fct, c.ec2.fctm, places=6)
 
@@ -326,21 +326,21 @@ class TestEC2Bridge(unittest.TestCase):
     """Tests for concrete_from_ec2 and concrete_from_class."""
 
     def test_c25_standard(self):
-        c = concrete_from_ec2(fck=25, ls='F')
+        c = concrete_from_ec2(fck=25, ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertAlmostEqual(c.fcd, 0.85 * 25 / 1.5, places=2)
         self.assertEqual(c.eps_cu2, -0.0035)
         self.assertEqual(c.n_parabola, 2.0)
 
     def test_c30_french_annex(self):
         c = concrete_from_ec2(fck=30, ls='F', loadtype='slow',
-                              TypeConc='R', NA='French')
+                              TypeConc='R', NA='French', time=28)
         self.assertAlmostEqual(c.fcd, 0.85 * 30 / 1.5, places=2)
         self.assertTrue(hasattr(c, 'ec2'))
         self.assertAlmostEqual(c.ec2.fcm, 38.0)
 
     def test_c70_high_strength(self):
         """fck > 50 must give different n, eps_c2, eps_cu2."""
-        c = concrete_from_ec2(fck=70, ls='F')
+        c = concrete_from_ec2(fck=70, ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertNotEqual(c.n_parabola, 2.0)
         self.assertNotEqual(c.eps_c2, -0.002)
         self.assertNotEqual(c.eps_cu2, -0.0035)
@@ -349,16 +349,16 @@ class TestEC2Bridge(unittest.TestCase):
                                places=2)
 
     def test_from_class(self):
-        c = concrete_from_class('C50/60', ls='F')
+        c = concrete_from_class('C50/60', ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertEqual(c.fck, 50.0)
 
     def test_accidental_ls(self):
-        c = concrete_from_ec2(fck=25, ls='A')
+        c = concrete_from_ec2(fck=25, ls='A', loadtype='slow', TypeConc='R', NA='French', time=28)
         self.assertAlmostEqual(c.ec2.gamma_c, 1.2)
 
     def test_unknown_class(self):
         with self.assertRaises(ValueError):
-            concrete_from_class('C999')
+            concrete_from_class('C999', ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
 
 
 class TestEN10025Bridge(unittest.TestCase):

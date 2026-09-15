@@ -153,7 +153,7 @@ def part2_realistic_both_treatments():
     from gensec.materials.concrete import Concrete
     from gensec.materials.steel import PrestressingSteel
 
-    conc = Concrete(fck=45.0)
+    conc = Concrete(fck=45.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     strand = PrestressingSteel(f_p01d=1600.0 / 1.15, sigma_ud=1860.0,
                                eps_ud=0.0315, Ep=EP)
     tendons = [Tendon(y=y, x=B / 2, material=strand, Ap=AP, eps_pe=0.0)

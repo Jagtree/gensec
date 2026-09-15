@@ -1,0 +1,714 @@
+{
+  "demands": [
+    {
+      "name": "d_SLE_01",
+      "N_kN": -25000.0,
+      "Mx_kNm": 53680.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9219,
+      "eta_norm_beta": 0.3743,
+      "eta_norm_ray": 0.0537,
+      "eta_2D": 0.1601,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_02",
+      "N_kN": -33370.0,
+      "Mx_kNm": 2.0,
+      "My_kNm": 53680.0,
+      "eta_norm": 0.9103,
+      "eta_norm_beta": 0.3856,
+      "eta_norm_ray": 0.0647,
+      "eta_2D": 0.1448,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_03",
+      "N_kN": -33370.0,
+      "Mx_kNm": 56680.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.912,
+      "eta_norm_beta": 0.3956,
+      "eta_norm_ray": 0.0641,
+      "eta_2D": 0.1529,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_04",
+      "N_kN": -25170.0,
+      "Mx_kNm": 56680.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9224,
+      "eta_norm_beta": 0.3822,
+      "eta_norm_ray": 0.0556,
+      "eta_2D": 0.1688,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_05",
+      "N_kN": -33370.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 62220.0,
+      "eta_norm": 0.9126,
+      "eta_norm_beta": 0.402,
+      "eta_norm_ray": 0.0689,
+      "eta_2D": 0.1679,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_06",
+      "N_kN": -25170.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 62220.0,
+      "eta_norm": 0.9228,
+      "eta_norm_beta": 0.3903,
+      "eta_norm_ray": 0.0603,
+      "eta_2D": 0.1842,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_07",
+      "N_kN": -33370.0,
+      "Mx_kNm": 65220.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9143,
+      "eta_norm_beta": 0.4128,
+      "eta_norm_ray": 0.068,
+      "eta_2D": 0.1759,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_08",
+      "N_kN": -25170.0,
+      "Mx_kNm": 65220.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9247,
+      "eta_norm_beta": 0.4045,
+      "eta_norm_ray": 0.0613,
+      "eta_2D": 0.1942,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_09",
+      "N_kN": -29300.0,
+      "Mx_kNm": 8540.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9045,
+      "eta_norm_beta": 0.3097,
+      "eta_norm_ray": 0.0409,
+      "eta_2D": 0.0241,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "d_SLE_10",
+      "N_kN": -29300.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.9023,
+      "eta_norm_beta": 0.3036,
+      "eta_norm_ray": 0.0401,
+      "eta_2D": 0.0,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_01",
+      "N_kN": -33978.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": -489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0001,
+      "eta_norm_ray": 1.5829,
+      "eta_2D": 1.3617,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_02",
+      "N_kN": -25155.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": -489596.0,
+      "eta_norm": 1.0003,
+      "eta_norm_beta": 1.0012,
+      "eta_norm_ray": 1.747,
+      "eta_2D": 1.5067,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_03",
+      "N_kN": -33978.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": -489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0001,
+      "eta_norm_ray": 1.5763,
+      "eta_2D": 1.3606,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_04",
+      "N_kN": -25155.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": -489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0001,
+      "eta_norm_ray": 1.7367,
+      "eta_2D": 1.5065,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_05",
+      "N_kN": -33978.0,
+      "Mx_kNm": 450872.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.4425,
+      "eta_2D": 1.2694,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_06",
+      "N_kN": -25155.0,
+      "Mx_kNm": 450872.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.6104,
+      "eta_2D": 1.4123,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_07",
+      "N_kN": -33978.0,
+      "Mx_kNm": 450872.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.4425,
+      "eta_2D": 1.2694,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_08",
+      "N_kN": -25155.0,
+      "Mx_kNm": 450872.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.6104,
+      "eta_2D": 1.4127,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_09",
+      "N_kN": -33978.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": 489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0001,
+      "eta_norm_ray": 1.5829,
+      "eta_2D": 1.3617,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_10",
+      "N_kN": -25155.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": 489596.0,
+      "eta_norm": 1.0003,
+      "eta_norm_beta": 1.0012,
+      "eta_norm_ray": 1.747,
+      "eta_2D": 1.5063,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_11",
+      "N_kN": -33978.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": 489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0001,
+      "eta_norm_ray": 1.5763,
+      "eta_2D": 1.3606,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_12",
+      "N_kN": -25155.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": 489596.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0002,
+      "eta_norm_ray": 1.7367,
+      "eta_2D": 1.5065,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_13",
+      "N_kN": -33978.0,
+      "Mx_kNm": -450872.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.3881,
+      "eta_2D": 1.2468,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_14",
+      "N_kN": -25155.0,
+      "Mx_kNm": -450872.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 1.0002,
+      "eta_norm_beta": 1.0007,
+      "eta_norm_ray": 1.5374,
+      "eta_2D": 1.3758,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_15",
+      "N_kN": -33978.0,
+      "Mx_kNm": -450872.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 1.0,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 1.388,
+      "eta_2D": 1.2468,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_16",
+      "N_kN": -25155.0,
+      "Mx_kNm": -450872.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 1.0002,
+      "eta_norm_beta": 1.0006,
+      "eta_norm_ray": 1.5374,
+      "eta_2D": 1.3756,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "SLV_17",
+      "N_kN": -44271.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 0.9375,
+      "eta_norm_beta": 0.6678,
+      "eta_norm_ray": 0.2068,
+      "eta_2D": 0.4804,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_18",
+      "N_kN": -14862.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 0.9741,
+      "eta_norm_beta": 0.8094,
+      "eta_norm_ray": 0.5959,
+      "eta_2D": 0.6824,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_19",
+      "N_kN": -44271.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 0.935,
+      "eta_norm_beta": 0.6589,
+      "eta_norm_ray": 0.215,
+      "eta_2D": 0.471,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_20",
+      "N_kN": -14862.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": -146879.0,
+      "eta_norm": 0.9715,
+      "eta_norm_beta": 0.794,
+      "eta_norm_ray": 0.5703,
+      "eta_2D": 0.6606,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_21",
+      "N_kN": -44271.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 0.9375,
+      "eta_norm_beta": 0.6678,
+      "eta_norm_ray": 0.2068,
+      "eta_2D": 0.4805,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_22",
+      "N_kN": -14862.0,
+      "Mx_kNm": 135262.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 0.9741,
+      "eta_norm_beta": 0.8094,
+      "eta_norm_ray": 0.5959,
+      "eta_2D": 0.6824,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_23",
+      "N_kN": -44271.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 0.935,
+      "eta_norm_beta": 0.6589,
+      "eta_norm_ray": 0.215,
+      "eta_2D": 0.471,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLV_24",
+      "N_kN": -14862.0,
+      "Mx_kNm": -135262.0,
+      "My_kNm": 146879.0,
+      "eta_norm": 0.9715,
+      "eta_norm_beta": 0.794,
+      "eta_norm_ray": 0.5703,
+      "eta_2D": 0.6606,
+      "inside": true,
+      "verified": true
+    }
+  ],
+  "combinations": [
+    {
+      "name": "SLE_01_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25000.0,
+        "Mx_kNm": 53680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9219,
+      "eta_norm_beta": 0.3743,
+      "eta_norm_ray": 0.0537,
+      "eta_2D": 0.1601,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_01_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25000.0,
+        "Mx_kNm": 53680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9219,
+      "eta_norm_beta": 0.3743,
+      "eta_norm_ray": 0.0537,
+      "eta_2D": 0.1601,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_02_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 2.0,
+        "My_kNm": 53680.0
+      },
+      "eta_norm": 0.9103,
+      "eta_norm_beta": 0.3856,
+      "eta_norm_ray": 0.0647,
+      "eta_2D": 0.1448,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_02_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 2.0,
+        "My_kNm": 53680.0
+      },
+      "eta_norm": 0.9103,
+      "eta_norm_beta": 0.3856,
+      "eta_norm_ray": 0.0647,
+      "eta_2D": 0.1448,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_03_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 56680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.912,
+      "eta_norm_beta": 0.3956,
+      "eta_norm_ray": 0.0641,
+      "eta_2D": 0.1529,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_03_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 56680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.912,
+      "eta_norm_beta": 0.3956,
+      "eta_norm_ray": 0.0641,
+      "eta_2D": 0.1529,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_04_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 56680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9224,
+      "eta_norm_beta": 0.3822,
+      "eta_norm_ray": 0.0556,
+      "eta_2D": 0.1688,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_04_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 56680.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9224,
+      "eta_norm_beta": 0.3822,
+      "eta_norm_ray": 0.0556,
+      "eta_2D": 0.1688,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_05_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 62220.0
+      },
+      "eta_norm": 0.9126,
+      "eta_norm_beta": 0.402,
+      "eta_norm_ray": 0.0689,
+      "eta_2D": 0.1679,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_05_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 62220.0
+      },
+      "eta_norm": 0.9126,
+      "eta_norm_beta": 0.402,
+      "eta_norm_ray": 0.0689,
+      "eta_2D": 0.1679,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_06_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 62220.0
+      },
+      "eta_norm": 0.9228,
+      "eta_norm_beta": 0.3903,
+      "eta_norm_ray": 0.0603,
+      "eta_2D": 0.1842,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_06_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 62220.0
+      },
+      "eta_norm": 0.9228,
+      "eta_norm_beta": 0.3903,
+      "eta_norm_ray": 0.0603,
+      "eta_2D": 0.1842,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_07_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 65220.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9143,
+      "eta_norm_beta": 0.4128,
+      "eta_norm_ray": 0.068,
+      "eta_2D": 0.1759,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_07_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -33370.0,
+        "Mx_kNm": 65220.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9143,
+      "eta_norm_beta": 0.4128,
+      "eta_norm_ray": 0.068,
+      "eta_2D": 0.1759,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_08_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 65220.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9247,
+      "eta_norm_beta": 0.4045,
+      "eta_norm_ray": 0.0613,
+      "eta_2D": 0.1942,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_08_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -25170.0,
+        "Mx_kNm": 65220.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9247,
+      "eta_norm_beta": 0.4045,
+      "eta_norm_ray": 0.0613,
+      "eta_2D": 0.1942,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_09_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -29300.0,
+        "Mx_kNm": 8540.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9045,
+      "eta_norm_beta": 0.3097,
+      "eta_norm_ray": 0.0409,
+      "eta_2D": 0.0241,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_09_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -29300.0,
+        "Mx_kNm": 8540.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9045,
+      "eta_norm_beta": 0.3097,
+      "eta_norm_ray": 0.0409,
+      "eta_2D": 0.0241,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_10_car",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -29300.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9023,
+      "eta_norm_beta": 0.3036,
+      "eta_norm_ray": 0.0401,
+      "eta_2D": 0.0,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "SLE_10_qp",
+      "type": "simple",
+      "resultant": {
+        "N_kN": -29300.0,
+        "Mx_kNm": 0.0,
+        "My_kNm": 0.0
+      },
+      "eta_norm": 0.9023,
+      "eta_norm_beta": 0.3036,
+      "eta_norm_ray": 0.0401,
+      "eta_2D": 0.0,
+      "inside": true,
+      "verified": true
+    }
+  ]
+}

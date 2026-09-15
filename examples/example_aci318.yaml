@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# GenSec — reinforced/prestressed concrete sectional analysis.
+# Copyright (C) 2026  Andrea (GenSec project).
+#
+# ---------------------------------------------------------------------
+#  A model verified to ACI 318-19, declared in one line.
+# ---------------------------------------------------------------------
+#
+#  Why this file is distributed
+#  ----------------------------
+#  GenSec is normative-agnostic by construction, and until Phase 21 that
+#  claim had no witness in the battery: every shipped example was a
+#  Eurocode model, so a container that had quietly become
+#  Eurocode-shaped would have looked identical from outside.  The Phase
+#  19 lesson applies unchanged -- a property no distributed example
+#  exercises is a property no instrument can see.
+#
+#  ACI is the right witness because its structure is genuinely
+#  different, which is why `7_0-GENSEC_PHASE5_PRIMER.md §10` named it
+#  the genericity test bench in the first place.  The conventional
+#  modulus is a square root of the strength, not a power of the mean:
+#
+#      ACI 318-19 §19.2.2.1   E_c  = 4700 sqrt(f'c)          [MPa]
+#      EN 1992-1-1 Tab. 3.1   E_cm = 22000 ((f_ck+8)/10)^0.3 [MPa]
+#
+#  On the f'c = 28 MPa of this file:
+#
+#      ACI   4700 * sqrt(28)          = 24 870.062 MPa
+#      EC2   22000 * (36/10)^0.3      = 32 308.250 MPa      +29.9 %
+#
+#  Thirty per cent is not a rounding difference.  Under-declaring the
+#  code does not produce a slightly wrong homogenisation ratio; it
+#  produces a different structure.
+#
+#  What the declaration governs
+#  ----------------------------
+#  Everything code-dependent, from this one key:
+#
+#    * the conventional secant modulus of every concrete, with the
+#      citation that appears in the report;
+#    * the rheological provider, when the model declares a time axis.
+#      ACI 209R-92 is a DECLARED EMPTY SLOT in this build (`7_0 §13`):
+#      asking for creep or shrinkage under ACI raises and names the
+#      omission rather than falling back to the Eurocode's.  That
+#      refusal is the point.  A silent fallback would make this file a
+#      Eurocode model wearing an ACI label.
+#
+#  The constitutive shape below is still the EC2 parabola-rectangle
+#  (`type: concrete_ec2_gen1_custom`), and that is deliberate and
+#  declared rather than an oversight: this example isolates ONE
+#  variable, the modulus, so that the 29.9 % is attributable to the
+#  code declaration and to nothing else.  An ACI-shaped stress block is
+#  a separate piece of work with its own measurement.  Naming that
+#  limitation here is cheaper than having a reader infer that GenSec
+#  claims a full ACI implementation.
+#
+#  What to try
+#  -----------
+#  Change `code:` to `ec2` and re-run.  Nothing else in the file moves,
+#  and every modulus-derived quantity does.  That is the whole claim of
+#  normative agnosticism, in one edit.
+# ---------------------------------------------------------------------
+
+# The model's normative declaration.  Read once, applied everywhere.
+# A material may override it for itself with its own `code:` key --- a
+# precast beam under EN 1992-1-1 carrying an ACI topping is a real
+# model, not a contrivance --- and `code: custom` on a material means
+# GenSec derives nothing for it and the input supplies everything.
+code: aci318-19
+
+materials:
+
+  # f'c = 28 MPa (about 4000 psi), the ordinary ACI normalweight mix.
+  # gamma_c is carried because GenSec's own resistance path uses it;
+  # ACI works in strength-reduction factors phi rather than partial
+  # factors on materials, so a full ACI verification would supply phi
+  # at the demand side.  Out of scope here, and stated so it is not
+  # mistaken for a claim.
+  concrete_4ksi:
+    type: concrete_ec2_gen1_custom
+    fck: 28.0
+    gamma_c: 1.5
+    long_term_reduction_factor: 0.85
+
+  # Grade 60 reinforcement: f_y = 420 MPa, E_s = 200 GPa.  The steel
+  # modulus is a declared input under both codes and not derived from
+  # anything, so it is the one property the declaration does not move.
+  grade60:
+    type: steel
+    fyk: 420.0
+    gamma_s: 1.15
+    Es: 200000.0
+    eps_su: 0.05
+    k_hardening: 1.0
+
+section:
+  # 12 in x 24 in, in millimetres.
+  B: 305
+  H: 610
+  bulk_material: concrete_4ksi
+  n_fibers_y: 40
+  rebars:
+    # 3 #8 bars bottom (3 x 510 mm2), 2 in cover to centroid.
+    - y: 51
+      As: 1530.0
+      material: grade60
+      n_bars: 3
+      diameter: 25.4
+    # 2 #5 bars top, compression face.
+    - y: 559
+      As: 400.0
+      material: grade60
+      n_bars: 2
+      diameter: 15.9
+
+demands:
+  # Sagging, the governing direction for this layout.
+  - name: Mu_sag
+    N: 0.0
+    Mx: 250.0e6
+    My: 0.0
+
+  # A service axial compression with the same moment, so the report
+  # exercises the modulus on a state where it actually bites.
+  - name: service
+    N: -400.0e3
+    Mx: 120.0e6
+    My: 0.0
+
+# Phase 38: this document used to carry an 'output' block holding
+# exactly two keys, 'nm_diagram' and 'eta_3D', and nothing in src read
+# either of them.  The block is gone rather than emptied, because an
+# empty block and an absent one are the same document to the loader and
+# only one of the two says so.
+#
+# 'eta_3D' is worth naming: it is the demand architecture's own word for
+# one of the four utilisation types, so this document was asking for
+# something real, in the right vocabulary, and getting silence.  The
+# flags that implement it are 'eta_norm', 'eta_norm_beta' and
+# 'eta_norm_ray'.  They are NOT added here: this phase closes a hole in
+# the loader and does not change what any example computes.  The
+# divergence between the architecture's names and the loader's is a
+# finding of Phase 38, recorded for ratification, not repaired in it.

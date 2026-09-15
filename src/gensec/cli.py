@@ -430,6 +430,31 @@ def _run(args):
             envelope_results,
             os.path.join(outdir, "envelope_summary.json"))
 
+    # --- 3b. SLS stress verification (Phase 33) ---
+    # The staged SLS engine was reachable only from the Python API
+    # until this phase: a YAML document received a ULS domain check and
+    # no stress check at all, and nothing said so.  ``run_sls`` walks
+    # every combination; the ones that declare no ``sls`` block leave an
+    # explicit record here rather than silence, so "not requested" and
+    # "not available" are different lines in the report.
+    from .solver.timeline_run import run_sls
+    from .output.report import print_sls_results
+    sls_out = run_sls(data, n_points=args.n_points,
+                      biaxial=(nm_3d is not None))
+    if sls_out["combinations"]:
+        print("\n  SLS stress verification...")
+        if sls_out["requested"] == 0:
+            print("    no combination declares an 'sls' block; no "
+                  "stress verification was requested.")
+        for _rec in sls_out["combinations"]:
+            if _rec.get("skipped"):
+                print(f"    {_rec['name']}: SKIPPED - {_rec['reason']}")
+                continue
+            for _pt, _res in _rec["points"].items():
+                _at = "" if _pt == "-" else f" @ {_pt}"
+                print(f"\n  Combination '{_rec['name']}'{_at}")
+                print_sls_results(_res)
+
     # --- Unified verification export (with statistics) ---
     if demand_results or combination_results or envelope_results:
         export_verification_json(
@@ -925,3 +950,4 @@ def _print_staged_analysis(cr):
 
 if __name__ == "__main__":
     main()
+# GENSEC-COMPLETE phase=33 utc=2026-09-05T19:52:46Z sha256=410a270973275a120542a2a8ff60c3680ebb76ad62d67959e59d6196d0ecdabc body_lines=952

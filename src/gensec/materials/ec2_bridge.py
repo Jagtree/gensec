@@ -47,15 +47,15 @@ Create an S355 structural steel plate, 20 mm thick:
 
 import numpy as np
 from .concrete import Concrete
+from .service_concrete import ServiceConcrete
 from .steel import Steel, PrestressingSteel
 from .ec2_properties import fben2, ConcClassFck
 from .en10025_properties import Steel_EN10025_2
 from .prestress_properties import fbpren, PrestressClassData
 
 
-def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
-                      NA='French', time=28, enable_tension=False,
-                      tension_fct='fctd'):
+def concrete_from_ec2(fck, ls, loadtype, TypeConc, NA, time,
+                      enable_tension=False, tension_fct='fctd'):
     r"""
     Create a GenSec :class:`Concrete` from EC2 Table 3.1 properties.
 
@@ -127,7 +127,13 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
     c = Concrete(
         fck=ec2.fck,
         gamma_c=ec2.gamma_c,
-        alpha_cc=ec2.alpha_cc,
+        # The Eurocode's alpha_cc, EN 1992-1-1 §3.1.6(1)P, read off
+        # the EC2 property object that owns the clause and handed
+        # to the container's neutrally named field.  This line is
+        # the whole of the architecture: the value crosses from
+        # the normative module into the aggregator exactly once,
+        # and the aggregator has no opinion about it.
+        long_term_reduction_factor=ec2.alpha_cc,
         n_parabola=ec2.n_exp,
         eps_c2=-ec2.eps_c2,      # convert to negative
         eps_cu2=-ec2.eps_cu2,     # convert to negative
@@ -139,8 +145,7 @@ def concrete_from_ec2(fck, ls='F', loadtype='slow', TypeConc='R',
     return c
 
 
-def concrete_from_class(conc_class, ls='F', loadtype='slow',
-                        TypeConc='R', NA='French', time=28,
+def concrete_from_class(conc_class, ls, loadtype, TypeConc, NA, time,
                         enable_tension=False, tension_fct='fctd'):
     r"""
     Create a GenSec :class:`Concrete` from an EC2 class name.
@@ -224,9 +229,9 @@ def steel_from_en10025(grade='S355', t=0, young=200000,
     return s
 
 
-def prestress_from_ec2(f_p01k, f_pk, eps_uk, Ep=195000.0,
-                       ls='F', NA='EC2', eps_ud_factor=0.9,
-                       gamma_s_override=None, diagram='horizontal',
+def prestress_from_ec2(f_p01k, f_pk, eps_uk, Ep, ls, NA,
+                       eps_ud_factor, diagram,
+                       gamma_s_override=None,
                        works_in_compression=True):
     r"""
     Create a GenSec :class:`PrestressingSteel` from EC2 §3.3 inputs.
@@ -310,9 +315,8 @@ def prestress_from_ec2(f_p01k, f_pk, eps_uk, Ep=195000.0,
     return ps
 
 
-def prestress_from_class(ps_class, ls='F', NA='EC2',
-                         eps_ud_factor=0.9, gamma_s_override=None,
-                         diagram='horizontal',
+def prestress_from_class(ps_class, ls, NA, eps_ud_factor, diagram,
+                         gamma_s_override=None,
                          works_in_compression=True):
     r"""
     Create a GenSec :class:`PrestressingSteel` from a standard
@@ -349,3 +353,73 @@ def prestress_from_class(ps_class, ls='F', NA='EC2',
         gamma_s_override=gamma_s_override, diagram=diagram,
         works_in_compression=works_in_compression,
     )
+
+
+#: Which tensile strength the service law cuts its tension branch at.
+#: EN 1992-1-1 §7.1(2) admits f_ctm; §3.1.6 gives f_ctk,0.05 for a
+#: characteristic reading; §7.3.2 uses f_ctm,fl where flexural
+#: restraint governs.  Three different answers, three different
+#: cracking moments, and the model picks --- there is no default.
+SERVICE_FCT_SOURCES = ("fctm", "fctk_005", "fctd_005")
+
+
+def service_concrete_from_ec2(fck, fct_eff, ls='F', loadtype='slow',
+                              TypeConc='R', time=28.0):
+    r"""
+    Build a :class:`ServiceConcrete` from EN 1992-1-1 Table 3.1.
+
+    The bridge reads the four constants of expression (3.14) at the
+    requested age off :class:`fben2`, which owns the normative
+    document, and hands them over.  It derives none of them and it
+    invents no tensile strength: ``fct_eff`` must be named.
+
+    Parameters
+    ----------
+    fck : float
+        Characteristic cylinder strength at 28 days [MPa].
+    fct_eff : str or float
+        Either a member of :data:`SERVICE_FCT_SOURCES`, read off
+        ``fben2`` **at the requested age**, or a tensile strength in
+        MPa given directly.  There is no default: see
+        :data:`SERVICE_FCT_SOURCES`.
+    ls, loadtype, TypeConc : str, optional
+        Passed through to :class:`fben2`.
+    time : float, optional
+        Age [days].  Default 28, the age Table 3.1 is written at.
+
+    Returns
+    -------
+    ServiceConcrete
+
+    Raises
+    ------
+    ValueError
+        On an unknown ``fct_eff`` name, or when the constants at the
+        requested age are outside the domain ``fben2`` reports
+        (below three days it returns ``fcm = 0`` as a marker).
+
+    Examples
+    --------
+    >>> law = service_concrete_from_ec2(35.0, fct_eff='fctm',
+    ...                                 TypeConc='N', time=7.0)
+    >>> round(law.tangent(0.0) / law.Ecm, 4)
+    1.05
+    """
+    props = fben2(fck=fck, ls=ls, loadtype=loadtype, TypeConc=TypeConc,
+                  time=time)
+    if isinstance(fct_eff, str):
+        if fct_eff not in SERVICE_FCT_SOURCES:
+            raise ValueError(
+                f"unknown effective tensile strength {fct_eff!r}; "
+                f"name one of {SERVICE_FCT_SOURCES} or give a value "
+                f"in MPa.  The choice moves the cracking moment and "
+                f"is the model's to make."
+            )
+        value = float(getattr(props, fct_eff))
+    else:
+        value = float(fct_eff)
+    return ServiceConcrete(
+        fcm=float(props.fcm), Ecm=float(props.ecm),
+        eps_c1=float(props.eps_c1), eps_cu1=float(props.eps_cu1),
+        fct_eff=value, reference_age=float(time),
+        name=f"service C{fck:g} @ {time:g} d")

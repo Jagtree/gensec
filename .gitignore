@@ -1,36 +1,10 @@
-# Python
 __pycache__/
-*.py[cod]
+*.pyc
+.pytest_cache/
+*.bundle
+# Written by an editable install (pip install -e / uv pip install -e).
+# Untracked build metadata, not source: without this line every
+# session that installs the package leaves the worktree dirty, and
+# archive_currency reports a modification nobody made.
 *.egg-info/
-dist/
-build/
-*.egg
-
-# Virtual environments
 .venv/
-venv/
-
-# uv
-uv.lock
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# docs
-docs/build/
-docs/_build/
-
-# GenSec outputs
-results/
-*.png
-!examples/*.png
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Other
-*.prof

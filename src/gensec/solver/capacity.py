@@ -58,6 +58,100 @@ def _feas_tol(N_target):
     return max(_FEAS_ABS_TOL, _FEAS_REL_TOL * abs(N_target))
 
 
+# --- Batch memory budget -------------------------------------------
+#: Largest number of ``(config, fibre)`` elements a single
+#: :meth:`~gensec.solver.integrator.FiberSolver.integrate_batch` call
+#: may materialise, per array.
+#:
+#: ``integrate_batch`` builds dense ``(n_configs, n_fibers)`` arrays of
+#: ``float64`` and holds several of them live at once — strain, stress
+#: and fibre force at the peak.  Measurement on a 20 000-fibre section
+#: gives 0.458 MiB of resident memory per configuration, against
+#: 0.469 MiB predicted for three such arrays, so **three** is the
+#: multiplier to reason with.  At the budget below, one chunk therefore
+#: costs about
+#:
+#: .. math::
+#:
+#:    3 \cdot 12 \cdot 10^{6} \cdot 8\ \text{bytes} \approx 275\ \text{MiB}
+#:
+#: irrespective of how finely the section is meshed or how many
+#: configurations the caller asked for.  That independence is the whole
+#: point: before this budget existed, the peak was set by the input
+#: document, and two distributed examples asked for about 6.4 GiB and
+#: were killed by the kernel with ``SIGKILL``.
+MAX_BATCH_ELEMENTS = 12_000_000
+
+
+def max_configs_for(n_fibers):
+    r"""Configurations per integration chunk for a given fibre count.
+
+    Parameters
+    ----------
+    n_fibers : int
+        Number of fibres the section integrates over.
+
+    Returns
+    -------
+    int
+        :math:`\max(1, \text{MAX\_BATCH\_ELEMENTS} / n_{\text{fibers}})`.
+
+    Notes
+    -----
+    The floor is **one configuration**, not a comfortable minimum
+    batch.  A floor chosen for throughput would override the budget on
+    exactly the sections where the budget matters — the very finely
+    meshed ones — which would make the bound a suggestion rather than a
+    bound.  A section so fine that one configuration exceeds the budget
+    is still integrated, one configuration at a time, and pays in time
+    rather than in being killed.
+    """
+    return max(1, MAX_BATCH_ELEMENTS // max(int(n_fibers), 1))
+
+
+def _integrate_chunked(solver, eps0, chi_x, chi_y):
+    r"""Integrate a batch in chunks that respect the memory budget.
+
+    A pass-through to
+    :meth:`~gensec.solver.integrator.FiberSolver.integrate_batch` when
+    the batch already fits, and a loop over slices when it does not.
+
+    Parameters
+    ----------
+    solver : gensec.solver.integrator.FiberSolver
+        The solver whose section fixes the fibre count.
+    eps0, chi_x, chi_y : numpy.ndarray
+        One entry per configuration.
+
+    Returns
+    -------
+    N, Mx, My : numpy.ndarray
+        Stress resultants, one entry per configuration [N], [N·mm].
+
+    Notes
+    -----
+    Each configuration is integrated independently of every other, so
+    slicing the batch changes the order of allocation and nothing else:
+    the returned values are bit-identical to those of a single call.
+    This is what makes the chunking a change of memory schedule rather
+    than of physics, and it is asserted directly in
+    ``tests/test_phase35_batch_chunking.py``.
+    """
+    total = len(eps0)
+    cap = max_configs_for(solver.sec.n_fibers)
+    if total <= cap:
+        return solver.integrate_batch(eps0, chi_x, chi_y)
+
+    N = np.empty(total)
+    Mx = np.empty(total)
+    My = np.empty(total)
+    for s in range(0, total, cap):
+        e = min(s + cap, total)
+        N[s:e], Mx[s:e], My[s:e] = solver.integrate_batch(
+            eps0[s:e], chi_x[s:e], chi_y[s:e])
+    return N, Mx, My
+
+
 # --- Mx-My domain degeneracy ---------------------------------------
 # The interaction domain is declared collapsed (axial limit, M_Rd ~ 0)
 # when its outer radius falls below this fraction of a section plastic
@@ -65,6 +159,57 @@ def _feas_tol(N_target):
 # gap between a real domain (~1e8 N*mm) and limit noise (<=1e3 N*mm)
 # makes the exact coefficient non-critical.
 _DOMAIN_DEGEN_FRAC = 1.0e-3
+
+
+def _ultimate_by_group(sv, eb, er, et, band=0.99):
+    r"""
+    Has any element passed **its own** limit? (N-2, Phase 16.)
+
+    Parameters
+    ----------
+    sv : FiberSolver
+    eb, er, et : numpy.ndarray
+        Bulk, rebar and tendon strains, each already at the argument its
+        own constitutive law is evaluated at, shaped
+        ``(n_points, n_k)``.  An absent class is passed as
+        ``(n_points, 0)``.
+    band : float, optional
+        Fraction of the limit at which the event is declared.  Kept at
+        the historical ``0.99`` so that what changes is *which*
+        comparison is made, not *how close* it must get.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean, shape ``(n_points,)``.
+
+    Notes
+    -----
+    Until Phase 16 the criterion pooled bulk and rebar into a single
+    array and compared its minimum against the **concrete** crushing
+    strain and its maximum against the pool's largest limit, which on a
+    reinforced section is the **steel's**; the tendons did not enter at
+    all.  A tendon carries :math:`\varepsilon_{pe}` on top of the
+    section strain, so it is the element closest to its own limit at
+    every curvature, and it was the one nobody asked.
+
+    Per **group**, not per class: two bulk zones of different concrete
+    have different crushing strains and the tighter is not the limit of
+    the looser.  The groups and their limits come from
+    :meth:`~gensec.solver.integrator.FiberSolver.element_limit_groups`.
+    """
+    arrays = {"bulk": eb, "rebar": er, "tendon": et}
+    hit = np.zeros(eb.shape[0], dtype=bool)
+    for kind, idx, emin, emax in sv.element_limit_groups():
+        arr = arrays[kind]
+        if arr.shape[1] == 0 or len(idx) == 0:
+            continue
+        sub = arr[:, idx]
+        if emin < 0.0:
+            hit |= sub.min(axis=1) <= emin * band
+        if emax > 0.0:
+            hit |= sub.max(axis=1) >= emax * band
+    return hit
 
 
 class NMDiagram:
@@ -134,6 +279,27 @@ class NMDiagram:
         for r in sec.rebars:
             emin_g = min(emin_g, r.material.eps_min)
             emax_g = max(emax_g, r.material.eps_max)
+        # --- Tendons (N-14) ---
+        # The envelope is the range of *section* strain the sweep must
+        # cover, so a tendon's own limits enter it shifted by the
+        # locked-in strain its law is evaluated on top of:
+        #
+        #     eps_p = eps_sec + eps_init   =>   eps_sec = eps_p - eps_init
+        #
+        # Before this, the envelope walked bulk and rebar only while its
+        # accessor's docstring promised "all materials".  On a section
+        # with strands and no ordinary rebar -- a hollow-core or
+        # double-tee slab -- ``emax_g`` collapsed to the bulk's tensile
+        # limit, i.e. the tensile half of the sweep did not exist and the
+        # N-M domain was computed over a range no tendon could reach.
+        # Phase 16 gave the *criterion* one home
+        # (``FiberSolver.element_limit_groups``); this is the *domain*
+        # the criterion is applied over, and it was still blind.
+        for _mat, _bulk_mat, _idx, eps_init in solver._tendon_groups:
+            e0_min = float(np.min(eps_init))
+            e0_max = float(np.max(eps_init))
+            emin_g = min(emin_g, float(_mat.eps_min) - e0_max)
+            emax_g = max(emax_g, float(_mat.eps_max) - e0_min)
         self._emg = emin_g        # eps_min_global
         self._exg = emax_g        # eps_max_global
         self._emb = b.eps_min     # eps_min_bulk (crush)
@@ -141,13 +307,44 @@ class NMDiagram:
         self._fcd_bulk = getattr(b, 'fcd', None)  # design strength [N/mm²]
 
         # ----- cached lever arms -----
+        # --- Tendons (N-16) ---
+        # The lever-arm arrays are the SCAN HULL: every consumer
+        # projects them onto a curvature direction and divides the
+        # strain envelope by the resulting depth,
+        #
+        #     span(theta) = max_i p_i - min_i p_i,
+        #     p_i         = ly_i cos(theta) - lx_i sin(theta),
+        #     chi_max     = (eps_max_global - eps_min_bulk) / span,
+        #
+        # so an element missing from the hull is an element the sweep
+        # believes the section does not have to reach.  Before this,
+        # the hull walked bulk fibres and rebars only.  An *embedded*
+        # tendon lies inside the fibre hull and changes nothing; a
+        # *non-embedded* one -- an external tendon deviated below the
+        # soffit -- can lie outside it, and then the span is short and
+        # chi_max correspondingly too large.  Measured on
+        # ``examples/example_external_tendon.yaml``: span 594 mm where
+        # the geometry supports 747 mm, chi_max too large by exactly
+        # 747/594 = 1.257576.
+        #
+        # This is the twin of N-14 in the same constructor and shares
+        # its cause: a section-wide quantity assembled from two of the
+        # three element classes.  N-14 was the strain ENVELOPE
+        # (numerator); this is the projected DEPTH (denominator).
+        # Every tendon is included, embedded or not: the embedded case
+        # is a numeric no-op by construction, and enumerating all
+        # three classes unconditionally is the same contract
+        # ``FiberSolver.element_limit_groups`` has carried since
+        # Phase 16.
         self._all_lx = np.concatenate([
             sec.x_fibers - solver.x_ref,
             sec.x_rebars - solver.x_ref,
+            sec.x_tendons - solver.x_ref,
         ])
         self._all_ly = np.concatenate([
             sec.y_fibers - solver.y_ref,
             sec.y_rebars - solver.y_ref,
+            sec.y_tendons - solver.y_ref,
         ])
 
         # ----- cached rebar yield strains -----
@@ -716,13 +913,14 @@ class NMDiagram:
             all_chi_x[s:e] = chi * cos_t
             all_chi_y[s:e] = chi * sin_t
 
-        # Chunked integration to limit memory usage.
-        # Peak per chunk: 4 live (n, n_fibers) matrices inside
-        # integrate_batch (strain, stress, force, moment-temp).
-        # At 12M elements ÷ n_fibers configs, each matrix is ~96 MB,
-        # giving ~400 MB true peak per chunk.
-        n_fibers = self.solver.sec.n_fibers
-        max_configs = max(500, 12_000_000 // max(n_fibers, 1))
+        # Chunked integration to limit memory usage.  The cap and the
+        # budget behind it live in one place, :func:`max_configs_for`,
+        # so that this path and the fixed-N Newton solve cannot drift
+        # apart.  The floor differs from the one written here before
+        # Phase 35: it was 500 configurations, which overrode the
+        # budget on finely meshed sections and so removed the bound
+        # exactly where it was needed.
+        max_configs = max_configs_for(self.solver.sec.n_fibers)
 
         all_N = np.empty(total)
         all_Mx = np.empty(total)
@@ -827,6 +1025,13 @@ class NMDiagram:
         :math:`|N - N_{\text{fixed}}| < \text{tol}`, avoiding
         unnecessary batch calls when convergence is fast.
 
+        Both calls go through :func:`_integrate_chunked`, so neither
+        the residual nor the Jacobian can materialise more than
+        :data:`MAX_BATCH_ELEMENTS` elements at a time.  Chunking the
+        Jacobian matters as much as chunking the residual: the
+        perturbed batch is the same size as the active set, so bounding
+        only the first would leave the peak untouched.
+
         Parameters
         ----------
         N_fixed : float
@@ -878,8 +1083,8 @@ class NMDiagram:
             idx = np.nonzero(active)[0]
             if idx.size == 0:
                 break
-            Na, Mxa, Mya = sv.integrate_batch(
-                eps0[idx], chi_x_arr[idx], chi_y_arr[idx])
+            Na, Mxa, Mya = _integrate_chunked(
+                sv, eps0[idx], chi_x_arr[idx], chi_y_arr[idx])
             N_arr[idx], Mx_arr[idx], My_arr[idx] = Na, Mxa, Mya
 
             residual = Na - N_fixed
@@ -887,8 +1092,8 @@ class NMDiagram:
             todo = ~conv
             if todo.any():
                 sub = idx[todo]
-                N_pert, _, _ = sv.integrate_batch(
-                    eps0[sub] + delta, chi_x_arr[sub], chi_y_arr[sub])
+                N_pert, _, _ = _integrate_chunked(
+                    sv, eps0[sub] + delta, chi_x_arr[sub], chi_y_arr[sub])
                 dNde = (N_pert - Na[todo]) / delta
                 good = np.abs(dNde) > 1.0
                 step = np.zeros_like(dNde)
@@ -1390,6 +1595,10 @@ class NMDiagram:
             if not conv[j]:
                 continue
             eb, er = sv.strain_field(eps0_arr[j], cx[j], cy[j])
+            # The ultimate is a material limit, so the bulk is measured
+            # at the argument its law reads (F-M3); the rebar is not,
+            # its law reads the section strain.
+            eb = eb + sv.bulk_strain_offset()
             all_eps = (np.concatenate([eb, er])
                        if len(er) > 0 else eb)
 
@@ -1491,38 +1700,11 @@ class NMDiagram:
                 chi_max = (abs(self._emb) / (d_max * 0.3) * 1.5
                            if d_max > 0 else 1e-4)
 
-        # Cracking strain: the first-cracking event is detected when
-        # the extreme bulk tensile strain reaches :math:`\varepsilon_{cr}`.
-        # Sourcing chain (first hit wins):
-        #
-        # 1. EC2 properties object (``bulk.ec2``, attached by the
-        #    ``concrete_ec2_gen1`` builders): :math:`f_{ctm}/E_{cm}`.
-        #    Kept first because the **mean** values are the appropriate
-        #    model for the first-cracking serviceability event on the
-        #    uncracked section — independently of whether the *design*
-        #    constitutive law models tension (``enable_tension``).
-        # 2. The bulk material's own declared tensile law: a custom
-        #    :class:`~gensec.materials.concrete.Concrete` with
-        #    ``fct > 0`` and ``Ec > 0`` exposes
-        #    ``eps_ct = fct / Ec``.  By definition this is the cracking
-        #    model the user intends (whether they fed mean or design
-        #    values is their declaration).
-        # 3. Neither available (e.g. ``fct = 0``): there is genuinely
-        #    no cracking information — detection is skipped and the
-        #    ``cracking_*`` outputs stay ``None`` (no marker), which is
-        #    honest rather than a silent guess.
-        eps_cr = None
-        bulk = sec.bulk_material
-        ec2_obj = getattr(bulk, 'ec2', None)
-        if ec2_obj is not None:
-            fctm = getattr(ec2_obj, 'fctm', None)
-            ecm = getattr(ec2_obj, 'ecm', None)
-            if fctm is not None and ecm is not None and ecm > 0:
-                eps_cr = fctm / ecm
-        if eps_cr is None:
-            eps_ct = getattr(bulk, 'eps_ct', None)
-            if eps_ct is not None and eps_ct > 0:
-                eps_cr = float(eps_ct)
+        # Cracking strain, resolved **per bulk zone** (F-M1).  See
+        # :meth:`_cracking_strain_field` for the sourcing chain and for
+        # why the threshold cannot be a single number on a section that
+        # has more than one concrete.
+        eps_cr = self._cracking_strain_field(sec)
 
         # Scan both positive and negative curvature
         results_pos = self._scan_chi_vectorized(
@@ -1582,6 +1764,113 @@ class NMDiagram:
             "diagnostics_pos": results_pos.get("diagnostics"),
             "diagnostics_neg": results_neg.get("diagnostics"),
         }
+
+    # ------------------------------------------------------------------
+    # Cracking threshold — one per bulk zone
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _zone_cracking_strain(material):
+        r"""
+        Mean cracking strain of one bulk material.
+
+        Sourcing chain, first hit wins:
+
+        1. the EC2 properties object (``material.ec2``, attached by the
+           ``concrete_ec2_gen1`` builders): :math:`f_{ctm}/E_{cm}`.
+           Kept first because the **mean** values are the appropriate
+           model for the first-cracking serviceability event on the
+           uncracked section — independently of whether the *design*
+           constitutive law models tension (``enable_tension``);
+        2. the material's own declared tensile law: a custom
+           :class:`~gensec.materials.concrete.Concrete` with
+           ``fct > 0`` and ``Ec > 0`` exposes
+           :math:`\varepsilon_{ct} = f_{ct}/E_c`.  By definition this
+           is the cracking model the user intends — whether they fed
+           mean or design values is their declaration;
+        3. neither available (e.g. ``fct = 0``): this material carries
+           no cracking information.  ``None`` is returned rather than a
+           guess.
+
+        Parameters
+        ----------
+        material : Material
+            A bulk material.
+
+        Returns
+        -------
+        float or None
+            :math:`\varepsilon_{cr}`, or ``None`` when the material
+            declares no cracking information.
+        """
+        ec2_obj = getattr(material, 'ec2', None)
+        if ec2_obj is not None:
+            fctm = getattr(ec2_obj, 'fctm', None)
+            ecm = getattr(ec2_obj, 'ecm', None)
+            if fctm is not None and ecm is not None and ecm > 0:
+                return float(fctm) / float(ecm)
+        eps_ct = getattr(material, 'eps_ct', None)
+        if eps_ct is not None and eps_ct > 0:
+            return float(eps_ct)
+        return None
+
+    def _cracking_strain_field(self, sec):
+        r"""
+        Per-fiber cracking threshold for the whole bulk mesh.
+
+        A cross-section with a cast sequence has more than one
+        concrete: the zone cast later is a different mix at a different
+        age, hence a different :math:`f_{ctm}` and a different
+        :math:`E_{cm}`.  Resolving a single :math:`\varepsilon_{cr}`
+        from ``sec.bulk_material`` — zone 0 — and comparing it against
+        the pooled fibres of every zone therefore asks the wrong
+        question of every fibre outside zone 0 (**F-M1**).  On the
+        C45 + C30 composite of ``example_composite_topping`` the
+        threshold applied to the topping was 18.6 % too high, and the
+        resulting cracking moment non-conservative.
+
+        Each zone is resolved independently through
+        :meth:`_zone_cracking_strain` and broadcast onto its own
+        fibres via :attr:`~gensec.geometry.GenericSection.mat_indices`.
+        A zone that declares no cracking information gets
+        :math:`+\infty`, which never triggers: its silence is confined
+        to its own fibres instead of suppressing detection for the
+        whole section.
+
+        Parameters
+        ----------
+        sec : GenericSection
+
+        Returns
+        -------
+        numpy.ndarray or None
+            Threshold per bulk fiber, shape ``(n_fibers,)``.  ``None``
+            when **no** zone declares cracking information — the
+            honest case, in which no marker is drawn and the diagnosis
+            reports ``no_ec2_properties``.
+        """
+        materials = [sec.bulk_material] + [
+            entry[1] for entry in sec.bulk_materials]
+        per_zone = [self._zone_cracking_strain(m) for m in materials]
+        if all(value is None for value in per_zone):
+            return None
+
+        # ``mat_indices`` and ``bulk_materials`` are declared attributes
+        # of :class:`~gensec.geometry.GenericSection`, so they are read
+        # directly: a ``getattr`` default here could never fire and
+        # would only hide a section that violated its own contract.
+        mat_indices = np.asarray(sec.mat_indices, dtype=int)
+        table = np.array(
+            [np.inf if value is None else value for value in per_zone],
+            dtype=float)
+        if mat_indices.size and int(mat_indices.max()) >= table.size:
+            raise ValueError(
+                f"mat_indices references zone "
+                f"{int(mat_indices.max())} but only {table.size} bulk "
+                f"materials are declared; the zone map and the material "
+                f"list disagree."
+            )
+        return table[mat_indices]
 
     # ------------------------------------------------------------------
     # METHOD 1 — _scan_chi  (fallback)
@@ -1695,17 +1984,37 @@ class NMDiagram:
             Ms[k] = M
             eps0_guess = eps0  # warm-start
 
-            # Track extreme strains
+            # Track extreme strains.  The bulk is measured at the
+            # argument its own law reads — cracking, crushing and the
+            # ultimate are all material properties (F-M3) — and the
+            # rebar at the section strain, which is what its law reads.
+            # The two scan methods must not be able to disagree about
+            # an event, so this line mirrors the vectorized one exactly.
             eb, er = sv.strain_field(eps0, chi_x, chi_y)
+            eb = eb + sv.bulk_strain_offset()
             all_eps = (np.concatenate([eb, er])
                        if len(er) > 0 else eb)
             eps_mins[k] = all_eps.min()
             eps_maxs[k] = all_eps.max()
+            # The tendon at its own argument, eps_sec + eps_init (N-2).
+            # ``eps_min``/``eps_max`` above stay the bulk+rebar extremes
+            # they have always been: they are a reported diagnostic with
+            # downstream consumers, and what had to change is the
+            # criterion, not the report.
+            if sv._has_tendons:
+                et_row = (sv._tendon_section_strain(eps0, chi_x, chi_y)
+                          + sv._eps_init_tendon)[None, :]
+            else:
+                et_row = np.empty((1, 0), dtype=float)
 
             # Detect first cracking
             if (cracking_chi is None and eps_cr is not None
                     and abs(chi) > 0):
-                if eb.max() >= eps_cr:
+                # ``eps_cr`` is a per-fiber field on a multi-zone
+                # section and a scalar on a single-material one; the
+                # elementwise comparison covers both, and the two scan
+                # methods must not be able to disagree about an event.
+                if np.any(eb >= eps_cr):
                     cracking_chi = chi
                     cracking_M = M
 
@@ -1719,10 +2028,13 @@ class NMDiagram:
                     yield_chi = chi
                 yield_M = M
 
-            # Detect ultimate
+            # Detect ultimate.  Every element class against its OWN
+            # limits, through the solver's single home (N-2).  The two
+            # scan methods must not be able to disagree about an event,
+            # so both go through ``_ultimate_by_group``.
             if ultimate_chi is None and abs(chi) > 0:
-                if (all_eps.min() <= emb * 0.99
-                        or all_eps.max() >= exg * 0.99):
+                if bool(_ultimate_by_group(
+                        sv, eb[None, :], er[None, :], et_row)[0]):
                     ultimate_chi = chi
                     ultimate_M = M
 
@@ -1879,13 +2191,30 @@ class NMDiagram:
         #
         # Bulk: ε_b[k, i] = ε₀[k] + χ_x[k]·ly[i] − χ_y[k]·lx[i]
         # Shape: (n_points, n_bulk_fibers)
+        #
+        # Every criterion below — cracking, crushing, ultimate — is a
+        # property of the MATERIAL, so it must be asked of the strain
+        # the material's own law is evaluated at: the section strain
+        # plus the zone's imposed-strain field (``bulk_eps_init`` and
+        # the locked-in plane of ``bulk_planes``).  On a staged section
+        # the casting datum alone is of the order of ε_cr, so the
+        # difference is not rounding (F-M3, ``handoff/14_1`` §5).  The
+        # offset is asked of the solver rather than re-derived here:
+        # ``strains_within_limits`` already reads it that way, and two
+        # definitions of "the strain in this fibre" inside one solver
+        # is one home too many.  On a section with no planes the
+        # accessor returns the plain scalar and the arithmetic is
+        # unchanged.
         eb = (eps0_arr[:, None]
             + chi_x_arr[:, None] * sv._ly_bulk[None, :]
-            - chi_y_arr[:, None] * sv._lx_bulk[None, :])
+            - chi_y_arr[:, None] * sv._lx_bulk[None, :]
+            + sv.bulk_strain_offset())
 
         n_rebars = len(sv.sec.y_rebars)
         if n_rebars > 0:
-            # Rebar: ε_r[k, i] = ε₀[k] + χ_x[k]·ly_r[i] − χ_y[k]·lx_r[i]
+            # Rebar: ε_r[k, i] = ε₀[k] + χ_x[k]·ly_r[i] − χ_y[k]·lx_r[i].
+            # No offset: the steel's own law reads the section strain,
+            # and the concrete's imposed field is the concrete's.
             er = (eps0_arr[:, None]
                 + chi_x_arr[:, None] * sv._ly_rebar[None, :]
                 - chi_y_arr[:, None] * sv._lx_rebar[None, :])
@@ -1897,6 +2226,17 @@ class NMDiagram:
 
         eps_mins = all_eps.min(axis=1)
         eps_maxs = all_eps.max(axis=1)
+
+        # Tendon strain at its own argument (N-2).  Built beside the
+        # pool rather than folded into it: the pooled extremes are a
+        # reported diagnostic with consumers of their own.
+        if sv._has_tendons:
+            et = (eps0_arr[:, None]
+                  + chi_x_arr[:, None] * sv._ly_tendon[None, :]
+                  - chi_y_arr[:, None] * sv._lx_tendon[None, :]
+                  + sv._eps_init_tendon[None, :])
+        else:
+            et = np.empty((n_points, 0), dtype=np.float64)
 
         # --- 6. Vectorized event detection ---
         #
@@ -1918,28 +2258,44 @@ class NMDiagram:
             "n_points": int(n_points),
             "n_converged": int(converged.sum()),
             "cracking_reason": None,
+            "cracking_zone": None,
             "ultimate_reason": None,
         }
 
         eb_max = eb.max(axis=1)
 
-        # 6a. Cracking: first step where max bulk tensile strain >= eps_cr.
+        # 6a. Cracking: first step where **some fiber** reaches the
+        #     threshold **of its own zone** (F-M1).  ``eps_cr`` is a
+        #     per-fiber field, so the comparison is elementwise and the
+        #     margin ``eb - eps_cr`` is what carries the event; a
+        #     scalar is still accepted and broadcasts, which keeps the
+        #     single-material call sites unchanged.
         if eps_cr is None:
             diagnostics["cracking_reason"] = "no_ec2_properties"
         else:
-            crack_mask = valid & (eb_max >= eps_cr)
+            eps_cr_arr = np.atleast_1d(np.asarray(eps_cr, dtype=float))
+            margin = eb - eps_cr_arr[None, :]
+            margin_max = margin.max(axis=1)
+            crack_mask = valid & (margin_max >= 0.0)
             if np.any(crack_mask):
                 k = int(np.argmax(crack_mask))
                 cracking_chi = float(chis[k])
                 cracking_M = float(Ms[k])
+                # Which zone cracked first is the diagnosis a reader
+                # needs on a composite section: the marker alone does
+                # not say whose concrete it belongs to.
+                if eps_cr_arr.size > 1:
+                    diagnostics["cracking_zone"] = int(
+                        np.asarray(sv.sec.mat_indices)[
+                            int(np.argmax(margin[k]))])
             else:
                 # Distinguish a physically uncracked section (bulk never
                 # reaches tension within the scanned range, e.g. high
                 # compression) from a convergence / window failure.
-                reached = eb_max[valid]
+                reached = margin_max[valid]
                 if reached.size == 0:
                     diagnostics["cracking_reason"] = "no_convergence"
-                elif reached.max() < eps_cr:
+                elif reached.max() < 0.0:
                     diagnostics["cracking_reason"] = "no_tension_in_range"
                 else:
                     diagnostics["cracking_reason"] = "below_threshold"
@@ -1955,8 +2311,7 @@ class NMDiagram:
 
         # 6c. Ultimate: first step where any strain limit is reached,
         #     eps_min <= eps_cu * 0.99  or  eps_max >= eps_max_global * 0.99.
-        ult_mask = valid & (
-            (eps_mins <= emb * 0.99) | (eps_maxs >= exg * 0.99))
+        ult_mask = valid & _ultimate_by_group(sv, eb, er, et)
         if np.any(ult_mask):
             k = int(np.argmax(ult_mask))
             ultimate_chi = float(chis[k])
@@ -2032,12 +2387,26 @@ class NMDiagram:
         Notes
         -----
         Memory budget: the Newton solve operates on flat arrays of
-        length :math:`n_\text{angles} \times n_\chi`.  If this exceeds
-        the internal chunking threshold of :meth:`integrate_batch`
-        (:math:`\approx 50\,000\,000 / n_\text{fibers}`), the batch
-        is automatically split by the solver.  The per-angle strain
-        field is always :math:`n_\chi \times n_\text{fibers}`, safely
-        below budget.
+        length :math:`n_\text{angles} \times n_\chi`, and the strain
+        field it materialises is
+        :math:`(n_\text{angles} \cdot n_\chi) \times n_\text{fibers}`
+        — not :math:`n_\chi \times n_\text{fibers}`, because the scan
+        is solved across all angles at once.
+
+        That product is bounded by :func:`max_configs_for`, which
+        splits the batch into chunks of at most
+        :data:`MAX_BATCH_ELEMENTS` elements each.  The bound holds
+        whatever the caller asks for, so the peak is set by the budget
+        and not by the input document.
+
+        Before Phase 35 this note claimed the splitting happened
+        inside :meth:`integrate_batch`.  It never did: that method
+        allocates in one call, and the chunking the note described
+        belonged to :meth:`_mega_batch_integrate`, on the
+        resistance-surface path.  The consequence was measured rather
+        than argued — ``examples/example_prestress.yaml`` and
+        ``examples/example_staged_injection.yaml`` asked for about
+        6.4 GiB here and were killed by the kernel with ``SIGKILL``.
         """
         if n_angles < 3:
             raise ValueError(
@@ -2131,10 +2500,13 @@ class NMDiagram:
             cy = flat_chi_y[s:e]
             mags = flat_chi_mag[s:e]
 
-            # Bulk strains: (n_chi, n_bulk)
+            # Bulk strains: (n_chi, n_bulk), at the argument the bulk
+            # law is evaluated at — the ultimate is a material limit
+            # (F-M3).
             eb_i = (e0[:, None]
                     + cx[:, None] * sv._ly_bulk[None, :]
-                    - cy[:, None] * sv._lx_bulk[None, :])
+                    - cy[:, None] * sv._lx_bulk[None, :]
+                    + sv.bulk_strain_offset())
 
             n_rebars = len(sv.sec.y_rebars)
             if n_rebars > 0:

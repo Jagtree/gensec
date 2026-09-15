@@ -58,7 +58,7 @@ def _ec2_section():
     EC2 concrete provides fctm/Ecm → cracking detection is active.
     """
     concrete = concrete_from_class("C25/30", ls="F", loadtype="slow",
-                                   TypeConc="R")
+                                   TypeConc="R", NA='French', time=28)
     steel = Steel(fyk=450.0)
     As = np.pi / 4 * 16 ** 2
     rb = [
@@ -73,7 +73,7 @@ def _plain_section():
     """
     300×500 with basic Concrete (no .ec2 attribute) → no cracking detection.
     """
-    concrete = Concrete(fck=25.0)
+    concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450.0)
     As = np.pi / 4 * 16 ** 2
     rb = [
@@ -86,7 +86,7 @@ def _plain_section():
 
 def _biaxial_section():
     """300×500 with 4 corner bars — biaxial fixture."""
-    concrete = Concrete(fck=30.0)
+    concrete = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450.0)
     As = np.pi / 4 * 20 ** 2
     rb = [

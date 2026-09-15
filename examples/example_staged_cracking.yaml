@@ -1,0 +1,175 @@
+# =====================================================================
+#  GenSec - first cracking ON A STAGED SECTION.
+#
+#  Why this example is distributed
+#  ------------------------------------------------------------------
+#  Defect N-3 (ledger ``18_0`` section 4): of the three distributed
+#  models carrying a ``construction_history``, **none** reaches a
+#  cracking event on the materialised stage view.  The cause, measured
+#  in Phase 19, is sharper than "no example cracks": every
+#  ``staged_mchi[...].cracking_reason_*`` key of those three models
+#  reads ``no_ec2_properties``.  Their concretes are declared with
+#  ``type: concrete`` (fck given directly), so no EC2 property object
+#  exists, so the first-cracking marker has no
+#  :math:`\varepsilon_{cr} = f_{ctm} / E_{cm}` to resolve.  The
+#  detector was never reached, let alone tested, on a staged section.
+#
+#  Loading the section harder would not have fixed that.  The fix is a
+#  class-based concrete in **both** zones, so that
+#  ``NMDiagram._cracking_strain_field`` resolves a per-zone threshold
+#  and F-M1 - each fibre compared against the threshold *of its own
+#  zone* - is exercised on a section whose zones also carry different
+#  locked-in datum planes.
+#
+#  What it exercises that no other model does
+#  ------------------------------------------------------------------
+#  * a cracking event detected on a **materialised stage view**, i.e.
+#    on fibres whose argument carries the per-zone casting datum
+#    (the "mechanical vs sectional strain" distinction of F-M3);
+#  * two zones with **different** f_ctm / E_cm, so
+#    ``cracking_zone_*`` is a discriminating output rather than a
+#    constant: measured here as zone 1 (topping) for positive
+#    curvature and zone 0 (precast) for negative.
+#
+#  That the staging is load-bearing on the result, and not decoration,
+#  is a measurement rather than a claim.  Same section, same axial
+#  level, base section against materialised ``service`` view:
+#
+#      N =     0 kN, positive:  chi_cr  1.005e-07 -> 5.025e-08
+#                               M_cr    12.92 MN.mm -> 6.46 MN.mm
+#      N = -1000 kN, positive:  chi_cr  2.010e-07 -> 1.005e-07
+#
+#  The locked-in datum plane of the freshly cast topping **halves**
+#  the curvature at which its own threshold is reached.  A battery run
+#  on the base section only would report the un-staged number and call
+#  it the answer.
+#
+#  Also measured, and stated rather than glossed: the ``transfer`` and
+#  ``service`` views give **identical** cracking values here.  The
+#  datum planes are locked at the ``cast`` event, which precedes both
+#  anchors, and the G2 load between them changes the demand, not the
+#  section.  The two anchors are kept because the staged probe should
+#  walk more than one point; they are not offered as evidence that it
+#  discriminates between them.
+#
+#  It is deliberately the *same geometry* as
+#  ``example_composite_timeline.yaml``: the only substantive change is
+#  the constitutive declaration of the two concretes.  Keeping the
+#  geometry identical makes the pair a controlled comparison rather
+#  than two unrelated models.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+#  Document schema version (D7): mandatory for any document declaring
+#  ``zone_rheology``.  See handoff/13_0-GENSEC_DUMP_SCHEMA.md section 1.1.
+# ---------------------------------------------------------------------
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
+schema_version: 1
+
+materials:
+  # Class-based: fctm and Ecm come from EC2 Table 3.1 through the
+  # bridge, which is what gives the first-cracking marker a threshold.
+  # ``enable_tension: false`` is the default and is left alone on
+  # purpose: the DESIGN law models no tension, while the cracking
+  # marker uses the MEAN fctm/Ecm.  The two are independent, and this
+  # example is the one place that difference is visible on a staged
+  # section.
+  c_precast:
+    type: concrete_ec2_gen1
+    class: C45/55
+    ls: F
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
+  c_topping:
+    type: concrete_ec2_gen1
+    class: C30/37
+    ls: F
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
+  steel:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+
+section:
+  shape: rect
+  params:
+    B: 600
+    H: 1400
+  bulk_material: c_precast
+  mesh_size: 50
+  # Zone 1 = topping (top 200 mm).  Zone 0 = precast base (implicit).
+  material_zones:
+    - shape: custom
+      name: topping
+      material: c_topping
+      params:
+        exterior: [[0, 1200], [600, 1200], [600, 1400], [0, 1400]]
+  rebars:
+    - {name: A1, x: 60,  y: 60,   diameter: 26, material: steel}
+    - {name: A2, x: 540, y: 60,   diameter: 26, material: steel}
+    - {name: T1, x: 60,  y: 1340, diameter: 16, material: steel}
+    - {name: T2, x: 540, y: 1340, diameter: 16, material: steel}
+
+# ---------------------------------------------------------------------
+#  The rheological identity of each zone, declared once (P3).  No
+#  ``interval`` here integrates creep: the declaration exists so the
+#  casting datum of the topping is drawn on the substrate's SERVICE
+#  response rather than on the design law (Phase 12, datum
+#  unification: a design-law tangent leaves the substrate 29-41 % too
+#  soft).
+# ---------------------------------------------------------------------
+losses_models:
+  rheo_precast:
+    provider: ec2
+    fck: 45.0
+    cement_class: N
+    RH: 70.0
+  rheo_topping:
+    provider: ec2
+    fck: 30.0
+    cement_class: N
+    RH: 70.0
+
+zone_rheology:
+  base:    {model: rheo_precast, age: 28, curing: 3}
+  topping: {model: rheo_topping, age: 0,  curing: 3}
+
+demands:
+  - {name: G1, N_kN: -300, Mx_kNm: -220}   # precast self-weight
+  - {name: G2, Mx_kNm: -180}               # topping + superimposed dead
+  - {name: Q,  Mx_kNm: -260}               # variable
+
+construction_history:
+  - load:  {demand: G1}                    # precast carries its own weight
+  - cast:  {zone: topping, datum: auto}    # topping cast; datum computed
+  - point: transfer                        # composite just formed
+  - load:  {demand: G2}                    # dead load on the composite
+  - point: service                         # in-service permanent state
+
+combinations:
+  - name: ULS_composite
+    at: [transfer, service]
+    history_factors: {G1: 1.35, G2: 1.35}
+    gamma_P: favourable
+    components:
+      - {ref: Q, factor: 1.5}
+
+  - name: SLS_char
+    at: service
+    history_factors: {G1: 1.0, G2: 1.0}
+    components:
+      - {ref: Q, factor: 1.0}
+
+output:
+  verification_top_k: 10

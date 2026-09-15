@@ -36,8 +36,18 @@ from gensec.materials.rheology import (
 import os                                                        # noqa: E402
 import sys                                                       # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))))
+# The fixture is imported by bare name, so a directory that
+# actually contains it must be on sys.path.  Two candidates are
+# offered, nearest first: the directory holding this file (where
+# aci209_falsification.py lives) and the repository root (where an
+# earlier revision kept it).  Under pytest the tests package is
+# imported as 'tests.test_phase5_c5' and only the repository root
+# is placed on sys.path, so the repository-root insert alone loses
+# the whole module at collection time — on every platform.
+_FIXTURE_DIR = os.path.dirname(os.path.abspath(__file__))        # noqa: E402
+for _cand in (os.path.dirname(_FIXTURE_DIR), _FIXTURE_DIR):       # noqa: E402
+    if _cand not in sys.path:                                    # noqa: E402
+        sys.path.insert(0, _cand)                                # noqa: E402
 from aci209_falsification import ACIRheologicalModel              # noqa: E402
 from gensec.solver.losses import (
     EC2_LUMP_CHI, LossModel, compute_interval_losses, ec2_5106_closed_form,
@@ -68,9 +78,9 @@ def ec2_steel(ec2):
 def pt_beam():
     """A 600x1400 post-tensioned beam, one bonded tendon at y = 200."""
     b, h = 600.0, 1400.0
-    conc = concrete_from_class("C35/45", ls="S")
+    conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
     ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
-                            Ep=195000.0)
+                            Ep=195000.0, ls='F', NA='EC2', eps_ud_factor=0.9, diagram='horizontal')
     ps.ec2.relaxation_class, ps.ec2.rho_1000 = 2, 2.5
     t = Tendon(y=200.0, x=b / 2, Ap=2000.0, material=ps,
                eps_pe=1200.0 / 195000.0, bonded=True, embedded=True,
@@ -354,7 +364,7 @@ class TestNullAndSign:
         b, h = 600.0, 1400.0
         sec = GenericSection(
             polygon=Polygon([(0, 0), (b, 0), (b, h), (0, h)]),
-            bulk_material=concrete_from_class("C35/45", ls="S"),
+            bulk_material=concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28),
             rebars=[], tendons=[], mesh_size=50.0)
         return sec, StagedDomainManager(sec, biaxial=False).initial_state()
 
@@ -397,12 +407,12 @@ class TestBoltzmannSuperposition:
         common = dict(demand=(0.0, -800e6, 0.0), zone_ages_t0={0: 28.0},
                       zone_ages_t={0: INF}, zone_curing_ages={0: 7.0},
                       tendon_ages_t0={"T1": 0.0}, interval_days=INF - 28.0)
-        _o, tr1, _h, _r = expand_losses(
+        _o, tr1, _h, _hd, _r = expand_losses(
             sec, st, models={0: LossModel(provider=prov)}, **common)
         base = tr1[0].d_sigma_p["T1"]
         cuts = sorted({round((INF - 28.0) * 10 ** (-3 + 3 * k / 8), 4)
                        for k in range(1, 8)})
-        _o, tr, _h, _r = expand_losses(
+        _o, tr, _h, _hd, _r = expand_losses(
             sec, st, models={0: LossModel(provider=prov, steps=cuts)},
             **common)
         tot = sum(r.d_sigma_p["T1"] for r in tr)
@@ -418,9 +428,9 @@ class TestBoltzmannSuperposition:
         common = dict(demand=(0.0, -800e6, 0.0), zone_ages_t0={0: 28.0},
                       zone_ages_t={0: INF}, zone_curing_ages={0: 7.0},
                       tendon_ages_t0={"T1": 0.0}, interval_days=INF - 28.0)
-        _o, tr1, _h, _r = expand_losses(
+        _o, tr1, _h, _hd, _r = expand_losses(
             sec, st, models={0: LossModel(provider=prov)}, **common)
-        _o, tr, _h, _r = expand_losses(
+        _o, tr, _h, _hd, _r = expand_losses(
             sec, st, models={0: LossModel(provider=prov,
                                           steps=[100.0, 1000.0, 10000.0])},
             **common)
@@ -554,9 +564,7 @@ class TestTimelineC5:
         from gensec.solver.timeline import ConstructionTimeline
         sec = flagship["section"]
         ddb = {d["name"]: d for d in flagship["demands"]}
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         res = tl.resolve(sec, ddb)
         assert len(res.losses_ops) == 3
         for ops in res.losses_ops.values():
@@ -566,9 +574,7 @@ class TestTimelineC5:
         from gensec.solver.timeline import ConstructionTimeline
         sec = flagship["section"]
         ddb = {d["name"]: d for d in flagship["demands"]}
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         res = tl.resolve(sec, ddb)
         combo = [c for c in flagship["combinations"]
                  if c["name"] == "ULS_composite"][0]
@@ -588,9 +594,7 @@ class TestTimelineC5:
         from gensec.solver.timeline import ConstructionTimeline
         sec = flagship["section"]
         ddb = {d["name"]: d for d in flagship["demands"]}
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         res = tl.resolve(sec, ddb)
         last = res.losses_trace[max(res.losses_trace)][0]
         assert last.phi[1] > last.phi[0]
@@ -748,9 +752,9 @@ class TestStressedNotGrouted:
         from gensec.solver.losses import LossModel
         from gensec.solver.timeline import ConstructionTimeline
         b, h = 600.0, 1000.0
-        conc = concrete_from_class("C35/45", ls="S")
+        conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
         ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
-                                Ep=195000.0)
+                                Ep=195000.0, ls='F', NA='EC2', eps_ud_factor=0.9, diagram='horizontal')
         t = Tendon(y=850.0, x=b / 2, Ap=600.0, material=ps,
                    eps_pe=900.0 / 195000.0, name="P1")
         sec = GenericSection(
@@ -780,9 +784,9 @@ class TestStressedNotGrouted:
             concrete_from_class, prestress_from_ec2)
         from gensec.solver.timeline import ConstructionTimeline
         b, h = 600.0, 1000.0
-        conc = concrete_from_class("C35/45", ls="S")
+        conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
         ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
-                                Ep=195000.0)
+                                Ep=195000.0, ls='F', NA='EC2', eps_ud_factor=0.9, diagram='horizontal')
         t = Tendon(y=850.0, x=b / 2, Ap=600.0, material=ps,
                    eps_pe=900.0 / 195000.0, name="P1")
         sec = GenericSection(
@@ -828,9 +832,7 @@ class TestStressedNotGrouted:
         """The guard must not fire on the ordinary sequence -- the whole
         flagship is that sequence."""
         from gensec.solver.timeline import ConstructionTimeline
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         ddb = {d["name"]: d for d in flagship["demands"]}
         res = tl.resolve(flagship["section"], ddb)
         assert len(res.losses_ops) == 3
@@ -894,9 +896,9 @@ class TestGroutOfAPretensionedTendon:
             concrete_from_class, prestress_from_ec2)
         from shapely.geometry import Polygon
         b, h = 400.0, 800.0
-        conc = concrete_from_class("C35/45", ls="S")
+        conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
         ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
-                                Ep=195000.0)
+                                Ep=195000.0, ls='F', NA='EC2', eps_ud_factor=0.9, diagram='horizontal')
         t = Tendon(y=700.0, x=b / 2, Ap=1000.0, material=ps,
                    eps_pe=1200.0 / 195000.0, bonded=True, embedded=True,
                    name="P1")
@@ -931,9 +933,7 @@ class TestGroutOfAPretensionedTendon:
         equal -- they would only happen to agree."""
         from gensec.solver.timeline import (
             ConstructionTimeline, _classify_pre_post)
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         sec = flagship["section"]
         ddb = {d["name"]: d for d in flagship["demands"]}
         assert tl.resolve(sec, ddb).pre_post == _classify_pre_post(
@@ -974,9 +974,7 @@ class TestGroutOfAPretensionedTendon:
 
     def test_post_tensioned_grouting_is_untouched(self, flagship):
         from gensec.solver.timeline import ConstructionTimeline
-        tl = ConstructionTimeline.from_block(
-            flagship["construction_history"],
-            losses_models=flagship["losses_models"])
+        tl = ConstructionTimeline.from_document(flagship)
         tl.validate(flagship["section"])          # must not raise
 
 

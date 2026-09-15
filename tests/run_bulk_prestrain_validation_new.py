@@ -81,7 +81,7 @@ def _build_plain_section(delta):
     (``section.bulk_eps_init = ...``), so the solver picks it up through
     its ``getattr(section, 'bulk_eps_init', 0.0)`` read.
     """
-    concrete = Concrete(fck=30.0)
+    concrete = Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     # Plain concrete: no rebars, no tendons. ``rebars`` is a required
     # positional on RectSection, so pass an empty list explicitly.
     sec = RectSection(B=300.0, H=600.0, bulk_material=concrete,

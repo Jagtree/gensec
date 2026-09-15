@@ -296,9 +296,30 @@ class fben2:
             self.fck = fck  # [MPa]
             alpha = 2/3
         elif time < 3:
-            self.fcm = 0  # [MPa]
-            self.fck = 0  # [MPa]
-            alpha = 0
+            # F-M5 (Phase-16).  EN 1992-1-1 (3.1)/(3.2) give f_cm(t), and
+            # (6) derives f_ck(t) = f_cm(t) - 8 MPa only for 3 d < t: below
+            # three days that offset breaks down (it goes NEGATIVE on a
+            # C30 at half a day), so the zero here is a *marker* for "this
+            # code does not state it", guarded by the provider's declared
+            # domain (``EC2RheologicalModel.DOMAIN``), which is the one
+            # home of the number 3.
+            #
+            # ``alpha`` is NOT part of that marker.  It is the exponent of
+            # expression (3.4),
+            #     f_ctm(t) = [beta_cc(t)]^alpha * f_ctm ,
+            # which is written on beta_cc(t) and the 28-DAY f_ctm and
+            # never routes through f_cm(t); the clause states alpha = 1
+            # for every t < 28 d and carves out no exception at three.
+            # With alpha = 0 the factor collapsed to one and a concrete of
+            # one day was handed the 28-day tensile strength: +192 % on a
+            # C30/N against the value (3.4) prescribes at that age, and a
+            # discontinuity at t = 3 in the NON-CONSERVATIVE direction --
+            # the strength fell by a factor 1.672 as the concrete matured.
+            # Registered in 12_2 §7 and repeated unchanged in 12_11,
+            # 13_1 §13, 14_1 §10 and 15_0 §2.
+            self.fcm = 0  # [MPa]  -- marker, see above
+            self.fck = 0  # [MPa]  -- marker, see above
+            alpha = 1
         else:
             self.fcm = self.beta_cc * self.fcm_28  # [MPa]
             self.fck = self.fcm - 8  # [MPa]
@@ -435,19 +456,218 @@ def en2sargin(
         strain: float,
         en2class: fben2,
 ) -> float:
-    '''
-    This function gives for a given strain and a concrete class (from fben2())
-    the correspondent stress from the constitutive law of Sargin.
-    This constitutive law should be used only for non-linear applications.
-    '''
+    r"""
+    Stress of EN 1992-1-1 expression (3.14) at a given strain.
+
+    The non-linear law for structural analysis --- Sargin's curve ---
+    written on the three constants a concrete has at one age:
+
+    .. math::
+
+        \sigma_c = f_{cm}\,
+            \frac{k\eta - \eta^{2}}{1 + (k-2)\eta},
+        \qquad
+        \eta = \frac{\varepsilon_c}{\varepsilon_{c1}},
+        \qquad
+        k = \frac{1.05\,E_{cm}\,\lvert\varepsilon_{c1}\rvert}{f_{cm}} .
+
+    Sign convention is ``fben2``'s own and **not** GenSec's: here
+    compression is positive, so a consumer working in the library's
+    convention evaluates :math:`\sigma(\varepsilon) = -S(-\varepsilon)`.
+
+    Age consistency (F-P26-0)
+    -------------------------
+    All three constants are read from the **same** ``en2class`` and
+    therefore from the same age.  Until Phase 26 the shape
+    parameter :math:`k` was divided by ``fcm_28`` while the stress
+    was scaled by ``fcm``, i.e. :math:`f_{cm}(t)`: at 28 days the two
+    coincide and nothing showed, and away from it the curve's
+    initial tangent --- which is :math:`1.05 E_{cm}` by construction,
+    because :math:`E_{cm}` is the secant at :math:`0.4 f_{cm}` and
+    not the tangent at the origin --- drifted to :math:`0.8177 E_{cm}`
+    at 7 days and :math:`0.6282 E_{cm}` at 3 days.  Those are the ages
+    at which a tendon is stressed.  The peak is unaffected by the
+    error --- at :math:`\eta = 1` the fraction is :math:`(k-1)/(k-1)`
+    for any :math:`k` --- which is why a probe on the peak never
+    saw it; see ``tests/test_phase26_service_law.py``.
+
+    Parameters
+    ----------
+    strain : float
+        Strain [-], compression **positive**.
+    en2class : fben2
+        The normative constants, at the age of interest.  This
+        function derives none of them: it is handed :math:`f_{cm}`,
+        :math:`E_{cm}`, :math:`\varepsilon_{c1}` and
+        :math:`\varepsilon_{cu1}` and forms only the curve.
+
+    Returns
+    -------
+    float
+        Stress [MPa], compression positive; zero beyond
+        :math:`\lvert\varepsilon_{cu1}\rvert`.
+
+    Raises
+    ------
+    ValueError
+        If ``en2class`` carries a zero strain at peak or a non-positive
+        mean strength.  Below three days ``fben2`` reports
+        :math:`f_{cm} = 0` as a marker of its own domain, and
+        :math:`\varepsilon_{c1}` follows it to zero.  A curve through a
+        zero strength is not a soft concrete, it is no concrete: the
+        constants are outside the domain their source claims, and
+        that is an undeclared input rather than unmodelled physics ---
+        hence ``ValueError`` and not ``NotImplementedError``, and
+        never the ``ZeroDivisionError`` of an arithmetic accident.
+
+    Examples
+    --------
+    >>> props = fben2(fck=35.0, ls='F', loadtype='slow', TypeConc='N')
+    >>> round(en2sargin(props.eps_c1, props), 9) == props.fcm
+    True
+    """
+    if en2class.eps_c1 == 0 or en2class.fcm <= 0:
+        raise ValueError(
+            f"EN 1992-1-1 (3.14) needs a strain at peak and a"
+            f" mean strength at the age it is asked about;"
+            f" the constants handed in carry"
+            f" eps_c1={en2class.eps_c1!r} and"
+            f" fcm={en2class.fcm!r}, which fben2 reports as its"
+            f" own out-of-domain marker (age"
+            f" {en2class.time!r} d, below the"
+            f" three-day floor).  Declare an age inside the"
+            f" domain, or a law that covers it."
+        )
     if abs(strain) <= abs(en2class.eps_cu1):
         k = 1.05*(en2class.ecm/1000)*abs(en2class.eps_c1) * \
-            1000 / en2class.fcm_28
+            1000 / en2class.fcm
         eta = strain/en2class.eps_c1
         stress = en2class.fcm*(k*eta - eta**2)/(1+(k-2)*eta)
     else:
         stress = 0
     return stress
+
+def en2sargin_array(strain, en2class):
+    r"""
+    Vectorised form of :func:`en2sargin`, on the same constants.
+
+    Expression (3.14) evaluated on a whole array at once.  This is not
+    a second law: the scalar function above and this one form the same
+    curve from the same four constants of the same ``en2class``, and
+    ``tests/test_phase26_service_law.py`` binds them element by element
+    so neither can drift from the other.  It exists only because the
+    fibre integrator asks for a strain plane, not for one fibre at a
+    time, and a Python-level loop over ten thousand fibres inside a
+    Newton iteration is a cost the sectional solver cannot carry.
+
+    Parameters
+    ----------
+    strain : array_like
+        Strain [-], compression **positive**, as in :func:`en2sargin`.
+    en2class : fben2
+        The normative constants, at the age of interest.
+
+    Returns
+    -------
+    numpy.ndarray
+        Stress [MPa], compression positive; zero beyond
+        :math:`\lvert\varepsilon_{cu1}\rvert`, with the shape of
+        ``strain``.
+
+    Raises
+    ------
+    ValueError
+        On the same out-of-domain constants as :func:`en2sargin`.
+    """
+    if en2class.eps_c1 == 0 or en2class.fcm <= 0:
+        raise ValueError(
+            f"EN 1992-1-1 (3.14) needs a strain at peak and a"
+            f" mean strength at the age it is asked about;"
+            f" the constants handed in carry"
+            f" eps_c1={en2class.eps_c1!r} and"
+            f" fcm={en2class.fcm!r}, which fben2 reports as its"
+            f" own out-of-domain marker (age"
+            f" {en2class.time!r} d, below the"
+            f" three-day floor).  Declare an age inside the"
+            f" domain, or a law that covers it."
+        )
+    e = np.asarray(strain, dtype=float)
+    k = 1.05*(en2class.ecm/1000)*abs(en2class.eps_c1) * \
+        1000 / en2class.fcm
+    inside = np.abs(e) <= abs(en2class.eps_cu1)
+    eta = np.where(inside, e/en2class.eps_c1, 0.0)
+    den = 1.0 + (k - 2.0)*eta
+    out = np.where(inside,
+                   en2class.fcm*(k*eta - eta*eta)/den,
+                   0.0)
+    return out
+
+
+def en2sargin_tangent_array(strain, en2class):
+    r"""
+    Derivative of expression (3.14) with respect to strain.
+
+    Differentiating the quotient of :func:`en2sargin` gives
+
+    .. math::
+
+        \frac{d\sigma_c}{d\varepsilon_c} =
+            \frac{f_{cm}}{\varepsilon_{c1}}\;
+            \frac{(k - 2\eta)\,[1 + (k-2)\eta] - (k\eta - \eta^{2})(k-2)}
+                 {[1 + (k-2)\eta]^{2}} ,
+
+    which at :math:`\eta = 0` collapses to :math:`f_{cm}k/\varepsilon_{c1}
+    = 1.05\,E_{cm}`: the initial tangent the shape parameter exists to
+    produce.  Beyond :math:`\lvert\varepsilon_{cu1}\rvert` the stress is
+    identically zero and so is its derivative.
+
+    The closed form is checked against a central difference of
+    :func:`en2sargin_array` in ``tests/test_phase26_service_law.py``, so
+    it cannot drift away from the curve it claims to differentiate.
+
+    Parameters
+    ----------
+    strain : array_like
+        Strain [-], compression **positive**.
+    en2class : fben2
+        The normative constants, at the age of interest.
+
+    Returns
+    -------
+    numpy.ndarray
+        Slope [MPa], in the same sign convention as the stress.
+
+    Raises
+    ------
+    ValueError
+        On the same out-of-domain constants as :func:`en2sargin`.
+    """
+    if en2class.eps_c1 == 0 or en2class.fcm <= 0:
+        raise ValueError(
+            f"EN 1992-1-1 (3.14) needs a strain at peak and a"
+            f" mean strength at the age it is asked about;"
+            f" the constants handed in carry"
+            f" eps_c1={en2class.eps_c1!r} and"
+            f" fcm={en2class.fcm!r}, which fben2 reports as its"
+            f" own out-of-domain marker (age"
+            f" {en2class.time!r} d, below the"
+            f" three-day floor).  Declare an age inside the"
+            f" domain, or a law that covers it."
+        )
+    e = np.asarray(strain, dtype=float)
+    k = 1.05*(en2class.ecm/1000)*abs(en2class.eps_c1) * \
+        1000 / en2class.fcm
+    inside = np.abs(e) <= abs(en2class.eps_cu1)
+    eta = np.where(inside, e/en2class.eps_c1, 0.0)
+    den = 1.0 + (k - 2.0)*eta
+    num = k*eta - eta*eta
+    d_num = (k - 2.0*eta)/en2class.eps_c1
+    d_den = (k - 2.0)/en2class.eps_c1
+    out = np.where(inside,
+                   en2class.fcm*(d_num*den - num*d_den)/(den*den),
+                   0.0)
+    return out
+
 
 # Test of constitutive laws
 # import Curve_Tracing as ct
@@ -474,3 +694,102 @@ ConcClassFck = {
     'C90/105': 90,
     'C100/115': 100,
 }
+
+
+# ===========================================================================
+#  EN 1992-1-1 below three days: a declared scope boundary
+# ===========================================================================
+#
+#  This block lives in the Eurocode module and nowhere else.  The three-day
+#  limit is EN 1992-1-1 §3.1.2(5)'s own statement about its own expression,
+#  so it belongs to the document that makes it, together with the class that
+#  refuses on its behalf and the law that will one day replace the refusal.
+#  Another document draws its own early-age boundary in its own place, and
+#  this module has nothing to say about where.  Each code runs a closed,
+#  watertight cycle: that is what normative agnosticism costs and what it
+#  buys.  Nothing here reaches outside EN 1992-1-1, and nothing outside
+#  reaches in.
+
+#: Age [days] below which EN 1992-1-1 §3.1.2(5) declares its own strength
+#: development expression insufficiently accurate.
+EC2_EARLY_AGE_LIMIT_DAYS = 3.0
+
+
+class EC2EarlyAgeConcrete:
+    r"""
+    Placeholder for the constitutive law of concrete below three days.
+
+    Constructing this class always raises.  It is a class rather than a
+    bare ``raise`` at the call site for three reasons, and the third is
+    the one that matters:
+
+    * the refusal names one address, so every consumer that hits the
+      boundary reports the same thing;
+    * the message can carry what is actually missing, rather than a
+      symptom (``fcm=0``) that reads like a corrupted input;
+    * when the law is written, its home already exists, and the future
+      phase changes what this class *does* instead of hunting for the
+      places that currently refuse.
+
+    Parameters
+    ----------
+    t : float
+        Age [days].
+    fck : float, optional
+        Characteristic strength [MPa], carried into the message when
+        known so that the refusal identifies the material it refused
+        for.
+    name : str, optional
+
+    Raises
+    ------
+    NotImplementedError
+        Always, at construction.
+
+    Notes
+    -----
+    What a future implementation needs, and why none of it is guessable
+    from the tree as it stands:
+
+    * a strength development valid below three days, expressed within
+      EN 1992-1-1 or declared as an amendment to it.  What other
+      documents write is their own business and is not admissible
+      here;
+    * a :math:`\varepsilon_{c1}(t)`.  EN 1992-1-1 Table 3.1 ties it to
+      :math:`f_{cm}`, so it follows the strength once the strength
+      exists;
+    * a statement about whether the tension branch is still
+      :math:`1.05\,E_{cm}` up to :math:`f_{ctm}` at an age where the
+      concrete is barely set.  This is the one that cannot be inherited
+      from the mature law by analogy, because early-age cracking is
+      governed by restrained shrinkage rather than by load, and the
+      relevant strength is not necessarily the one the mature law
+      stops at.
+
+    Examples
+    --------
+    >>> EC2EarlyAgeConcrete(t=2.0, fck=45.0)      # doctest: +SKIP
+    Traceback (most recent call last):
+        ...
+    NotImplementedError: ...
+    """
+
+    def __init__(self, t, fck=None, name=None):
+        which = f" for C{fck:g}" if fck is not None else ""
+        label = f" ('{name}')" if name else ""
+        raise NotImplementedError(
+            f"no constitutive law is available for concrete at "
+            f"t = {float(t):g} d{which}{label}: EN 1992-1-1 §3.1.2(5) "
+            f"declares its strength development insufficiently accurate "
+            f"below {EC2_EARLY_AGE_LIMIT_DAYS:g} days, and fben2 marks that "
+            f"boundary by reporting f_cm = 0 and eps_c1 = 0.  A concrete "
+            f"this young has a compressive strength; the Eurocode "
+            f"declines to state it, which is a limit of the clause and "
+            f"not of the material.  GenSec refuses rather than "
+            f"extrapolate a normative formula outside the domain its own "
+            f"document claims, and rather than carry on with a stiffness "
+            f"and a tensile strength but no compressive strength -- a "
+            f"state no concrete is in.  Move the instant to "
+            f"t >= {EC2_EARLY_AGE_LIMIT_DAYS:g} d, or declare the zone's "
+            f"service material explicitly."
+        )

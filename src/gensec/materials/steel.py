@@ -27,7 +27,7 @@ transparently.
 
 import numpy as np
 from dataclasses import dataclass
-from .base import Material
+from .base import Material, ReferenceModulus
 
 # ------------------------------------------------------------------
 #  Optional Numba acceleration
@@ -195,6 +195,23 @@ class Steel(Material):
     k_hardening: float = 1.0
     eps_su: float = 0.01
     works_in_compression: bool = True
+
+    def reference_modulus(self):
+        r"""
+        :math:`E_s` [MPa], at no reference age.
+
+        Intrinsic to the constitutive law rather than normative: the
+        elastic modulus of reinforcing steel is a property of the law
+        the engineer chose, not a value a code derives from a strength
+        class, and it does not age over the life of a structure.
+
+        Returns
+        -------
+        ReferenceModulus
+        """
+        return ReferenceModulus(
+            value=float(self.Es), reference_age=None,
+            source="intrinsic to the constitutive law (E_s)")
 
     def __post_init__(self):
         self.fyd = self.fyk / self.gamma_s
@@ -581,6 +598,18 @@ class PrestressingSteel(Material):
     eps_ud: float = 0.02
     Ep: float = 195000.0
     works_in_compression: bool = True
+
+    def reference_modulus(self):
+        r"""
+        :math:`E_p` [MPa], at no reference age.
+
+        Returns
+        -------
+        ReferenceModulus
+        """
+        return ReferenceModulus(
+            value=float(self.Ep), reference_age=None,
+            source="intrinsic to the constitutive law (E_p)")
 
     def __post_init__(self):
         if self.sigma_ud <= 0.0:

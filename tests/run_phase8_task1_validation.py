@@ -342,14 +342,14 @@ def v1_identity():
 def v2_masked_vs_standalone():
     banner("V2  Masked view == standalone section (domains)")
     st = Steel(fyk=450.0, gamma_s=1.15)
-    conc = Concrete(fck=45.0)
+    conc = Concrete(fck=45.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     rebars = [RebarLayer(x=60.0, y=60.0, As=800.0, material=st),
               RebarLayer(x=540.0, y=60.0, As=800.0, material=st)]
 
     comp = GenericSection(
         polygon=rect_poly(B, H), bulk_material=conc,
         rebars=list(rebars),
-        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0),
+        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                          "topping")],
         mesh_size=100.0, n_grid_x=6, n_grid_y=14)
     stand = GenericSection(
@@ -426,9 +426,19 @@ _V3_REFS = {
     "vcaslu_1.yaml": (
         2.838982425116848e-05, 1.921290488436274e-06,
         -464204715.00370455, -3.2782554626464844e-07),
+    # RE-PINNED in Phase 18, attributed to N-14.  The two cloud sums
+    # moved because ``NMDiagram`` stopped building its strain-plane
+    # sweep envelope from bulk and rebar alone; on any section with
+    # tendons the swept domain widens, so the cloud is sampled over a
+    # different -- and now complete -- range.  The isolation is the
+    # attribution: with only ``capacity.py`` reverted to 066f5c9 the
+    # four values return to the previous tuple exactly, and the SOLVED
+    # PLANE (eps0, chi_x) is IDENTICAL on both trees to 17 digits --
+    # N-14 moves the domain of the scan, not the equilibrium.
+    #   was: -912772316.9084029, -135255742964.064
     "example_prestress.yaml": (
         0.00014167202634475092, 3.5467171585641617e-06,
-        -912772316.9084029, -135255742964.064),
+        -789851550.4010632, -112144276121.54279),
     "biaxial_column.yaml": (
         -1.1873085585995818e-05, 5.840807851662742e-07,
         -885006210.3702846, 1.1920928955078125e-06),
@@ -478,9 +488,9 @@ def v4_invariants():
     st = Steel(fyk=450.0, gamma_s=1.15)
     reb_top = RebarLayer(x=60.0, y=1340.0, As=400.0, material=st)
     sec = GenericSection(
-        polygon=rect_poly(B, H), bulk_material=Concrete(fck=45.0),
+        polygon=rect_poly(B, H), bulk_material=Concrete(fck=45.0, gamma_c=1.5, long_term_reduction_factor=0.85),
         rebars=[reb_top],
-        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0),
+        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                          "topping")],
         mesh_size=100.0, n_grid_x=6, n_grid_y=14)
     mgr = StagedDomainManager(sec, biaxial=False,
@@ -598,9 +608,9 @@ def v6_tendon_in_topping():
     t_top = Tendon(y=1300.0, x=300.0, material=ps, Ap=700.0,
                    eps_pe=0.0)                       # topping tendon
     sec = GenericSection(
-        polygon=rect_poly(B, H), bulk_material=Concrete(fck=45.0),
+        polygon=rect_poly(B, H), bulk_material=Concrete(fck=45.0, gamma_c=1.5, long_term_reduction_factor=0.85),
         rebars=[], tendons=[t_pre, t_top],
-        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0),
+        bulk_materials=[(box(0, H1, B, H), Concrete(fck=30.0, gamma_c=1.5, long_term_reduction_factor=0.85),
                          "topping")],
         mesh_size=100.0, n_grid_x=6, n_grid_y=14)
     check("geometric parents: precast strand -> 0, topping -> 1",

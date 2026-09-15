@@ -287,6 +287,47 @@ class ACIRheologicalModel(RheologicalModel):
         dt = t - t0
         return (dt ** 0.6) / (10.0 + dt ** 0.6) * phi_u
 
+    def service_law(self, t):
+        r"""
+        Refuse, by name: GenSec has no ACI 318-19 material to build on.
+
+        ACI 318-19 does nominate the quantities this method would need
+        -- §19.2.3.1 writes the modulus of rupture
+        :math:`f_r = 0.62\,\lambda\sqrt{f'_c}` in MPa, and §19.2.2.1
+        the modulus :math:`E_c = 4700\sqrt{f'_c}` this provider
+        already uses.  What is missing is not the formula but the
+        **material**: GenSec ships no ACI concrete, no ACI strain at
+        peak, no ACI stress-strain shape, and no bridge that would own
+        those numbers on ACI's behalf.
+
+        Answering with a law from another document would be the exact
+        failure this file exists to detect: an ACI rheology silently
+        wearing somebody else's constitutive law.  **Rheology is
+        normative, and the law it hands back is normative with it.**
+        A provider refuses rather than borrows, and this refusal is how
+        the borrowing is made visible before it becomes a number.
+
+        Parameters
+        ----------
+        t : float
+            Age [days].  Accepted and unused.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+        """
+        raise NotImplementedError(
+            "ACIRheologicalModel declares ACI 209R-92 rheology, but "
+            "GenSec has no ACI 318-19 material: no strain at peak, no "
+            "stress-strain shape, no module that owns the constants.  "
+            "ACI 318-19 19.2.3.1 nominates f_r = 0.62*lambda*sqrt(f'c) "
+            "as its rupture strength; returning a law from another "
+            "document instead would dress this rheology in a code it "
+            "has not declared.  Declare the service material "
+            "explicitly."
+        )
+
     def J(self, t, t_prime):
         r""":math:`J(t,t') = [1 + \varphi(t,t')] / E_c(t')` [1/MPa] —
         creep referenced to the modulus **at loading**."""

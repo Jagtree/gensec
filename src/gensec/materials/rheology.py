@@ -72,7 +72,7 @@ import numpy as np
 
 from functools import lru_cache
 
-from .base import RheologicalModel
+from .base import ReferenceModulusRule, RheologicalModel
 from .ec2_properties import fben2
 
 
@@ -105,13 +105,142 @@ def _ec2_at(fck, cement_class, t):
 
 __all__ = [
     "EC2RheologicalModel",
+    "EC2ReferenceModulus",
     "TabulatedRheologicalModel",
+    "default_reference_modulus",
 ]
 
 
 # ==================================================================
 #  Shared geometry binding
 # ==================================================================
+
+class EC2ReferenceModulus(ReferenceModulusRule):
+    r"""
+    EN 1992-1-1 Table 3.1: :math:`E_{cm}` at the 28-day reference age.
+
+    The conventional secant modulus a Eurocode analysis uses when the
+    model declares no time axis:
+
+    .. math::
+
+        E_{cm} = 22\,000
+                 \left(\frac{f_{cm}}{10}\right)^{0.3}
+        \qquad [\mathrm{MPa}],\; f_{cm} = f_{ck} + 8
+
+    read from the material's **own** EC2 bridge rather than
+    recomputed here, so the number a datum is drawn on and the number
+    the material's other clauses use are the same object's answer
+    (rule 5).  Verified equal to
+    ``EC2RheologicalModel(fck).E_c(28.0)`` to the last digit
+    (35 220.462 MPa at ``fck = 40``), which is the consistency this
+    reading buys.
+
+    This class is a **default, not a wiring**.  A model under ACI 318,
+    AS 3600 or a national annex supplies its own
+    :class:`~gensec.materials.base.ReferenceModulusRule`, with its own
+    reference age and its own citation, and nothing in the resolver
+    changes.  The Eurocode is the shipped default because it is this
+    project's shipped default everywhere else -- not because the
+    mechanism knows it.
+
+    Parameters
+    ----------
+    source : str, optional
+        Citation.  Defaults to the Table 3.1 reference.
+
+    See Also
+    --------
+    gensec.materials.base.ReferenceModulusRule : the contract.
+    default_reference_modulus : the shipped instance.
+
+    Examples
+    --------
+    >>> EC2ReferenceModulus().reference_age
+    28.0
+    """
+
+    _DEFAULT_SOURCE = (
+        "EN 1992-1-1:2004 §3.1.3 Table 3.1 -- E_cm, secant modulus of "
+        "elasticity of concrete at the 28-day reference age.  Applied "
+        "only where the model declares no time axis, i.e. where no "
+        "other age is stated by the analysis."
+    )
+
+    def __init__(self, source=None):
+        super().__init__(source=source or self._DEFAULT_SOURCE,
+                         reference_age=28.0)
+
+    def E_c(self, material):
+        r"""
+        :math:`E_{cm}` [MPa] of *material*, or ``None``.
+
+        Parameters
+        ----------
+        material : Material
+            Any material.  Only one that carries an EC2 bridge
+            (``material.ec2.ecm``) is described by this rule.
+
+        Returns
+        -------
+        float or None
+            ``None`` for a material with no EC2 bridge -- a steel, a
+            tabulated law, a user law.  Declining is the correct
+            answer: the resolver, not this rule, owns the refusal.
+        """
+        # Ask the material first.  Every material class declares its
+        # own conventional modulus, at its own reference age, with its
+        # own citation, so the agnostic path needs no probe.  The EC2
+        # branches below are the *override*: they exist for a material
+        # that cannot state one (the legacy ``concrete`` alias) or for
+        # an engineer deliberately applying this code's convention to a
+        # material built under another.
+        try:
+            declared = material.reference_modulus()
+        except (NotImplementedError, AttributeError):
+            declared = None
+        if declared is not None and float(declared.value) > 0.0:
+            return float(declared.value)
+        bridge = getattr(material, "ec2", None)
+        ecm = getattr(bridge, "ecm", None) if bridge is not None else None
+        if ecm is None:
+            # A material built through the legacy ``concrete`` alias
+            # carries no bridge object but does declare ``fck``, which
+            # is the only input Table 3.1 needs.  It is evaluated
+            # through the same ``fben2`` the bridge would have used --
+            # one formula, one home -- and at the 28-day reference age
+            # :math:`\beta_{cc} = 1`, so the cement class drops out
+            # exactly here.  The conventional value therefore carries
+            # no undeclared hardening choice, which is the property
+            # that makes it usable without a time axis at all.
+            fck = getattr(material, "fck", None)
+            if fck is None:
+                return None
+            try:
+                ecm = _ec2_at(float(fck), "N", 28.0).ecm
+            except Exception:                            # noqa: BLE001
+                return None
+        ecm = float(ecm)
+        return ecm if ecm > 0.0 else None
+
+
+#: The shipped default rule.  Named so that a caller can replace it
+#: rather than edit it: ``ConstructionTimeline(...,
+#: reference_modulus=MyCodeReferenceModulus())``.
+def default_reference_modulus():
+    r"""
+    The default :class:`ReferenceModulusRule` of this build.
+
+    A function rather than a module constant so that the object is not
+    shared mutable state across analyses, and so that a build for a
+    different code family has one symbol to replace.
+
+    Returns
+    -------
+    EC2ReferenceModulus
+    """
+    return EC2ReferenceModulus()
+
 
 # ==================================================================
 #  EN 1992-1-1 / NTC 2018
@@ -280,6 +409,17 @@ class EC2RheologicalModel(RheologicalModel):
     #: EN 1992-1-1 §3.3.2(8): the long-term relaxation reference time [h].
     T_RELAX_MAX_HOURS = 500000.0
 
+    #: Declared content: the Eurocode material parameters, plus the
+    #: late-bound drying geometry and prestressing steel.  ``fcm``,
+    #: ``Ecm28`` and every other Table-3.1 quantity are deliberately
+    #: absent: this class stores none of them, it reads them from the
+    #: normative source on demand, so they are functions of ``fck``
+    #: and ``cement_class`` and add no discrimination.
+    CONTENT_FIELDS: tuple = (
+        "fck", "cement_class", "RH", "relaxation_class", "rho_1000",
+        "A_c", "u", "f_pk",
+    )
+
     def __init__(self, fck, cement_class="N", RH=70.0, A_c=None, u=None,
                  relaxation_class=2, rho_1000=None, name=""):
         cc = str(cement_class).upper()
@@ -321,6 +461,72 @@ class EC2RheologicalModel(RheologicalModel):
     # fben2.ecm was then broken by F2).  Forking a normative computation to
     # route around a bug leaves two of them forever.  Fix the source.
 
+    #: EN 1992-1-1 §3.1.2(5) gives f_cm(t) = beta_cc(t) f_cm and
+    #: f_ck(t) = f_cm(t) - 8 MPa for 3 d <= t; below three days the
+    #: clause does not define them and refers the question elsewhere.
+    #: The floor is therefore *data taken from a document*, not a rule
+    #: of GenSec's: another code places it elsewhere or nowhere at all
+    #: (ACI 209R-92 states f'_c(t) = t/(a+bt) f'_c(28) from t -> 0+),
+    #: and a National Annex may move this one.  Nothing outside this
+    #: mapping knows the number 3.
+    #:
+    #: E_c(t), phi and eps_imposed are deliberately absent: §3.1.3(3)
+    #: builds the modulus from beta_cc directly, not through f_cm, and
+    #: is stated at every age.
+    #: Closed vocabulary (N-8).  The container's four invariants come
+    #: from :class:`~gensec.materials.base.RheologicalModel`; the four
+    #: names added here are the EN 1992-1-1 quantities this provider
+    #: declares an interval for, plus ``phi``, which it states at every
+    #: age.
+    #:
+    #: Three of them -- ``f_ck``, ``f_cm``, ``f_ctm`` -- have **no
+    #: method on this class**.  They are declared because the norm
+    #: states where they hold and the dump publishes that, and they are
+    #: kept in the vocabulary rather than deleted because deleting a
+    #: declared interval a downstream consumer reads would widen the
+    #: domain silently -- the same defect from the other side.
+    #: :meth:`~gensec.materials.base.RheologicalModel.check_vocabulary`
+    #: reports them under ``declared_no_surface`` so the gap is visible
+    #: instead of silent.  Whether the interval itself is right is
+    #: **open**: see ``17_0`` section N-8.
+    QUANTITIES = RheologicalModel.QUANTITIES | frozenset({
+        "f_ck", "f_cm", "f_ctm", "linearity_limit", "phi",
+    })
+
+    #: N-8, closed in Phase 17 **from the implementation**, which is
+    #: where the route each quantity takes is written:
+    #:
+    #: * ``f_cm`` and ``f_ck`` are zeroed below three days by
+    #:   :class:`~gensec.materials.ec2_properties.fben2` -- a deliberate
+    #:   marker, because ``f_ck(t) = f_cm(t) - 8`` of §3.1.2(6) goes
+    #:   negative there.  The floor describes the code.  Kept.
+    #: * ``linearity_limit`` is :math:`0.45\,f_{ck}(t)` and inherits that
+    #:   floor through ``f_ck``.  Kept.
+    #: * ``f_ctm`` is **removed**.  Expression (3.4) is written on
+    #:   :math:`\beta_{cc}(t)` and the 28-day :math:`f_{ctm}`, and
+    #:   ``fben2`` computes it from ``fck_28`` and ``beta_cc`` at every
+    #:   age, below three days included -- which is precisely what F-M5
+    #:   established when it restored :math:`\alpha = 1` there.  The
+    #:   entry declared a floor the implementation does not have, and
+    #:   its citation ("through ``f_cm(t)``") named a route neither the
+    #:   code nor (3.4) takes.  It was the last fossil of the belief
+    #:   F-M5 corrected.
+    #:
+    #: Absent from this mapping means *stated at every age*: that is now
+    #: a claim about ``f_ctm`` and no longer an accident.
+    DOMAIN = {
+        "f_cm": (3.0, float("inf")),
+        "f_ck": (3.0, float("inf")),
+        "linearity_limit": (3.0, float("inf")),
+    }
+
+    DOMAIN_SOURCE = {
+        "f_cm": "EN 1992-1-1 §3.1.2(5)",
+        "f_ck": "EN 1992-1-1 §3.1.2(5)",
+        "linearity_limit": ("EN 1992-1-1 §3.1.4(4), through f_ck(t) of "
+                            "§3.1.2(5)"),
+    }
+
     def _p(self, t):
         r"""fben2 at age *t*.  The single source (:func:`_ec2_at`)."""
         return _ec2_at(self.fck, self.cement_class, float(t))
@@ -342,6 +548,77 @@ class EC2RheologicalModel(RheologicalModel):
         """
         return float(self._p(t).ecm)
 
+    def service_law(self, t):
+        r"""
+        EN 1992-1-1 expression (3.14) at age *t*, with the Eurocode's
+        own tensile strength.
+
+        The five constants are read from the **one** ``fben2``
+        evaluation this provider already uses for :meth:`E_c`, so the
+        law and the modulus cannot drift apart: they are two readings
+        of a single normative evaluation at a single age.
+
+        .. math::
+
+            f_{cm}(t),\quad E_{cm}(t),\quad
+            \varepsilon_{c1}(t),\quad \varepsilon_{cu1},\quad
+            f_{ct,\mathrm{eff}} = f_{ctm}(t) .
+
+        The last line is the point.  :math:`f_{ct,\mathrm{eff}}` is not
+        a parameter of this method and has no default: **EN 1992-1-1
+        7.3.2(2) nominates** :math:`f_{ctm}` as the effective tensile
+        strength at the moment cracking is expected, and this provider
+        is entitled to apply that clause precisely because it *is* the
+        Eurocode provider.  A provider that declares a different
+        document answers from that document, inside that document's own
+        module; neither may answer for the other.  A caller that wants
+        :math:`f_{ctm,fl}` or :math:`f_{ctk,0.05}` is declaring a
+        different rule and declares it by building the material
+        itself -- which is a declaration, not an override of this one.
+
+        Below three days ``fben2`` reports :math:`f_{cm}=0` as the
+        marker of its own domain, and
+        :class:`~gensec.materials.service_concrete.ServiceConcrete`
+        refuses it with a ``ValueError``.  That refusal is propagated
+        unchanged: an age outside the domain the source claims is an
+        undeclared input, not unmodelled physics.
+
+        Parameters
+        ----------
+        t : float
+            Age [days].
+
+        Returns
+        -------
+        gensec.materials.service_concrete.ServiceConcrete
+
+        Raises
+        ------
+        ValueError
+            If *t* is outside the domain of EN 1992-1-1 Table 3.1 as
+            ``fben2`` reports it.
+        """
+        from .ec2_properties import (EC2_EARLY_AGE_LIMIT_DAYS,
+                                     EC2EarlyAgeConcrete)
+        from .service_concrete import ServiceConcrete
+
+        t = float(t)
+        if t < EC2_EARLY_AGE_LIMIT_DAYS:
+            # Refused from its own address, not by a stray guard here.
+            # Below three days fben2 zeroes f_cm and eps_c1 while still
+            # reporting E_cm and f_ctm, so a law built from it would be
+            # stiff, resist tension and resist no compression.  The
+            # boundary is EN 1992-1-1 §3.1.2(5)'s, so it is declared
+            # in the Eurocode module and refused from there: each code
+            # runs a closed cycle and does not borrow another's edges.
+            EC2EarlyAgeConcrete(t=t, fck=self.fck, name=self.name)
+        p = self._p(t)
+        return ServiceConcrete(
+            fcm=float(p.fcm), Ecm=float(p.ecm),
+            eps_c1=float(p.eps_c1), eps_cu1=float(p.eps_cu1),
+            fct_eff=float(p.fctm), reference_age=t,
+            name=f"{self.name} service @{t:g}d")
+
     def linearity_limit(self, t):
         r"""
         :math:`0.45\, f_{ck}(t)` [MPa] (§3.1.4(4)), above which the creep
@@ -350,8 +627,43 @@ class EC2RheologicalModel(RheologicalModel):
 
         :math:`f_{ck}(t)` is fben2's, hence **capped at the 28-day value**
         for :math:`t \ge 28` d, exactly as §3.1.2(5) prescribes.
+
+        Below three days §3.1.2(5) does not define :math:`f_{ck}(t)` and
+        this provider therefore has no limit to give.  It raises rather
+        than return the zero that fben2's out-of-range branch produces:
+        a limit of zero is not a limit, it is a tripwire that any
+        compression whatsoever crosses, and a guard that fires on a
+        quantity the code never defined reports the wrong cause.  Supply
+        a :class:`~gensec.materials.base.DeclaredRule` if the analysis
+        must reach below three days.
+
+        Parameters
+        ----------
+        t : float
+            Age at loading [days].
+
+        Returns
+        -------
+        float
+            Limit stress [MPa, positive magnitude].
+
+        Raises
+        ------
+        ~gensec.materials.base.OutOfDeclaredDomain
+            For :math:`t < 3` d with no declared rule covering *t*.
+
+        Examples
+        --------
+        >>> m = EC2RheologicalModel(fck=30, cement_class="N")
+        >>> round(m.linearity_limit(28.0), 3)
+        13.5
+        >>> m.linearity_limit(1.0)               # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        gensec.materials.base.OutOfDeclaredDomain: ...
         """
-        return 0.45 * max(float(self._p(t).fck), 0.0)
+        return self._stated(
+            "linearity_limit", t,
+            lambda tt: 0.45 * max(float(self._p(tt).fck), 0.0))
 
     # -- geometry ---------------------------------------------------
 
@@ -615,6 +927,21 @@ class TabulatedRheologicalModel(RheologicalModel):
     cannot supply a modulus, and says so.
     """
 
+    #: Declared content: the two grids, the compliance table, the two
+    #: optional callables and the extrapolation policy, plus the
+    #: late-bound geometry and steel.  The log-grids cached at
+    #: construction are functions of the grids and are not listed.
+    #:
+    #: A callable enters the token by its importable name, which is
+    #: the honest limit of the scheme: two different functions with
+    #: the same qualified name would collide, and an anonymous
+    #: function is rejected outright rather than tokenised into
+    #: something that does not survive a process boundary.
+    CONTENT_FIELDS: tuple = (
+        "_tp", "_t", "_J", "_shrinkage", "_relaxation", "extrapolate",
+        "A_c", "u", "f_pk",
+    )
+
     def __init__(self, t_prime_grid, t_grid, J_table, shrinkage=None,
                  relaxation=None, extrapolate=False, name=""):
         tp = np.asarray(t_prime_grid, dtype=float).ravel()
@@ -654,6 +981,27 @@ class TabulatedRheologicalModel(RheologicalModel):
         self._relaxation = relaxation
         self.extrapolate = bool(extrapolate)
         self.name = name or "tabulated"
+        self._declare_domains()
+
+    def _declare_domains(self):
+        r"""
+        Publish the table's own span through
+        :meth:`~gensec.materials.base.RheologicalModel.domain`.
+
+        The grids differ per object, so the intervals are recorded on
+        the instance rather than on the class.  ``extrapolate=True``
+        widens them to every age, which is exactly what that flag means:
+        the caller has accepted a flat extension of the data.
+        """
+        if self.extrapolate:
+            self._domain = {}
+            self._domain_source = {}
+            return
+        span_t = (float(self._t[0]), float(self._t[-1]))
+        span_tp = (float(self._tp[0]), float(self._tp[-1]))
+        src = f"tabulated data supplied to {self.name or 'this provider'}"
+        self._domain = {"J": span_t, "E_c": span_tp, "phi": span_t}
+        self._domain_source = {"J": src, "E_c": src, "phi": src}
 
     def _check_range(self, value, grid, what):
         if self.extrapolate:
@@ -691,6 +1039,50 @@ class TabulatedRheologicalModel(RheologicalModel):
     def E_c(self, t):
         r""":math:`E_c(t) = 1/J(t,t)` — the table's diagonal [MPa]."""
         return 1.0 / self.J(t, t)
+
+    def service_law(self, t):
+        r"""
+        Refuse, by name: a compliance table nominates no strength.
+
+        This provider is *a code that is only data*.  It declares
+        :math:`J(t,t')` and nothing else, so it knows the concrete's
+        compliance and does not know its strength, its strain at peak
+        or its tensile strength.  A constitutive law cannot be built
+        from a compliance table, and building one from **another**
+        code's constants -- reaching for EN 1992-1-1 Table 3.1 because
+        it happens to be in the same package -- would be precisely the
+        silent normative choice this architecture exists to prevent.
+        The Eurocode's :math:`f_{ctm}` is the Eurocode's answer and is
+        not available to a provider that has not declared the
+        Eurocode.
+
+        The refusal is a ``NotImplementedError`` and not a
+        ``ValueError``: the input is complete and well formed, and what
+        is missing is a *model* -- a constitutive law this provider's
+        declared content does not contain.  Supplying the missing
+        physics is a declaration the caller makes by handing in a
+        material of its own.
+
+        Parameters
+        ----------
+        t : float
+            Age [days].  Accepted and unused: the refusal does not
+            depend on the age.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+        """
+        raise NotImplementedError(
+            "TabulatedRheologicalModel declares a compliance table and "
+            "no normative document: it knows J(t,t') and therefore E_c, "
+            "but not f_cm, eps_c1 or a tensile strength, so it cannot "
+            "produce a constitutive law.  Borrowing EN 1992-1-1 Table "
+            "3.1 here would attribute to this model a code it has not "
+            "declared.  Declare the service material explicitly, or use "
+            "a provider whose code owns a constitutive law."
+        )
 
     def eps_imposed(self, t, t_s):
         r"""Imposed strain [-] from the user's shrinkage callable or

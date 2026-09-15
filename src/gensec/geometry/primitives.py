@@ -80,30 +80,104 @@ def rect_poly(B, H):
     return shapely_box(0, 0, B, H)
 
 
-def circle_poly(D, resolution=64):
+def _checked_segments_per_quadrant(value):
+    r"""
+    Validate a declared discretisation of a curved boundary.
+
+    Parameters
+    ----------
+    value : int
+        The declared number of straight segments per quadrant.
+
+    Returns
+    -------
+    int
+        The same value, as an ``int``.
+
+    Raises
+    ------
+    ValueError
+        If the value is not a positive integer.  A curved boundary
+        cannot be built from zero or a fractional number of segments,
+        and refusing here names the parameter rather than letting
+        Shapely fail later with a message about ``quad_segs``.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int,)):
+        raise ValueError(
+            f"segments_per_quadrant must be a positive integer, got "
+            f"{value!r}; it counts the straight segments used for each "
+            f"quadrant of the boundary, so the polygon receives "
+            f"4 x segments_per_quadrant vertices."
+        )
+    if value < 1:
+        raise ValueError(
+            f"segments_per_quadrant must be a positive integer, got "
+            f"{value!r}."
+        )
+    return int(value)
+
+
+def circle_poly(D, *, segments_per_quadrant):
     r"""
     Circular section polygon (regular N-gon approximation).
 
     The circle is centred at :math:`(D/2, D/2)` so that the bounding
     box starts at the origin.
 
+    The section GenSec analyses is the **polygon**, not the circle.
+    Every coordinate this library reports is exact on that polygon; the
+    distance to the circle the author had in mind is a property of the
+    author's own discretisation, of magnitude
+
+    .. math::
+
+        s = R\left(1 - \cos\frac{\pi}{n}\right),
+        \qquad n = 4\,\texttt{segments\_per\_quadrant},
+
+    the sagitta of one side.  At :math:`R = 600` mm with
+    ``segments_per_quadrant = 64`` this is 4.517890e-02 mm, i.e.
+    3.765e-03 % of the 1200 mm depth.
+
+    ``segments_per_quadrant`` is keyword-only and has **no default**: it
+    does not tune the accuracy of an integration over a fixed shape, it
+    selects which shape the section is.  A 16-gon is not a circle
+    integrated coarsely, it is a different section, and choosing one
+    silently on the caller's behalf would be a declaration GenSec made
+    for them.
+
     Parameters
     ----------
     D : float
         Diameter [mm].
-    resolution : int, optional
-        Number of vertices on the circumference. Default 64.
+    segments_per_quadrant : int
+        Straight segments used for each quadrant of the circumference.
+        The resulting polygon has :math:`4n` vertices; the name states
+        the factor of four so that the sagitta formula above can be
+        applied without discovering it by experiment.
 
     Returns
     -------
     shapely.geometry.Polygon
+        Polygon with :math:`4\,\texttt{segments\_per\_quadrant}`
+        vertices.
+
+    Raises
+    ------
+    ValueError
+        If ``segments_per_quadrant`` is not a positive integer.
     """
-    return Point(D / 2, D / 2).buffer(D / 2, quad_segs=resolution)
+    n = _checked_segments_per_quadrant(segments_per_quadrant)
+    return Point(D / 2, D / 2).buffer(D / 2, quad_segs=n)
 
 
-def annulus_poly(D_ext, D_int, resolution=64):
+def annulus_poly(D_ext, D_int, *, segments_per_quadrant):
     r"""
     Annular (hollow circular) section.
+
+    Both boundaries are discretised with the same
+    ``segments_per_quadrant``.  See :func:`circle_poly` for what the
+    parameter measures and for the sagitta it implies; the inner
+    boundary, having the smaller radius, carries the smaller sagitta.
 
     Parameters
     ----------
@@ -111,7 +185,9 @@ def annulus_poly(D_ext, D_int, resolution=64):
         Outer diameter [mm].
     D_int : float
         Inner diameter [mm].
-    resolution : int, optional
+    segments_per_quadrant : int
+        Straight segments per quadrant, on both boundaries.  Each ring
+        receives :math:`4n` vertices.
 
     Returns
     -------
@@ -121,16 +197,18 @@ def annulus_poly(D_ext, D_int, resolution=64):
     Raises
     ------
     ValueError
-        If ``D_int >= D_ext``.
+        If ``D_int >= D_ext``, or if ``segments_per_quadrant`` is not a
+        positive integer.
     """
+    n = _checked_segments_per_quadrant(segments_per_quadrant)
     if D_int >= D_ext:
         raise ValueError(
             f"Inner diameter ({D_int}) must be less than "
             f"outer diameter ({D_ext})."
         )
     cx, cy = D_ext / 2, D_ext / 2
-    outer = Point(cx, cy).buffer(D_ext / 2, quad_segs=resolution)
-    inner = Point(cx, cy).buffer(D_int / 2, quad_segs=resolution)
+    outer = Point(cx, cy).buffer(D_ext / 2, quad_segs=n)
+    inner = Point(cx, cy).buffer(D_int / 2, quad_segs=n)
     return outer.difference(inner)
 
 
@@ -414,3 +492,4 @@ def custom_poly(exterior_coords, holes=None):
     if holes:
         return Polygon(exterior_coords, holes)
     return Polygon(exterior_coords)
+# GENSEC-COMPLETE phase=30 utc=2026-09-04T07:30:41Z sha256=f73e32e8153e1617dd268e91c01b6a85f57ca732b1c018305656a925ae20e40d body_lines=494

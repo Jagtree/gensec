@@ -263,9 +263,9 @@ def section_D():
 
 def _pt_beam(mesh=25.0, y_t=200.0, sp0=1200.0):
     b, h = 600.0, 1400.0
-    conc = concrete_from_class("C35/45", ls="S")
+    conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
     ps = prestress_from_ec2(f_p01k=1600.0, f_pk=1860.0, eps_uk=0.035,
-                            Ep=195000.0)
+                            Ep=195000.0, ls='F', NA='EC2', eps_ud_factor=0.9, diagram='horizontal')
     ps.ec2.relaxation_class, ps.ec2.rho_1000 = 2, 2.5
     t = Tendon(y=y_t, x=b / 2, Ap=2000.0, material=ps, eps_pe=sp0 / 195000.0,
                bonded=True, embedded=True, name="T1")
@@ -311,7 +311,7 @@ def section_F():
     print("\n== F. NULL AND STRUCTURAL TESTS ==")
     from gensec.solver.losses import _UNCAST_PLACEHOLDER_E  # noqa: F401
     b, h = 600.0, 1400.0
-    conc = concrete_from_class("C35/45", ls="S")
+    conc = concrete_from_class("C35/45", ls="S", loadtype='slow', TypeConc='R', NA='French', time=28)
     sec = GenericSection(polygon=Polygon([(0, 0), (b, 0), (b, h), (0, h)]),
                          bulk_material=conc, rebars=[], tendons=[],
                          mesh_size=40.0)
@@ -382,7 +382,7 @@ def section_H():
     common = dict(demand=(0.0, -800e6, 0.0), zone_ages_t0={0: 28.0},
                   zone_ages_t={0: INF}, zone_curing_ages={0: 7.0},
                   tendon_ages_t0={"T1": 0.0}, interval_days=INF - 28.0)
-    _, tr1, _, _ = expand_losses(
+    _, tr1, _, _, _ = expand_losses(
         sec, st, models={0: LossModel(provider=prov)}, **common)
     base = tr1[0].d_sigma_p["T1"]
     print(f"     single AAEM interval : {base:8.2f} MPa")
@@ -390,7 +390,7 @@ def section_H():
     for n in (2, 4, 8, 12):
         cuts = sorted({round((INF - 28.0) * 10 ** (-3 + 3 * k / n), 4)
                        for k in range(1, n)})
-        _, tr, _, _ = expand_losses(
+        _, tr, _, _, _ = expand_losses(
             sec, st, models={0: LossModel(provider=prov, steps=cuts)},
             **common)
         tot = sum(r.d_sigma_p["T1"] for r in tr)
@@ -480,8 +480,11 @@ def section_J(yaml_path="examples/example_composite_losses.yaml"):
         return
     sec = d["section"]
     ddb = {x["name"]: x for x in d["demands"]}
-    tl = ConstructionTimeline.from_block(d["construction_history"],
-                                         losses_models=d["losses_models"])
+    # from_document, not from_block: the timeline is made of more
+    # top-level keys than construction_history + losses_models, and
+    # a caller that lists them by hand drops the ones it does not
+    # know about -- silently, until a datum needs one.
+    tl = ConstructionTimeline.from_document(d)
     res = tl.resolve(sec, ddb)
     check("the timeline resolves with losses on three intervals",
           len(res.losses_ops) == 3, f"{sorted(res.losses_ops)}")

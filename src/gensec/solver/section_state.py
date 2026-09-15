@@ -114,6 +114,46 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
 
+from ..materials.base import (
+    DIGEST_SIZE, digest_bytes, encode_value,
+)
+
+
+def digest_to_int(digest: bytes) -> int:
+    r"""
+    Project a digest onto a Python :class:`int`.
+
+    The first eight bytes are read as a little-endian **signed**
+    integer, giving a value in the same range as a CPython hash and
+    usable as a dictionary key wherever the previous integer hash was.
+
+    The projection is deliberately *not* ``hash(digest)``.  CPython's
+    ``hash`` of a ``bytes`` object is SipHash keyed by
+    ``PYTHONHASHSEED``, random per process by default; routing a
+    stable digest through it would produce an integer that is
+    irreproducible across runs while the digest beneath it is stable
+    — a defect harder to see than the one it replaced.
+
+    Parameters
+    ----------
+    digest : bytes
+        At least eight bytes.
+
+    Returns
+    -------
+    int
+
+    Raises
+    ------
+    ValueError
+        If *digest* is shorter than eight bytes.
+    """
+    if len(digest) < 8:
+        raise ValueError(
+            f"digest_to_int: need at least 8 bytes, got {len(digest)}."
+        )
+    return int.from_bytes(digest[:8], "little", signed=True)
+
 
 # ==================================================================
 #  Speed knob
@@ -227,14 +267,29 @@ def geometry_signature(section) -> Tuple[Any, ...]:
     identity.  In Phase 3 the bulk is immutable, so this is computed
     once and reused.
 
-    The byte hashes of the coordinate/area arrays make the signature a
-    genuine *content* identity: two sections meshed identically share
-    a signature even if they are distinct objects.  Material identity
-    uses :func:`id`, which is process-local — adequate because the
-    domain cache lives only within a single run.  Two materials with
-    identical parameters but different objects get different
-    signatures and therefore do not share a cached domain; this is the
-    *safe* direction (a missed reuse, never a wrong reuse).
+    Every term is derived from *content*, so the signature is
+    reproducible: two sections meshed identically share a signature
+    whether they are the same object, two separate constructions, a
+    deep copy, or the same file loaded in two different processes.
+
+    Neither ``id()`` nor the interpreter's built-in ``hash`` appears
+    in any term.  ``id()`` is a memory address, which differs between
+    runs; ``hash(bytes)`` is SipHash keyed by ``PYTHONHASHSEED``,
+    random per process.  Either one alone would make a serialised
+    signature meaningless, so both are gone: materials enter through
+    :meth:`~gensec.materials.base.Material.content_token` and arrays
+    through :func:`~gensec.materials.base.digest_bytes`.
+
+    Zone materials
+    --------------
+    A composite section carries per-zone material overrides in
+    ``bulk_materials``, and they are part of the signature.  Before
+    Phase 12 only ``bulk_material`` — the substrate — was read, so two
+    sections with the same mesh and the same substrate but a different
+    *topping* produced the same signature.  No wrong reuse followed,
+    because the domain cache is per-manager and a manager owns exactly
+    one base section; a serialised digest, which Phase 13 intends,
+    would have turned it into one.
 
     Parameters
     ----------
@@ -244,33 +299,113 @@ def geometry_signature(section) -> Tuple[Any, ...]:
     Returns
     -------
     tuple
-        Canonical, hashable signature.
+        Canonical, hashable signature.  Terms are digests and integers,
+        so ``hash()`` of the tuple is stable for a fixed
+        ``PYTHONHASHSEED`` and the tuple itself is byte-comparable
+        without one.
+
+    See Also
+    --------
+    geometry_digest : the same content collapsed to a single digest.
 
     Notes
     -----
     A bulk-fiber active mask is intentionally **not** part of this
-    signature in Phase 3 (all bulk fibers are always active).  When
-    staged-construction of bulk material (composite toppings) is added
-    later, fold the active-fiber mask hash in here; the per-element
-    hash machinery below is unaffected.
+    signature (it is a *state* quantity, carried by
+    :attr:`SectionState.bulk_active` and folded in by
+    :meth:`SectionState.capacity_digest`).
     """
     x = np.ascontiguousarray(section.x_fibers, dtype=float)
     y = np.ascontiguousarray(section.y_fibers, dtype=float)
     a = np.ascontiguousarray(section.A_fibers, dtype=float)
     mi = np.ascontiguousarray(section.mat_indices, dtype=np.int64)
+
+    zone_mats = getattr(section, "bulk_materials", None) or []
+    zone_tokens = tuple(
+        _material_token(mat) for _poly, mat in zone_mats
+    )
     return (
-        id(section.bulk_material),
+        _material_token(getattr(section, "bulk_material", None)),
+        zone_tokens,
         int(x.size),
-        hash(x.tobytes()),
-        hash(y.tobytes()),
-        hash(a.tobytes()),
-        hash(mi.tobytes()),
+        digest_bytes(x.tobytes()),
+        digest_bytes(y.tobytes()),
+        digest_bytes(a.tobytes()),
+        digest_bytes(mi.tobytes()),
         # Reference point: in Phase 3 it is the polygon centroid and
         # constant, but include it so that a future bulk-staging change
         # which moves the centroid invalidates the cache.
         _quantize(float(section.x_centroid), 1e-3),
         _quantize(float(section.y_centroid), 1e-3),
     )
+
+
+def _material_token(material) -> bytes:
+    r"""
+    Content token of *material*, or a null token when absent.
+
+    Parameters
+    ----------
+    material : Material or None
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    NotImplementedError
+        Propagated from
+        :meth:`~gensec.materials.base.Material.content_token` when a
+        custom material declares no content.  The failure is loud on
+        purpose: a material whose identity cannot be derived would
+        otherwise silently collapse onto every other such material and
+        share their cached domain.
+    """
+    if material is None:
+        return digest_bytes(b"none")
+    token = getattr(material, "content_token", None)
+    if not callable(token):
+        cls = type(material)
+        raise NotImplementedError(
+            f"{cls.__module__}.{cls.__qualname__} declares no content "
+            f"token, so it cannot take part in a reproducible section "
+            f"identity.  Subclass gensec.materials.base.Material as a "
+            f"dataclass (the token is then derived from its fields), "
+            f"or implement content_token() returning a digest over "
+            f"exactly the parameters that define the law."
+        )
+    return token()
+
+
+def geometry_digest(section) -> bytes:
+    r"""
+    Single digest of the fixed (bulk) part of a section.
+
+    The same content as :func:`geometry_signature`, collapsed to
+    :data:`~gensec.materials.base.DIGEST_SIZE` bytes.  Use this when
+    the identity has to be written down — a cache file, a report, the
+    machine-readable construction-timeline dump — and the signature
+    tuple when it only has to be compared in memory.
+
+    Parameters
+    ----------
+    section : GenericSection
+
+    Returns
+    -------
+    bytes
+        Digest of length
+        :data:`~gensec.materials.base.DIGEST_SIZE`.
+
+    Examples
+    --------
+    >>> import copy
+    >>> geometry_digest(sec) == \
+    ...     geometry_digest(copy.deepcopy(sec))   # doctest: +SKIP
+    True
+    """
+    return digest_bytes(encode_value(geometry_signature(section)))
 
 
 # ==================================================================
@@ -363,7 +498,7 @@ class SectionState:
         1. the fixed geometry/mesh signature *geom_sig*;
         2. for every **active and bonded** element, in ascending
            index order, the triple
-           ``(material_id, quantize(eps_init), bonded)``;
+           ``(material_token, quantize(eps_init), bonded)``;
         3. the quantized bulk pre-strain;
         4. (Phase 8, when :attr:`bulk_active` is set) the byte hash of
            the zone activity mask, and — per **active** zone in index
@@ -393,9 +528,11 @@ class SectionState:
         ----------
         geom_sig : tuple
             Output of :func:`geometry_signature` for the base section.
-        union_materials : list of int
-            ``id(material)`` for each element in the union set, in the
-            canonical ``rebars + tendons`` order.
+        union_materials : list of bytes
+            Content token of the material of each element in the union
+            set, in the canonical ``rebars + tendons`` order.  Before
+            Phase 12 these were ``id(material)`` values, which made the
+            resulting hash a memory address in disguise.
         chi_quantum : float, optional
             Curvature bucket width [1/mm].  Deterministic per manager:
             :class:`StagedDomainManager` computes it once from the
@@ -406,7 +543,45 @@ class SectionState:
         Returns
         -------
         int
-            Python hash of the canonical state tuple.
+            Signed 64-bit projection of :meth:`capacity_digest`.
+
+        See Also
+        --------
+        capacity_digest : the same identity as bytes.
+        """
+        return digest_to_int(self.capacity_digest(
+            geom_sig, union_materials, chi_quantum=chi_quantum))
+
+    def capacity_digest(self, geom_sig: Tuple[Any, ...],
+                        union_materials: List[bytes],
+                        chi_quantum: float = QUANT_EPS) -> bytes:
+        r"""
+        Capacity state identity as a reproducible digest.
+
+        Same content as :meth:`capacity_hash`, which is now a
+        projection of this method — one identity, two renderings,
+        never two parallel objects.
+
+        Every term is content-derived, so the digest is byte-identical
+        across processes, machines and deep copies.  In particular the
+        zone-activity mask enters through
+        :func:`~gensec.materials.base.digest_bytes` rather than
+        ``hash(...tobytes())``, which was seed-randomised.
+
+        Parameters
+        ----------
+        geom_sig : tuple
+            Output of :func:`geometry_signature` for the base section.
+        union_materials : list of bytes
+            Content token per union element, ``rebars + tendons``.
+        chi_quantum : float, optional
+            Curvature bucket width [1/mm].
+
+        Returns
+        -------
+        bytes
+            Digest of length
+            :data:`~gensec.materials.base.DIGEST_SIZE`.
         """
         elem_terms = []
         idx = np.nonzero(self.active & self.bonded)[0]
@@ -423,7 +598,7 @@ class SectionState:
         ]
         if self.bulk_active is not None:
             ba = np.ascontiguousarray(self.bulk_active, dtype=bool)
-            terms.append(hash(ba.tobytes()))
+            terms.append(digest_bytes(ba.tobytes()))
             if self.bulk_planes is None:
                 planes = np.zeros((ba.size, 3), dtype=float)
             else:
@@ -437,7 +612,7 @@ class SectionState:
                     _quantize(float(cy), chi_quantum),
                 ))
             terms.append(tuple(zone_terms))
-        return hash(tuple(terms))
+        return digest_bytes(encode_value(tuple(terms)))
 
     def copy_advanced(self, stage_index: int,
                       label: str = "") -> "SectionState":
@@ -1605,12 +1780,28 @@ class StagedDomainManager:
         self._mat_indices = getattr(base_section, "mat_indices", None)
 
     @staticmethod
-    def _collect_union_materials(section) -> List[int]:
-        r"""``id(material)`` per union element, ``rebars + tendons``."""
-        ids = [id(r.material) for r in section.rebars]
+    def _collect_union_materials(section) -> List[bytes]:
+        r"""
+        Content token per union element, ``rebars + tendons``.
+
+        Before Phase 12 this returned ``id(material)``, so two runs of
+        the same script produced different capacity hashes for the
+        same section and a deep copy disagreed with its original.  The
+        tokens are content digests, so the identity now says what it
+        claims to say.
+
+        Parameters
+        ----------
+        section : GenericSection
+
+        Returns
+        -------
+        list of bytes
+        """
+        tokens = [_material_token(r.material) for r in section.rebars]
         for t in getattr(section, "tendons", []):
-            ids.append(id(t.material))
-        return ids
+            tokens.append(_material_token(t.material))
+        return tokens
 
     def hash_of(self, state: SectionState) -> int:
         """Capacity state hash for *state* against the base geometry."""

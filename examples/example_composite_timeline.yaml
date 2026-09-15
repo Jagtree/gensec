@@ -13,15 +13,38 @@
 #  Verification combinations anchor at named timeline *points*.
 # =====================================================================
 
+# ---------------------------------------------------------------------
+#  Document schema version (D7).  Mandatory for any document that
+#  declares 'zone_rheology', 'tolerances' or a provider 'declared:'
+#  block: those carry hand-written, time-dependent or judgement
+#  numbers that travel into the machine-readable timeline dump as
+#  provenance, and provenance under an unstated contract is not
+#  provenance.  See handoff/13_0-GENSEC_DUMP_SCHEMA.md section 1.1.
+# ---------------------------------------------------------------------
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
+schema_version: 1
+
 materials:
   c_precast:
     type: concrete
     fck: 45.0
     gamma_c: 1.5
+    # EN 1992-1-1 §3.1.6(1)P recommended value, declared
+    # here because the container supplies none.
+    long_term_reduction_factor: 0.85
   c_topping:
     type: concrete
     fck: 30.0
     gamma_c: 1.5
+    # EN 1992-1-1 §3.1.6(1)P recommended value, declared
+    # here because the container supplies none.
+    long_term_reduction_factor: 0.85
   steel:
     type: steel
     fyk: 450.0
@@ -46,6 +69,31 @@ section:
     - {name: A2, x: 540, y: 60,   diameter: 26, material: steel}   # precast
     - {name: T1, x: 60,  y: 1340, diameter: 16, material: steel}   # topping
     - {name: T2, x: 540, y: 1340, diameter: 16, material: steel}   # topping
+
+# ---------------------------------------------------------------------
+#  The rheological identity of each zone, declared once (P3).  It is not
+#  a request to compute creep -- no ``interval`` here integrates any --
+#  it is what tells the engine which concrete each zone is made of and
+#  how old it is, so the casting datum can be drawn on the section's
+#  real (service) response instead of on the design law.  Without it the
+#  topping's datum would be locked in against a substrate about 30 %
+#  too soft.
+# ---------------------------------------------------------------------
+losses_models:
+  rheo_precast:
+    provider: ec2
+    fck: 45.0
+    cement_class: N
+    RH: 70.0
+  rheo_topping:
+    provider: ec2
+    fck: 30.0
+    cement_class: N
+    RH: 70.0
+
+zone_rheology:
+  base:    {model: rheo_precast, age: 28, curing: 3}   # precast, 28 d at t=0
+  topping: {model: rheo_topping, age: 0,  curing: 3}   # cast at its event
 
 # Permanent actions only enter the timeline (variable actions are
 # combination components).  SI in the engine; kN / kN*m at the surface.

@@ -1,0 +1,121 @@
+# =====================================================================
+#  GenSec — STAGED INJECTION: the D1 case, made observable.
+#
+#  A post-tensioned girder whose three tendons are stressed AND INJECTED
+#  one at a time:
+#
+#      stress P1 -> grout P1 -> stress P2 -> grout P2 -> stress P3 -> grout P3
+#
+#  This is the ordinary site practice on long girders tensioned in
+#  segments, where nobody waits for the last cable before grouting the
+#  first (6_8-WARNING_intra_sequence_bonded.md §2, case 1).  It is also
+#  the case NO distributed example exercised before Phase 22: measured
+#  at the opening of that phase, 0 of the 23 example files interleaved a
+#  `stress` with a `grout`, and the two that grouted at all carried a
+#  SINGLE tendon — a geometry in which the effect cannot exist, because
+#  there is no second cable for the first to stiffen the section for.
+#
+#  WHAT THE FILE IS FOR.  When P2 is jacked, P1 is already bonded: it is
+#  a section element, and it transforms the section P2 is stressed
+#  against by (Ep - Ec)*Ap at its own level.  Before Phase 22 the
+#  resisting view was tendon-free and CONSTANT across the sequence, so
+#  the driver refused this history outright — and the refusal named the
+#  wrong reason, reading "P2 and P3 are not in `order`" as "they are
+#  already grouted" when in fact they were NOT YET STRESSED.
+#
+#  MEASURED on this geometry (22_0 §1), tendon-free view vs
+#  already-injected view, one_pass scheme:
+#
+#      tendon      sigma_p final        elastic-shortening loss
+#      P1          +0.464 %             -5.11 %
+#      P2          +0.258 %             -6.62 %
+#      P3           0                    0     (last jacked, no debit)
+#
+#  Against GenSec's declared tolerances — all of which sit at 1e-9
+#  relative or below (`tolerances.py`) — 0.46 % is eight orders of
+#  magnitude out.  That is what made D1 a defect rather than a
+#  conservative refusal worth narrowing.
+#
+#  SCOPE NOTE.  The section is a bare rectangle and the history carries
+#  no `interval`: this file isolates the elastic-shortening physics of
+#  the staged injection, so that any number it moves is attributable to
+#  that and to nothing else.  Creep, shrinkage and relaxation on a
+#  staged-injection history are the flagship's business
+#  (`example_composite_losses.yaml`), not this file's.
+# =====================================================================
+
+# The normative declaration. Without it GenSec derives nothing and the
+# model does not load: f_ck is an input, the code is what turns it into
+# a modulus (F-P21-1).
+code: ec2
+
+materials:
+  conc:
+    type: concrete_ec2_gen1
+    fck: 40                 # Ec = 35 220.462 MPa under EN 1992-1-1 Table 3.1
+    ls: F
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
+  strand:
+    type: prestressing_steel_ec2
+    class: Y1860S7          # f_p01k=1600, f_pk=1860, eps_uk=0.035, Ep=195000
+    ls: F
+    diagram: inclined
+    NA: "EC2"
+    eps_ud_factor: 0.9
+  rebar_steel:
+    type: steel
+    fyk: 450
+    Es: 200000
+
+section:
+  B: 400
+  H: 1200
+  bulk_material: conc
+  n_fibers_y: 240
+
+  rebars:
+    - {y: 1140, x:  60, As: 314, material: rebar_steel}
+    - {y: 1140, x: 340, As: 314, material: rebar_steel}
+
+  # Three tendons in the bottom third, 50 mm apart.  y is measured from
+  # the section's own origin; the centroid sits at 600.
+  tendons:
+    - {name: P1, y: 150, x: 200, Ap: 1500, material: strand, eps_pe: 0.0, bonded: true}
+    - {name: P2, y: 200, x: 200, Ap: 1500, material: strand, eps_pe: 0.0, bonded: true}
+    - {name: P3, y: 250, x: 200, Ap: 1500, material: strand, eps_pe: 0.0, bonded: true}
+
+demands:
+  - {name: G1, N_kN: -420, Mx_kNm: -640}    # girder on its bearings
+  - {name: Q,  Mx_kNm: -520}                # variable
+
+construction_history:
+  - load:   {demand: G1}                          # girder self-weight
+  # --- the interleaving. Each cable is injected before the next is
+  #     jacked, so tendon k is bonded from step k+1 onwards and the
+  #     resisting section grows by one cable at every jack.
+  - stress: {tendons: [P1], sigma_p0: 1300.0}
+  - grout:  {tendons: [P1]}
+  - stress: {tendons: [P2], sigma_p0: 1300.0}
+  - grout:  {tendons: [P2]}
+  - stress: {tendons: [P3], sigma_p0: 1300.0}
+  - grout:  {tendons: [P3]}
+  - point:  transfer
+  - load:   {demand: Q}
+  - point:  service
+
+combinations:
+  - name: ULS_transfer
+    at: transfer
+    history_factors: {G1: 1.35}
+    gamma_P: favourable
+    components: []
+  - name: SLS_char
+    at: service
+    history_factors: {G1: 1.0, Q: 1.0}
+    components: []
+
+output:
+  verification_top_k: 10

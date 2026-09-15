@@ -12,6 +12,13 @@
 # and staged construction are later phases.
 # ---------------------------------------------------------------------------
 
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
 materials:
   # Concrete C40/50 (EC2), parabola-rectangle, ULS fundamental.
   conc:
@@ -19,6 +26,10 @@ materials:
     fck: 40
     ls: F
 
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
   # Prestressing steel — option A: standard EN 10138 designation.
   # The inclined design branch towards f_pd is selected; gamma_S = 1.15
   # is resolved from ls='F'.
@@ -29,6 +40,8 @@ materials:
     diagram: inclined     # or 'horizontal'
     # eps_ud_factor: 0.9  # default, EC2 §3.3.6(7)
 
+    NA: "EC2"
+    eps_ud_factor: 0.9
   # Ordinary reinforcement (B450C).
   rebar_steel:
     type: steel

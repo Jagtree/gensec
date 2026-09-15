@@ -60,7 +60,7 @@ from gensec.solver.section_state import (
 
 def _rc_section(n_fibers_y=20):
     """300x500 RC section, 4 corner bars (no tendons)."""
-    concrete = Concrete(fck=25.0)
+    concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     steel = Steel(fyk=450.0)
     As = np.pi / 4 * 16 ** 2
     rebars = [
@@ -104,9 +104,91 @@ class TestCapacityHash(unittest.TestCase):
                             np.zeros(n))
 
     def test_geometry_signature_stable_and_hashable(self):
+        """Two calls agree — kept, but it is not the interesting claim.
+
+        This assertion cannot fail: it compares two calls inside one
+        process, where every ``id()`` is constant by construction.  It
+        is retained only as a smoke test; the claims that can actually
+        fail are the two below.
+        """
         g1 = geometry_signature(self.sec)
         g2 = geometry_signature(self.sec)
         self.assertEqual(hash(g1), hash(g2))
+
+    def test_geometry_signature_invariant_under_deepcopy(self):
+        """A deep copy is the same section by content, so it must hash
+        the same.
+
+        Under ``id()`` keying this failed: the copy's materials were
+        different objects, so the signature differed although not one
+        declared parameter had changed.
+        """
+        import copy as _copy
+        self.assertEqual(geometry_signature(self.sec),
+                         geometry_signature(_copy.deepcopy(self.sec)))
+
+    def test_capacity_hash_invariant_under_deepcopy(self):
+        """The state hash inherits the same property."""
+        import copy as _copy
+        other = _copy.deepcopy(self.sec)
+        mgr2 = StagedDomainManager.__new__(StagedDomainManager)
+        mgr2._geom_sig = geometry_signature(other)
+        mgr2._union_materials = \
+            StagedDomainManager._collect_union_materials(other)
+        self.assertEqual(mgr2.hash_of(self._all_active_state(other)),
+                         self.mgr.hash_of(self.base))
+
+    def test_geometry_digest_reproducible_across_processes(self):
+        """The digest survives a process boundary with a random seed.
+
+        Two fresh interpreters, ``PYTHONHASHSEED`` left at its default
+        (random per process), building the same section from the same
+        source.  This is the claim a serialised domain identity rests
+        on, and the only one of the four that a second process can
+        refute.
+        """
+        import os as _os
+        import subprocess
+        import sys as _sys
+
+        import gensec as _gensec
+        from gensec.solver.section_state import geometry_digest
+
+        self.assertTrue(callable(geometry_digest))
+        src_dir = _os.path.dirname(_os.path.dirname(
+            _os.path.abspath(_gensec.__file__)))
+        probe = (
+            "import sys\n"
+            "sys.path.insert(0, " + repr(src_dir) + ")\n"
+            "from shapely.geometry import Polygon\n"
+            "from gensec.geometry.fiber import RebarLayer\n"
+            "from gensec.geometry.section import GenericSection\n"
+            "from gensec.materials.concrete import Concrete\n"
+            "from gensec.materials.steel import Steel\n"
+            "from gensec.solver.section_state import geometry_digest\n"
+            "c = Concrete(fck=45.0, gamma_c=1.5,\n"
+            "             long_term_reduction_factor=0.85)\n"
+            "s = Steel(fyk=450.0)\n"
+            "sec = GenericSection(\n"
+            "    polygon=Polygon([(0.,0.),(300.,0.),(300.,600.),"
+            "(0.,600.)]),\n"
+            "    bulk_material=c,\n"
+            "    rebars=[RebarLayer(y=50., As=628., material=s,"
+            " x=150.)],\n"
+            "    mesh_size=25.)\n"
+            "print(geometry_digest(sec).hex())\n"
+        )
+        outs = []
+        for _ in range(2):
+            env = dict(_os.environ)
+            env.pop("PYTHONHASHSEED", None)
+            r = subprocess.run([_sys.executable, "-c", probe],
+                               capture_output=True, text=True,
+                               env=env, timeout=180)
+            self.assertEqual(r.returncode, 0, r.stderr[-400:])
+            outs.append(r.stdout.strip())
+        self.assertEqual(outs[0], outs[1])
+        self.assertEqual(len(outs[0]), 32)
 
     def test_eps_within_quantum_same_hash(self):
         h0 = self.mgr.hash_of(self.base)

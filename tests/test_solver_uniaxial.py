@@ -20,7 +20,7 @@ class TestPureAxial(unittest.TestCase):
         self.fcd = 0.85 * 25.0 / 1.5
         self.fyd = 450.0 / 1.15
         As = 3 * np.pi / 4 * 16**2
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rb = [RebarLayer(y=40, As=As, material=steel, n_bars=3, diameter=16),
               RebarLayer(y=460, As=As, material=steel, n_bars=3, diameter=16)]
@@ -57,7 +57,7 @@ class TestSimpleBending(unittest.TestCase):
         x = As * fyd / (0.8 * B * fcd)
         Mrd_ana = As * fyd * (d - 0.8 * x / 2)
 
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel_t = Steel(fyk=450.0, works_in_compression=False)
         rb = [RebarLayer(y=H - d, As=As, material=steel_t,
                          n_bars=n_bars, diameter=diameter)]
@@ -82,7 +82,7 @@ class TestRoundTrip(unittest.TestCase):
     """Forward integrate then inverse solve: must recover same state."""
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rb = [RebarLayer(y=40, As=942.5, material=steel),
               RebarLayer(y=560, As=942.5, material=steel)]
@@ -102,7 +102,7 @@ class TestSymmetry(unittest.TestCase):
     """Doubly symmetric section: N-M diagram must be symmetric in M."""
 
     def test_symmetric_diagram(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         rb = [RebarLayer(y=40, As=942.5, material=steel),
               RebarLayer(y=560, As=942.5, material=steel)]
@@ -122,7 +122,7 @@ class TestDetailedFiberState(unittest.TestCase):
     """
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.fcd = 0.85 * 25.0 / 1.5
         self.fyd = 450.0 / 1.15
         self.Es = 200000.0
@@ -192,7 +192,7 @@ class TestHighStrengthConcreteSolver(unittest.TestCase):
 
     def test_nm_diagram_generates(self):
         from gensec.materials import concrete_from_ec2
-        c70 = concrete_from_ec2(fck=70, ls='F')
+        c70 = concrete_from_ec2(fck=70, ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         steel = Steel(fyk=500.0, gamma_s=1.15)
         As = 4 * np.pi / 4 * 25**2
         rb = [RebarLayer(y=50, As=As, material=steel),
@@ -209,7 +209,7 @@ class TestHighStrengthConcreteSolver(unittest.TestCase):
 
     def test_inverse_converges(self):
         from gensec.materials import concrete_from_ec2
-        c70 = concrete_from_ec2(fck=70, ls='F')
+        c70 = concrete_from_ec2(fck=70, ls='F', loadtype='slow', TypeConc='R', NA='French', time=28)
         steel = Steel(fyk=500.0, gamma_s=1.15)
         As = 4 * np.pi / 4 * 25**2
         rb = [RebarLayer(y=50, As=As, material=steel),
@@ -233,7 +233,7 @@ class TestSolverRobustness(unittest.TestCase):
     """
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         A20 = np.pi / 4 * 20**2
         rb = [RebarLayer(y=40, As=3 * A20, material=steel),
@@ -274,7 +274,7 @@ class TestEmbeddedBarSubtraction(unittest.TestCase):
     """
 
     def setUp(self):
-        self.concrete = Concrete(fck=25.0)
+        self.concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.fcd = 0.85 * 25.0 / 1.5
         self.fyd = 450.0 / 1.15
         self.steel = Steel(fyk=450.0)
@@ -360,7 +360,7 @@ class TestSignConventions(unittest.TestCase):
     """
 
     def setUp(self):
-        self.c = Concrete(fck=25.0)
+        self.c = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.s = Steel(fyk=450.0)
         A20 = np.pi / 4 * 20**2
         rb = [RebarLayer(y=40, As=3 * A20, material=self.s),
@@ -407,7 +407,7 @@ class TestMomentCurvature(unittest.TestCase):
     """Test moment-curvature diagram generation."""
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         A20 = np.pi / 4 * 20**2
         rb = [RebarLayer(y=40, As=3 * A20, material=steel),
@@ -440,11 +440,45 @@ class TestMomentCurvature(unittest.TestCase):
         self.assertIsNotNone(mc["yield_M_pos"])
         self.assertGreater(abs(mc["yield_chi_pos"]), 0)
 
-    def test_ultimate_detected(self):
+    def test_ultimate_reports_that_no_limit_is_reached_in_range(self):
+        r"""
+        No element of this section reaches its own limit in the scanned
+        range, and the scan says so.
+
+        Rewritten in Phase 16 (declared deviation, ``16_1`` §5).  It
+        used to assert that an ultimate **was** detected, and one was --
+        but for a reason that does not exist: the criterion pooled the
+        bulk and rebar strains and compared the pool's maximum against
+        the pool's largest limit, which on a reinforced section is the
+        **steel's**.  What fired was the extreme *concrete* fibre in
+        tension crossing the *rebar's* ultimate strain, at
+        1.0157e-02 against a limit of 1.0000e-02 -- a comparison with no
+        physical referent, since the concrete law has no tensile failure
+        strain at all (``eps_max = 0``: it carries nothing above
+        cracking, it does not rupture).
+
+        With every class now tested against its own limits (N-2), the
+        measurement on this section is:
+
+        =====================  ============  ============
+        quantity               reached       own limit
+        =====================  ============  ============
+        bulk minimum (crush)   -3.3429e-03   -3.5000e-03
+        rebar maximum          below 1e-02    1.0000e-02
+        =====================  ============  ============
+
+        Neither binds, and the honest report is the diagnostic the scan
+        already carried and nobody read.
+        """
         mc = self.nm_gen.generate_moment_curvature(N_fixed=-500e3)
-        self.assertIsNotNone(mc["ultimate_chi_pos"])
-        self.assertGreater(abs(mc["ultimate_chi_pos"]),
-                           abs(mc["yield_chi_pos"]))
+        self.assertIsNone(mc["ultimate_chi_pos"])
+        self.assertEqual(mc["diagnostics_pos"]["ultimate_reason"],
+                         "limit_not_reached_in_range")
+        # the crushing strain is approached, not reached: the section is
+        # genuinely short of its limit, not mis-scanned.
+        eps_min = np.asarray(mc["eps_min"], dtype=float)
+        self.assertLess(float(np.nanmin(eps_min)), -3.0e-3)
+        self.assertGreater(float(np.nanmin(eps_min)), -3.5e-3)
 
     def test_symmetric_section_symmetric_mchi(self):
         """Doubly symmetric section -> M-chi symmetric for valid points."""

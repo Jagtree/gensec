@@ -89,7 +89,7 @@ def _concrete(name="C45"):
     (Phase-7 D3) matches overrides by ``material.name``, so the name
     is attached post-hoc exactly as the Phase-7 fixtures do.
     """
-    c = Concrete(fck=45.0)
+    c = Concrete(fck=45.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     c.name = name
     return c
 
@@ -574,9 +574,12 @@ class TestOffsetField(unittest.TestCase):
 class TestYamlSurface(unittest.TestCase):
 
     _BASE = """
+# Declared because GenSec derives nothing from an undeclared
+# model: the code is not inferred from a material type.
+code: ec2
 materials:
-  c1: {type: concrete_ec2_gen1, class: 'C45/55'}
-  c2: {type: concrete_ec2_gen1, class: 'C30/37'}
+  c1: {type: concrete_ec2_gen1, class: 'C45/55', ls: F, loadtype: slow, TypeConc: R, NA: French, time: 28}
+  c2: {type: concrete_ec2_gen1, class: 'C30/37', ls: F, loadtype: slow, TypeConc: R, NA: French, time: 28}
   s:  {type: steel, fyk: 450, gamma_s: 1.15}
 section:
   shape: rect
@@ -694,10 +697,9 @@ class TestSlsBoundary(unittest.TestCase):
         sec = _composite(rebars=[RebarLayer(x=60.0, y=60.0, As=800.0,
                                             material=_steel())],
                          linear=False)
-        # D3 rule: concrete SLS moduli are explicit — by name here
-        # (Material dataclasses are unhashable; by-instance overrides
-        # go through resolve_sls_moduli's id() indirection, which the
-        # public mapping does not expose).
+        # D3 rule: concrete SLS moduli are explicit -- by material
+        # name here, which is the broadcast sugar of the slot-key
+        # contract (12_0d S1).
         moduli = {"C_precast": 36000.0, "C_topping": 33000.0}
         return verify_sls_staged(
             sec,

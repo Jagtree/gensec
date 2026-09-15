@@ -1,0 +1,115 @@
+# =====================================================================
+#  GenSec - a girder with an EXTERNAL (non-embedded) tendon.
+#
+#  Why this example is distributed
+#  ------------------------------------------------------------------
+#  Every other prestressed example in ``examples/`` carries an
+#  *embedded* tendon, i.e. one whose coordinates fall inside the fibre
+#  mesh.  An embedded tendon can never move the scan hull that
+#  ``NMDiagram`` builds from the fibre and rebar lever arms, because it
+#  is already inside it.  The consequence, measured in Phase 19 across
+#  all nineteen distributed examples, is that
+#  ``tools/numeric_fingerprint.py`` was *structurally blind* to defect
+#  N-16 (``_all_lx`` / ``_all_ly`` built from bulk and rebar only): the
+#  repair could not move a single recorded value, so no attribution was
+#  possible and no fixture could be red for the right reason.
+#
+#  This model removes that blindness.  The tendon is deviated **below
+#  the soffit**, which is what an external post-tensioning deviator
+#  physically does on a box or I girder, so its lever arm falls
+#  outside the fibre hull:
+#
+#      section        400 x 600 mm, y in [0, 600], y_ref = 300 mm
+#      fibre hull     +/- 297 mm   (fibre *centroids*, 100 strips)
+#      tendon arm     -450 mm      -> OUTSIDE the hull
+#
+#  The scan span along the x-direction is therefore 594 mm where the
+#  geometry supports 747 mm, and ``chi_max`` is too large by exactly
+#  747 / 594 = 1.257576.
+#
+#  Scope note
+#  ------------------------------------------------------------------
+#  ``bonded: true`` with ``embedded: false`` is the modelling of an
+#  external tendon that is *strain-compatible at the deviator* - the
+#  section element taxonomy of ``yaml_reference_example.yaml`` applies
+#  unchanged: this is a **section element**, not a demand-side
+#  ``prestress_action``.  ``embedded: false`` means only that the
+#  tendon does not displace bulk material, so no bulk stress is
+#  subtracted at its location.  Nothing here declares a construction
+#  timeline; the locked-in prestrain is supplied directly, as in
+#  ``example_prestress.yaml``.
+# =====================================================================
+
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
+materials:
+
+  # Class-based concrete, so the EC2 property object exists and the
+  # first-cracking marker has an eps_cr to resolve (see the sourcing
+  # chain in ``NMDiagram._cracking_strain_field``).
+  c45:
+    type: concrete_ec2_gen1
+    class: C45/55
+    ls: F
+
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
+  b450c:
+    type: steel
+    fyk: 450.0
+    gamma_s: 1.15
+    Es: 200000
+    eps_su: 0.0675
+
+  # Prestressing steel, EN 10138 designation.
+  y1860:
+    type: prestressing_steel_ec2
+    class: Y1860S7          # f_p01k=1600, f_pk=1860, eps_uk=0.035, Ep=195000
+    ls: F
+    diagram: inclined
+
+    NA: "EC2"
+    eps_ud_factor: 0.9
+section:
+  B: 400
+  H: 600
+  bulk_material: c45
+  # 100 strips -> extreme fibre CENTROID at 297 mm from the reference
+  # axis, not 300.  The hull is over centroids, and the excess ratio
+  # quoted above is stated for this discretisation.
+  n_fibers_y: 100
+
+  rebars:
+    - {name: A1, x: 60,  y: 60,  diameter: 20, material: b450c}
+    - {name: A2, x: 340, y: 60,  diameter: 20, material: b450c}
+    - {name: T1, x: 60,  y: 540, diameter: 16, material: b450c}
+    - {name: T2, x: 340, y: 540, diameter: 16, material: b450c}
+
+  tendons:
+    # Deviated external tendon, 150 mm below the soffit.
+    - name: PE
+      x: 200
+      y: -150
+      material: y1860
+      Ap: 420             # mm^2, 3 strands of 140 mm^2
+      eps_pe: 0.0060      # effective prestrain after losses (tension +)
+      bonded: true
+      embedded: false     # external: displaces no bulk material
+
+#  Sizing note: the deviated tendon sits 450 mm below the reference
+#  axis, so its eccentricity is large and the force must be small or
+#  the hogging it induces would exceed the sagging it is there to
+#  balance.  P = 420 mm^2 x 0.0060 x 195000 = 491 kN, P.e = 221 kN.m
+#  against a permanent sagging demand of 200 kN.m: a strengthening
+#  scheme that roughly balances the dead load, which is what deviated
+#  external post-tensioning is used for.
+demands:
+  - {name: G,  N_kN: -150.0, Mx_kNm: -200.0}
+  - {name: Q,  N_kN:    0.0, Mx_kNm: -120.0}

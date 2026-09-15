@@ -1,0 +1,586 @@
+.. _architecture_solver:
+
+==============================
+Solver pipeline
+==============================
+
+This document describes the numerical engine of GenSec: how it
+goes from a section definition to resistance domains and utilization
+ratios.  Each step is explained with both the engineering meaning and
+the software mechanism.
+
+
+
+Overview: two pipelines
+-----------------------
+
+GenSec provides two pipelines built on the same
+:class:`~gensec.solver.FiberSolver`:
+
+.. mermaid::
+
+   flowchart TD
+       FS["FiberSolver<br/><i>strain plane → forces</i>"]
+
+       subgraph domain["Domain pipeline (gensec run)"]
+           NM["NMDiagram<br/><i>scan → domain</i>"]
+           VE["VerificationEngine<br/><i>domain + demands → η</i>"]
+       end
+
+       subgraph analysis["Analysis pipeline (gensec analyze)"]
+           AE["AnalysisEngine<br/><i>solve + decompose</i>"]
+       end
+
+       FS --> NM --> VE
+       FS --> AE
+
+**Domain pipeline** (``gensec run``): generates the full resistance
+domain first, then verifies demands against it.  Essential when the
+domain itself is needed (plots, CSV export, moment-curvature
+analysis).  Cost: thousands of integrations.
+
+**Analysis pipeline** (``gensec analyze``): solves equilibrium
+directly for each demand, skipping domain generation entirely.
+Returns per-material force decomposition and (optionally) on-demand
+:math:`\eta`.  Cost: ~5–25 solves per demand — orders of magnitude
+lighter.
+
+Both pipelines build on three solver layers:
+
+- **Layer 1** (FiberSolver): the *direct problem* — given a strain
+  plane, compute the resulting (N, Mx, My).  Also solves the *inverse
+  problem* — given target forces, find the strain plane.
+- **Layer 2** (NMDiagram): systematically calls Layer 1 with many
+  strain configurations to build the resistance domain.
+- **Layer 3** (VerificationEngine): compares demand points against
+  the domain boundary and computes utilization ratios.
+
+The analysis pipeline uses only Layer 1.
+
+
+Layer 1: FiberSolver
+---------------------
+
+The FiberSolver lives in ``solver/integrator.py``.  It is the
+computational core of GenSec — everything else is built on top of it.
+
+
+Direct problem
+~~~~~~~~~~~~~~~
+
+Given three parameters :math:`(\varepsilon_0, \chi_x, \chi_y)`,
+the solver computes the internal forces :math:`(N, M_x, M_y)` in
+three steps:
+
+.. mermaid::
+
+   flowchart TD
+       P["Input: ε₀, χₓ, χᵧ"]
+       S1["Step 1: Compute strain at each fiber<br/>εᵢ = ε₀ + χₓ(yᵢ − y_ref) − χᵧ(xᵢ − x_ref)"]
+       S2["Step 2: Compute stress at each fiber<br/>σᵢ = material.stress(εᵢ)"]
+       S3["Step 3: Sum forces and moments<br/>N = Σ σᵢ·Aᵢ<br/>Mx = Σ σᵢ·Aᵢ·(yᵢ − y_ref)<br/>My = −Σ σᵢ·Aᵢ·(xᵢ − x_ref)"]
+       R["Output: N, Mx, My"]
+       P --> S1 --> S2 --> S3 --> R
+
+Step 2 is where the **material constitutive law** enters: each
+fiber's strain is converted to stress using its assigned material's
+σ-ε relationship.  Different fibers can have different materials
+(concrete in the bulk, steel at rebar locations, CFRP at an
+external strip, etc.).
+
+For **embedded rebars** (bars inside the concrete), the solver
+subtracts the displaced concrete to avoid double-counting:
+
+.. math::
+
+   F_{\text{net},j} = \bigl[\sigma_{\text{rebar}}(\varepsilon_j)
+       - \sigma_{\text{concrete}}(\varepsilon_j)\bigr] \cdot A_{s,j}
+
+The subtraction is automatic for all rebars with ``embedded: true``
+(the default).
+
+
+Inverse problem (Newton-Raphson)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The inverse problem is: given target forces :math:`(N^*, M_x^*, M_y^*)`,
+find the strain plane :math:`(\varepsilon_0, \chi_x, \chi_y)` that
+produces them.
+
+This is a system of 3 nonlinear equations in 3 unknowns. GenSec
+solves it with **Newton-Raphson iteration** with backtracking line
+search:
+
+.. mermaid::
+
+   flowchart TD
+       A["Initial guess: (ε₀, χₓ, χᵧ)"]
+       B["Evaluate integrate_with_tangent<br/>→ (N, Mx, My) + 3×3 tangent K"]
+       C{"Residual r = (N−N*, Mx−Mx*, My−My*)<br/>|r| < tolerance?"}
+       E["Solve K · Δx = −r"]
+       F["Backtracking line search:<br/>find α such that |r(x + α·Δx)| < |r(x)|"]
+       G["Update: x ← x + α·Δx"]
+       H["Converged!<br/>Return (ε₀, χₓ, χᵧ, N, Mx, My)"]
+
+       A --> B --> C
+       C -- No --> E --> F --> G --> B
+       C -- Yes --> H
+
+The Jacobian is computed **analytically** from the tangent stiffness
+matrix:
+
+.. math::
+
+   \mathbf{K} = \sum_i E_{t,i} \, A_i \;
+     \boldsymbol{\varphi}_i \, \boldsymbol{\varphi}_i^T
+
+where :math:`E_{t,i} = d\sigma_i / d\varepsilon_i` is the tangent
+modulus at the current strain and
+:math:`\boldsymbol{\varphi}_i = [1,\; (y_i - y_{\text{ref}}),\;
+-(x_i - x_{\text{ref}})]^T` is the shape-function vector.  This is
+computed in a single pass together with the internal forces by
+:meth:`~gensec.solver.FiberSolver.integrate_with_tangent`, halving
+the cost per iteration compared to the former finite-difference
+approach.
+
+The line search halves the step size up to 15 times if the full
+Newton step would increase the residual.
+
+For uniaxial bending (:math:`\chi_y = 0`), the system reduces to
+2×2 (the upper-left sub-block of :math:`\mathbf{K}`), which
+converges faster.  GenSec detects this case automatically.
+
+
+Layer 2: NMDiagram
+-------------------
+
+The NMDiagram class lives in ``solver/capacity.py``.  It uses the
+FiberSolver to systematically explore the space of possible strain
+configurations.
+
+
+N-M diagram (uniaxial)
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The 2D resistance domain :math:`(N, M_x)` is generated by scanning
+pairs of edge strains :math:`(\varepsilon_{\text{bottom}},
+\varepsilon_{\text{top}})` across the full range of material limits:
+
+.. mermaid::
+
+   flowchart TD
+       A["Collect strain limits:<br/>ε_cu2 (concrete crush),<br/>ε_su (steel ultimate)"]
+       B["Branch 1: top edge at ε_cu2<br/>sweep bottom from ε_su to ε_cu2"]
+       C["Branch 2: bottom edge at ε_cu2<br/>sweep top from ε_su to ε_cu2"]
+       D["Branch 3: uniform tension<br/>(both edges positive)"]
+       E["Branch 4: near-uniform compression<br/>(both edges near ε_cu2)"]
+       F["For each (ε_bot, ε_top):<br/>convert to (ε₀, χₓ)<br/>evaluate direct problem<br/>collect (N, Mx)"]
+       G["Result: point cloud<br/>on the N-M boundary"]
+
+       A --> B & C & D & E
+       B & C & D & E --> F --> G
+
+This is **not** the classic EC2 pivot method (which identifies
+specific pivot points A, B, C).  GenSec uses a **parametric scan**
+that covers the same configuration space but is more general — it
+works with any material, not just EC2 parabola-rectangle.
+
+The scan covers **both curvature directions** (positive and negative
+:math:`\chi_x`), which is essential for producing a symmetric diagram.
+
+
+3D resistance surface (biaxial)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For biaxial bending, the curvature direction is parameterized by an
+angle :math:`\theta`:
+
+.. math::
+
+   \chi_x = \chi \cos\theta, \qquad
+   \chi_y = \chi \sin\theta
+
+The scan loops over :math:`\theta \in [0, 2\pi)` in ``n_angles``
+steps, and for each angle performs the same edge-strain scan as in
+the uniaxial case.  This produces a 3D point cloud
+:math:`(N, M_x, M_y)`.
+
+
+Mx-My contour at fixed N
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A horizontal slice of the 3D surface.  For each curvature direction
+:math:`\theta`, GenSec scans strain configurations, collects all
+:math:`(N, M_x, M_y)` points, and **interpolates** at
+:math:`N = N_{\text{fixed}}` to find the moment point on the contour.
+
+Among all crossing points at the target N, the one with maximum
+moment magnitude is kept.  The result is a closed curve in the
+:math:`(M_x, M_y)` plane.
+
+
+Moment-curvature (M-χ)
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+At a fixed axial force :math:`N`, GenSec scans curvature :math:`\chi`
+from 0 to ultimate (and from 0 to −ultimate for the other direction).
+At each curvature step:
+
+1. Solve for :math:`\varepsilon_0` such that :math:`N(\varepsilon_0,
+   \chi) = N_{\text{fixed}}` (1D Newton).
+2. Compute the moment :math:`M(\varepsilon_0, \chi)`.
+3. Check for key events: **cracking** (concrete tensile strain exceeds
+   :math:`\varepsilon_{cr} = f_{ctm}/E_{cm}`), **first yield** (any
+   rebar strain exceeds :math:`\varepsilon_{yd}`), **ultimate** (any
+   material reaches its strain limit).
+
+
+Layer 3: VerificationEngine
+----------------------------
+
+The VerificationEngine lives in ``solver/check.py``.  It wraps the
+resistance domain and provides four utilization ratio methods.
+
+
+Architecture
+~~~~~~~~~~~~~
+
+.. mermaid::
+
+   classDiagram
+       class VerificationEngine {
+           -domain: DomainChecker
+           -nm_gen: NMDiagram
+           -_contour_cache: dict
+           +check_demand(demand) dict
+           +check_combination(combo, demand_db) dict
+           +check_envelope(envelope, demand_db) dict
+       }
+       class DomainChecker {
+           -hull: ConvexHull
+           -N_range: float
+           +eta_3D(N, Mx, My) float
+           +eta_path(base, target) float
+           +is_inside(N, Mx, My) bool
+       }
+       class MxMyContour {
+           -hull: ConvexHull (2D)
+           +eta_2D(Mx, My) float
+           +eta_path_2D(base, target) float
+       }
+
+       VerificationEngine --> DomainChecker : 3D operations
+       VerificationEngine --> MxMyContour : 2D operations (cached)
+
+- **DomainChecker**: wraps the 3D ConvexHull.  Handles ``eta_3D``
+  (ray from origin) and ``eta_path`` (ray from arbitrary base).
+  Always available — the 3D hull is generated for any biaxial section.
+- **MxMyContour**: wraps a 2D ConvexHull of the Mx-My contour at a
+  specific N level.  Handles ``eta_2D`` and ``eta_path_2D``.
+  Generated **on demand** and **cached** by the engine.
+- **VerificationEngine**: the orchestrator.  Reads the output flags,
+  resolves demand references, accumulates combination stages, and
+  dispatches to the appropriate checker.
+
+
+The ray-casting algorithm
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All four η types use the same geometric primitive:
+
+1. Define a **ray** from base :math:`\mathbf{B}` through target
+   :math:`\mathbf{T}`.
+2. Find the **first intersection** :math:`\mathbf{R}` of the ray
+   with the ConvexHull boundary (by solving a linear system against
+   each hull facet).
+3. Compute :math:`\eta = |\mathbf{T} - \mathbf{B}| \;/\;
+   |\mathbf{R} - \mathbf{B}|`.
+
+.. mermaid::
+
+   flowchart LR
+       B["Base B"] -->|"ray direction"| T["Target T"]
+       T -.->|"continues to"| R["Boundary R"]
+       style B fill:#4CAF50,color:#fff
+       style T fill:#F44336,color:#fff
+       style R fill:#2196F3,color:#fff
+
+If :math:`\eta < 1`, the target is closer to the base than the
+boundary — the section has reserve capacity.  If :math:`\eta > 1`,
+the target is beyond the boundary — the section fails.
+
+
+Staged combinations
+~~~~~~~~~~~~~~~~~~~~
+
+For staged loading (e.g., gravity → seismic), the engine accumulates
+forces stage by stage:
+
+.. mermaid::
+
+   flowchart TD
+       O["Origin (0,0,0)"]
+       S0["Stage 0: Gravity<br/>S₀ = 1.0·G + 0.3·Q"]
+       S1["Stage 1: Seismic<br/>S₁ = S₀ + 1.0·Ex"]
+       R0["η_3D of S₀<br/>(ray from O to S₀)"]
+       R1["η_path of S₁<br/>(ray from S₀ to S₁)"]
+
+       O -->|"η_3D"| S0
+       S0 -->|"η_path"| S1
+       S0 --> R0
+       S1 --> R1
+
+The engineering meaning of :math:`\eta_{\text{path}}` for the
+seismic stage is: *"the gravity load is certain; how much of the
+seismic capacity is being used?"*  This is the relevant question for
+seismic design, because the gravity load does not vary — only the
+seismic action is the "variable" that might exhaust capacity.
+
+
+Analysis pipeline: AnalysisEngine
+-----------------------------------
+
+The :class:`~gensec.solver.analysis.AnalysisEngine` lives in
+``solver/analysis.py``.  It is a lightweight alternative to the full
+domain-based pipeline: it operates directly on
+:meth:`~gensec.solver.FiberSolver.solve_equilibrium` without
+generating the resistance domain.
+
+
+Force decomposition
+~~~~~~~~~~~~~~~~~~~~
+
+Given a load state :math:`(N, M_x, M_y)`:
+
+.. mermaid::
+
+   flowchart TD
+       D["Input: N, Mx, My"]
+       SE["solve_equilibrium<br/>→ (ε₀, χₓ, χᵧ)"]
+       SF["strain_field<br/>→ strains at every fiber"]
+       BG["Group by material:<br/>bulk zones, rebar groups"]
+       SUM["Sum per group:<br/>Nₖ = Σ σᵢ·Aᵢ<br/>Mxₖ = Σ σᵢ·Aᵢ·lyᵢ<br/>Myₖ = −Σ σᵢ·Aᵢ·lxᵢ"]
+       OUT["Output: force per component"]
+
+       D --> SE --> SF --> BG --> SUM --> OUT
+
+The grouping follows the same material structure as the integrator:
+``_bulk_groups`` for concrete zones, ``_rebar_groups`` for
+reinforcement.  Each rebar group includes per-bar detail (strain,
+net stress, force).  Future element types (CFRP strips, tendons)
+follow the same aggregation scheme.
+
+
+On-demand :math:`\eta`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The analysis engine can compute :math:`\eta` without a pre-computed
+domain using ray–bisection:
+
+.. mermaid::
+
+   flowchart TD
+       D["Demand (N, Mx, My)"]
+       RAY["Define ray:<br/>base → demand → beyond"]
+       SCAN["Exponential scan:<br/>t = 1, 2, 4, 8, ..."]
+       CHECK{"solve_equilibrium converges<br/>AND strains within limits?"}
+       BISECT["Bisection on t:<br/>~30 iterations"]
+       ETA["η = 1 / t_boundary"]
+
+       D --> RAY --> SCAN --> CHECK
+       CHECK -- Yes --> SCAN
+       CHECK -- No --> BISECT --> ETA
+
+A point is *feasible* (inside the domain) if
+:meth:`~gensec.solver.FiberSolver.solve_equilibrium` converges
+**and** all fiber strains satisfy
+
+.. math::
+
+   \varepsilon_{\min}^{(k)} \le \varepsilon_i
+   \le \varepsilon_{\max}^{(k)}
+
+where the limits are those of the material :math:`k` assigned to
+fiber :math:`i`.
+
+The domain is convex, so bisection along any ray from an interior
+point converges monotonically.  Typical cost: 15–25 equilibrium
+solves per demand (vs. thousands of integrations for the full
+domain).
+
+
+Material naming
+~~~~~~~~~~~~~~~~
+
+Each :class:`~gensec.materials.base.Material` has a ``name``
+attribute set by the YAML loader to the key used in the
+``materials`` block.  The analysis engine uses this for
+human-readable output:
+
+.. code-block:: yaml
+
+   materials:
+     C25_30:           # → this becomes Material.name
+       type: concrete_ec2_gen1
+       class: C25/30
+
+For API-constructed materials without a ``name``, the class name
+(e.g. ``Concrete``, ``Steel``) is used as fallback.
+
+
+Material constitutive laws
+---------------------------
+
+Each material class inherits from the abstract ``Material`` base and
+implements four methods:
+
+- ``stress(eps)`` — scalar: one strain in, one stress out.
+- ``stress_array(eps)`` — vectorized: array in, array out (fast path).
+  Accepts arrays of **any shape** (1-D, 2-D, …).
+- ``tangent(eps)`` — scalar tangent modulus
+  :math:`E_t = d\sigma/d\varepsilon`.
+- ``tangent_array(eps)`` — vectorized tangent modulus (any shape).
+
+.. mermaid::
+
+   flowchart LR
+       E["ε (strain)"] --> M["Material.stress(ε)"] --> S["σ (stress)"]
+       E --> T["Material.tangent(ε)"] --> Et["Eₜ (tangent)"]
+
+The fiber solver calls ``stress_array`` and ``tangent_array`` on
+entire fiber arrays at once, leveraging NumPy vectorization for speed.
+When `numba <https://numba.pydata.org>`_ is installed, the built-in
+``Concrete`` and ``Steel`` classes use JIT-compiled kernels for these
+methods, providing a further ~2–3× speed-up.
+
+**Concrete** (parabola-rectangle, EC2 3.1.7):
+
+.. math::
+
+   \sigma_c(\varepsilon) =
+   \begin{cases}
+       0 & \varepsilon > 0 \quad \text{(no tension)} \\
+       -f_{cd}\!\left[1 - \left(1 - \frac{\varepsilon}
+           {\varepsilon_{c2}}\right)^{n}\right]
+           & \varepsilon_{c2} \le \varepsilon \le 0 \\
+       -f_{cd}
+           & \varepsilon_{cu2} \le \varepsilon < \varepsilon_{c2} \\
+       0 & \varepsilon < \varepsilon_{cu2} \quad \text{(crushed)}
+   \end{cases}
+
+**Steel** (elastic-plastic with optional hardening):
+
+.. math::
+
+   \sigma_s(\varepsilon) =
+   \begin{cases}
+       E_s \, \varepsilon
+           & |\varepsilon| \le \varepsilon_{yd} \\
+       f_{yd} + (k-1)\,f_{yd}\,
+           \frac{|\varepsilon| - \varepsilon_{yd}}
+                {\varepsilon_{su} - \varepsilon_{yd}}
+           & \varepsilon_{yd} < |\varepsilon| \le \varepsilon_{su} \\
+       0 & |\varepsilon| > \varepsilon_{su}
+   \end{cases}
+
+**TabulatedMaterial**: piecewise-linear interpolation of user-supplied
+(ε, σ) data points.  Supports any shape, including descending
+branches (Kent-Park concrete, softening, etc.).  The tangent modulus
+is the slope of each linear segment.
+
+
+Performance architecture
+-------------------------
+
+GenSec uses three complementary strategies to achieve high
+computational throughput on the fiber integration pipeline.
+
+
+Batch integration
+~~~~~~~~~~~~~~~~~~
+
+The capacity generators (N-M diagram, 3-D surface, Mx-My contour)
+evaluate tens of thousands of strain configurations.  Rather than
+calling :meth:`~gensec.solver.FiberSolver.integrate` in a Python
+loop, they use :meth:`~gensec.solver.FiberSolver.integrate_batch`,
+which operates on 1-D arrays of :math:`(\varepsilon_0, \chi_x,
+\chi_y)` and produces 1-D arrays of :math:`(N, M_x, M_y)`.
+
+Internally, the strain field is built as a 2-D array of shape
+:math:`(n_{\text{configs}}, n_{\text{fibers}})` and passed through the
+constitutive law in one NumPy call.  This eliminates the per-call
+Python overhead and enables SIMD vectorization at the C level.
+
+
+Mega-batch with chunking
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For biaxial generators (``generate_biaxial``, ``generate_mx_my``),
+configurations from **all curvature directions** are concatenated
+into a single flat array before integration.  This avoids the overhead
+of calling ``integrate_batch`` once per angle (e.g. 144 calls of 550
+configs each) and replaces it with a few large chunked calls (e.g. 2
+calls of 40 000 configs each).
+
+The chunk size is bounded to limit peak memory usage:
+
+.. math::
+
+   n_{\text{chunk}} = \max\!\left(2000,\;
+       \left\lfloor\frac{50 \times 10^6}{n_{\text{fibers}}}
+       \right\rfloor\right)
+
+For a section with 5 000 fibers, this gives chunks of 10 000 configs
+(~400 MB peak), reducing the number of batch calls from 144 to ~8.
+
+
+Optional Numba JIT
+~~~~~~~~~~~~~~~~~~~
+
+When `numba <https://numba.pydata.org>`_ is installed, the element-wise
+stress and tangent kernels of ``Concrete`` and ``Steel`` are
+JIT-compiled to native code.  This provides a ~2–3× speed-up on
+large fiber arrays where NumPy's Python-to-C dispatch overhead becomes
+significant.
+
+Numba is **optional**: if not installed, the pure-NumPy fallback is
+used transparently.  Install with ``pip install gensec[fast]`` or
+``uv sync --all-extras``.
+
+
+Section meshing
+----------------
+
+The ``GenericSection`` class (``geometry/geometry.py``) takes a
+Shapely polygon and produces a fiber mesh:
+
+.. mermaid::
+
+   flowchart TD
+       P["Shapely Polygon<br/>(exterior + holes)"]
+       M{"Mesh method?"}
+       G["Grid meshing:<br/>rectangular grid cells<br/>clipped to polygon boundary"]
+       T["Triangle meshing:<br/>constrained Delaunay<br/>triangulation"]
+       F["Fiber arrays:<br/>x_fibers, y_fibers, A_fibers"]
+       R["Rebar arrays:<br/>x_rebars, y_rebars, A_rebars"]
+
+       P --> M
+       M -- grid --> G --> F
+       M -- triangle --> T --> F
+       P --> R
+
+Each grid cell is intersected with the polygon.  Partial cells at
+the boundary receive the area of the intersection, not the full cell
+area.  This gives a good area representation even with coarse meshes.
+
+When explicit grid dimensions are provided via ``n_grid_x`` /
+``n_grid_y`` (used internally by the ``RectSection`` factory
+function), they override the ``mesh_size``-based computation.
+This allows anisotropic grids when needed.
+
+The ``RectSection`` convenience function creates a rectangular
+polygon and calls ``GenericSection`` internally.  It derives an
+isotropic mesh size from ``n_fibers_y`` (i.e.,
+:math:`s = H / n_y`), ensuring approximately square cells.  When
+``n_fibers_x > 1`` is specified explicitly, it is passed as
+``n_grid_x`` to override the x-resolution.

@@ -8,12 +8,19 @@
 #  expressed via the parametric primitives.
 # ================================================================
 
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
 materials:
   concrete_1:
     type: concrete_ec2_gen1_custom
     fck: 30.0
     gamma_c: 1.5
-    alpha_cc: 0.85
+    long_term_reduction_factor: 0.85
 
   steel_1:
     type: steel

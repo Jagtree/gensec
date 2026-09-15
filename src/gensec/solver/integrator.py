@@ -46,6 +46,152 @@ Performance features
 import numpy as np
 
 
+class AxialStateNotAttainable(ValueError):
+    r"""
+    A pure-axial demand lies outside the section's zero-moment reach.
+
+    Raised when ``solve_equilibrium`` is asked for a state with both
+    target moments negligible, the search fails, **and** a measurement
+    on the section itself shows that no strain plane satisfies the
+    request: the requested axial force is larger, in magnitude, than
+    anything the section can carry with :math:`|M_x| \le M_{tol}`.
+
+    Why the distinction is worth an exception
+    -----------------------------------------
+    Before this class existed the caller got ``converged = False`` and
+    nothing else, and the two situations behind it were
+    indistinguishable:
+
+    * the state exists and the search did not find it — a **defect**;
+    * the state does not exist — a **fact about the section**.
+
+    The second is not a failure of GenSec and cannot be repaired by a
+    better search.  Reporting it as a non-convergence is what item
+    N-17 records, and the measurement that closed N-17 showed it was
+    the second case: on a 1200 x 200 strand-only slab with one
+    700 mm^2 strand at ``eps_pe = 0.0060`` and a lever arm of -60 mm,
+    the largest axial force reachable with :math:`|M_x| \le 10^3`
+    N.mm is 317 016 N, while the interrogated target was
+    1 056 673 N — the request misses the attainable set by 70 %, and
+    the minimum :math:`|M_x|` anywhere on the locus
+    :math:`N = N_{target}` is :math:`6.340041 \times 10^7` N.mm,
+    :math:`6.34 \times 10^4` times the tolerance.
+
+    The mechanism is elementary once stated.  An eccentric tendon at
+    lever arm :math:`e` carries tension :math:`T`; concrete carries no
+    tension, so at high axial load the section is inert everywhere
+    except the strand and
+
+    .. math::
+
+        M_x = T\,e ,
+
+    which is zero only if :math:`T` is.  Bringing :math:`M_x` back to
+    zero needs a compression resultant :math:`C < 0` with
+
+    .. math::
+
+        |C| \, |l_C| \;=\; |T| \, |e| ,
+
+    and every newton of that compression is subtracted from the axial
+    force, so
+
+    .. math::
+
+        N \;=\; T + C \;\le\; T \left( 1 - \frac{|e|}{|l_C|_{max}}
+        \right),
+
+    an upper bound strictly below :math:`T_{max}` whenever the tendon
+    is eccentric.  The number in ``attainable`` is not this bound: it
+    is the measured maximum over the :math:`M_x = 0` locus, which is
+    tighter.
+
+    Taxonomy
+    --------
+    A :class:`ValueError`, deliberately, and **not** a
+    :class:`NotImplementedError`.  It is the opposite case from
+    :class:`~gensec.solver.posttension.LoadBetweenJacksNotModelled`:
+    there GenSec declines a well-posed question it has no authority to
+    answer, here GenSec *answers* — negatively, with a certificate.
+    The request is a property of the demand, so a caller that catches
+    ``ValueError`` to mean "this demand cannot be satisfied by this
+    section" should catch this.
+
+    Attributes
+    ----------
+    N_target : float
+        The requested axial force [N].
+    attainable : tuple of float
+        ``(N_min, N_max)``: the smallest and largest axial force the
+        section carries with :math:`|M_x| \le` ``M_tol`` [N].
+    state : tuple of float
+        ``(eps0, chi_x)`` of the extreme state the bound was measured
+        at — the nearest thing to the request that does exist.
+    M_tol : float
+        Moment tolerance the reach was measured under [N.mm].
+    resolution : tuple of int
+        ``(n_chi, n_eps)`` of the scan that produced the bound, so the
+        certificate carries the coarseness of its own measurement.
+
+    See Also
+    --------
+    FiberSolver.axial_reach_at_zero_moment : the measurement.
+    FiberSolver.solve_equilibrium : the site that raises.
+    """
+
+    def __init__(self, N_target, attainable, state, M_tol, resolution):
+        self.N_target = float(N_target)
+        self.attainable = (float(attainable[0]), float(attainable[1]))
+        self.state = (float(state[0]), float(state[1]))
+        self.M_tol = float(M_tol)
+        self.resolution = (int(resolution[0]), int(resolution[1]))
+        near = (self.attainable[1] if self.N_target > 0
+                else self.attainable[0])
+        miss = abs(self.N_target - near)
+        pct = 100.0 * miss / max(abs(self.N_target), 1.0)
+        super().__init__(
+            f"no strain plane of this section carries N = "
+            f"{self.N_target:.1f} N with |Mx| <= {self.M_tol:g} N.mm.  "
+            f"The reach at zero moment was measured on the section "
+            f"itself and is [{self.attainable[0]:.1f}, "
+            f"{self.attainable[1]:.1f}] N; the request misses it by "
+            f"{miss:.1f} N ({pct:.2f} % of the target).  The nearest "
+            f"state that does exist is eps0 = {self.state[0]:.6g}, "
+            f"chi_x = {self.state[1]:.6g}.  This is not a search "
+            f"failure: the state does not exist, and no tolerance or "
+            f"initial guess will produce it.  Scan resolution: "
+            f"{self.resolution[0]} curvatures x {self.resolution[1]} "
+            f"strains.")
+
+
+def _yield_strain_of(material):
+    r"""
+    Yield strain of a steel-like material, or ``None``.
+
+    Parameters
+    ----------
+    material : Material
+
+    Returns
+    -------
+    float or None
+        An explicit ``eps_yd`` where the material declares one, else
+        ``f_yd / E_s`` where both are declared, else ``None``.  Never
+        a substituted value: a capacity factor written against a yield
+        strain is meaningless evaluated against an invented one.
+    """
+    for name in ("eps_yd", "eps_y"):
+        value = getattr(material, name, None)
+        if value is not None and float(value) > 0.0:
+            return float(value)
+    modulus = getattr(material, "Es", None) or getattr(material, "Ep", None)
+    strength = (getattr(material, "fyd", None)
+                or getattr(material, "f_p01d", None))
+    if modulus and strength and float(modulus) > 0.0:
+        return float(strength) / float(modulus)
+    return None
+
+
 class FiberSolver:
     r"""
     Material-agnostic fiber solver for biaxial bending + axial force.
@@ -92,6 +238,9 @@ class FiberSolver:
         self.x_ref = x_ref if x_ref is not None else section.x_centroid
         self.y_ref = y_ref if y_ref is not None else section.y_centroid
         self._rebar_groups = self._build_rebar_groups()
+        #: Zero-moment reach measurements, keyed by the resolution
+        #: and tolerance they were taken at (N-17).
+        self._axial_reach_cache = {}
 
         # Pre-compute lever arms (constant for a given section)
         self._ly_bulk = self.sec.y_fibers - self.y_ref
@@ -365,6 +514,57 @@ class FiberSolver:
         return (self._bulk_eps_field if idx is None
                 else self._bulk_eps_field[idx])
 
+    def bulk_strain_offset(self, idx=None):
+        r"""
+        The imposed-strain offset every bulk constitutive law is
+        evaluated at, on top of the section strain.
+
+        .. math::
+
+            \varepsilon^{\mathrm{mech}}_i = \varepsilon_{\mathrm{sec},i}
+                + \varepsilon_{b,0}
+                + \varepsilon_{0,z(i)}
+                + \chi_{x,z(i)}\,\ell_{y,i}
+                - \chi_{y,z(i)}\,\ell_{x,i}
+
+        Public because the *criteria* need it, not only the integration:
+        cracking, crushing and the ultimate limit are properties of the
+        material, and a material reads the mechanical strain.  A scan
+        that compares :math:`\varepsilon_{\mathrm{sec}}` against a
+        material threshold asks the wrong fibre a right question — the
+        defect **F-M3**, measured in ``handoff/14_1`` §5 and repaired in
+        Phase 15 by routing every such site through this accessor
+        instead of letting each one re-derive the field.
+
+        The rebar and tendon companions are deliberately *not*
+        published: a rebar's own law reads the section strain alone (the
+        concrete's imposed field is the concrete's), and a tendon's
+        reads the section strain plus its own prestrain.  Their offsets
+        exist only for the displaced-bulk subtraction, which is an
+        integration concern and has no criterion attached.
+
+        Parameters
+        ----------
+        idx : numpy.ndarray or None, optional
+            Fiber subset; ``None`` for all bulk fibers.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            A scalar on the fast path (no planes attached), else the
+            per-fiber field.  Either broadcasts transparently against a
+            1-D strain array and against an ``(n_configs, n_fibers)``
+            batch.
+
+        Examples
+        --------
+        >>> eb, er = solver.strain_field(eps0, chi_x, chi_y)
+        ... # doctest: +SKIP
+        >>> eb_mech = eb + solver.bulk_strain_offset()
+        ... # doctest: +SKIP
+        """
+        return self._bulk_offset(idx)
+
     def _rebar_offset(self, idx):
         r"""
         Displaced-bulk offset at rebar locations (fiber-subset *idx*).
@@ -376,6 +576,61 @@ class FiberSolver:
         if self._rebar_eps_field is None:
             return self._bulk_eps_init
         return self._rebar_eps_field[idx]
+
+    def element_limit_groups(self):
+        r"""
+        Every element group with the strain limits of **its own**
+        material and the argument that material's law is evaluated at.
+
+        The one home of the fact *"this element's strain, against this
+        element's limit"* (N-2, Phase 16).  Before it existed, the
+        curvature scans pooled the bulk and rebar strains into one array
+        and compared its minimum against the **concrete** crushing limit
+        and its maximum against the pool's largest limit, which on a
+        reinforced section is the **steel's** -- so a concrete fibre was
+        tested against a limit no concrete has, and the tendons, which
+        carry :math:`\varepsilon_{pe}` on top of the section strain and
+        are therefore the elements closest to their own limit at every
+        curvature, were not tested at all.
+
+        Returns
+        -------
+        list of tuple
+            ``(kind, idx, eps_min, eps_max)`` where *kind* is one of
+            ``'bulk'``, ``'rebar'``, ``'tendon'``, *idx* indexes that
+            class's strain array, and the two limits are the group
+            material's own.
+
+        Notes
+        -----
+        The **argument** each class is evaluated at is the caller's
+        responsibility and is stated here so the two cannot drift:
+        bulk at :math:`\varepsilon_{sec} + ` :meth:`bulk_strain_offset`,
+        rebar at :math:`\varepsilon_{sec}` bare, tendon at
+        :math:`\varepsilon_{sec} + \varepsilon_{init}`.  This is the
+        same triple :meth:`strains_within_limits` uses; that method
+        answers "is this plane admissible", this one exposes the
+        per-group data a scan needs to answer "at which step did it stop
+        being".
+
+        Examples
+        --------
+        >>> groups = solver.element_limit_groups()      # doctest: +SKIP
+        >>> {kind for kind, _i, _a, _b in groups}       # doctest: +SKIP
+        {'bulk', 'rebar', 'tendon'}
+        """
+        out = []
+        for mat, idx in self._bulk_groups:
+            out.append(("bulk", idx, float(mat.eps_min),
+                        float(mat.eps_max)))
+        for mat, _bulk_mat, idx in self._rebar_groups:
+            out.append(("rebar", idx, float(mat.eps_min),
+                        float(mat.eps_max)))
+        if self._has_tendons:
+            for mat, _bulk_mat, idx, _eps_init in self._tendon_groups:
+                out.append(("tendon", idx, float(mat.eps_min),
+                            float(mat.eps_max)))
+        return out
 
     def _tendon_offset(self, idx):
         r"""
@@ -586,6 +841,133 @@ class FiberSolver:
             K[2, 1] = K[1, 2]
             return N, Mx, My, K
         return N, Mx, My
+
+    def sectional_state(self, eps0, chi_x, chi_y=0.0,
+                        action="flexure", confinement="none"):
+        r"""
+        The solved strain state, in the form a code can factor.
+
+        Builds a
+        :class:`~gensec.materials.codes.SectionalState` from a strain
+        plane.  It exists because some codes carry their safety format
+        on the **capacity** rather than on the materials, and such a
+        factor is a function of the strain distribution the section
+        reached --- it cannot be evaluated before the solve, and it
+        cannot be folded into a material law.
+
+        GenSec already knows everything such a rule needs; what was
+        missing was a name for it.
+
+        Parameters
+        ----------
+        eps0 : float
+            Axial strain at the reference point.
+        chi_x, chi_y : float
+            Curvatures [1/mm].
+        action : str
+            Which resistance is being factored.  Carried through
+            unread: one section can need several factors at once, so
+            the action belongs to the question.
+        confinement : str
+            ``'tied'``, ``'spiral'`` or ``'none'``.
+
+        Returns
+        -------
+        SectionalState
+
+        Notes
+        -----
+        ``eps_t`` is the **net** tensile strain: for a tendon the
+        locked-in ``eps_init`` is subtracted, because a strain-based
+        factor measures how far the section is from a brittle failure
+        and a prestrain says nothing about that.  Including it would
+        put every prestressed section in the ductile branch and never
+        trip the transition.
+
+        ``eps_t`` is ``None`` when the section has no tension element
+        in tension.  The code is then required to decline rather than
+        pick a branch, which is why this returns ``None`` instead of
+        ``0.0``: zero is a strain, absence is not.
+
+        Examples
+        --------
+        >>> state = solver.sectional_state(1.0e-3, 5.0e-6)   # doctest: +SKIP
+        >>> code.capacity_factor(state).value                # doctest: +SKIP
+        """
+        from ..materials.codes import SectionalState
+
+        def _strain(ly):
+            return eps0 + chi_x * np.asarray(ly, dtype=float)
+
+        best_eps, best_yield = None, None
+
+        n_reb = int(np.size(self._ly_rebar))
+        if n_reb:
+            eps_r = _strain(self._ly_rebar)
+            k = int(np.argmax(eps_r))
+            if eps_r[k] > 0.0:
+                best_eps = float(eps_r[k])
+                best_yield = self._yield_strain_of_rebar(k)
+
+        n_ten = int(np.size(self._ly_tendon))
+        if n_ten:
+            # Net of the locked-in prestrain: see Notes.
+            eps_p = _strain(self._ly_tendon)
+            k = int(np.argmax(eps_p))
+            if eps_p[k] > 0.0 and (best_eps is None or eps_p[k] > best_eps):
+                best_eps = float(eps_p[k])
+                best_yield = self._yield_strain_of_tendon(k)
+
+        eps_c = None
+        y_fib = getattr(self.sec, "y_fibers", None)
+        if y_fib is not None and np.size(y_fib):
+            eps_f = _strain(np.asarray(y_fib, dtype=float) - self.y_ref)
+            low = float(np.min(eps_f))
+            if low < 0.0:
+                eps_c = low
+
+        return SectionalState(eps_t=best_eps, eps_c=eps_c,
+                              eps_yield=best_yield,
+                              confinement=str(confinement),
+                              action=str(action))
+
+    def _yield_strain_of_rebar(self, index):
+        r"""
+        Yield strain of rebar *index*, or ``None``.
+
+        Parameters
+        ----------
+        index : int
+
+        Returns
+        -------
+        float or None
+            ``None`` when the material declares neither an explicit
+            yield strain nor the pair needed to derive one.  Declining
+            is right: a rule written against ``eps_ty`` cannot be
+            evaluated against a guess.
+        """
+        for mat, _b, idx, *_rest in self._rebar_groups:
+            if index in np.atleast_1d(idx):
+                return _yield_strain_of(mat)
+        return None
+
+    def _yield_strain_of_tendon(self, index):
+        r"""
+        Yield strain of tendon *index*, or ``None``.
+
+        Parameters
+        ----------
+        index : int
+
+        Returns
+        -------
+        float or None
+        """
+        for mat, _b, idx, *_rest in self._tendon_groups:
+            if index in np.atleast_1d(idx):
+                return _yield_strain_of(mat)
+        return None
 
     def integrate(self, eps0, chi_x, chi_y=0.0):
         r"""
@@ -1006,6 +1388,375 @@ class FiberSolver:
     #  Main solver entry point
     # ==================================================================
 
+    #: Default resolution of the zero-moment reach scan, as
+    #: ``(n_chi, n_eps)``.  Deliberately modest: the scan runs only on
+    #: a failure path, once per solver instance, and its purpose is to
+    #: separate "no such state" from "search failed", which a coarse
+    #: measurement already does.  The numbers travel inside
+    #: :class:`AxialStateNotAttainable` so a reader can see how coarse
+    #: the certificate is.
+    AXIAL_REACH_RESOLUTION = (61, 250)
+
+    def axial_reach_at_zero_moment(self, M_tol=1.0e3, resolution=None):
+        r"""
+        The axial force this section can carry with zero moment.
+
+        Measures, rather than bounds, the interval
+
+        .. math::
+
+            \bigl[\, \min N,\ \max N \,\bigr]
+            \quad \text{over} \quad
+            \{ (\varepsilon_0, \chi_x) : |M_x(\varepsilon_0, \chi_x)|
+            \le M_{tol} \}
+
+        by walking a grid of curvatures, locating every sign change of
+        :math:`M_x(\varepsilon_0)` along each of them, refining it by
+        bisection, and keeping the extreme axial forces among the
+        roots that verify.
+
+        Why a scan and not a formula
+        ----------------------------
+        The set is not convex and its boundary is not smooth: concrete
+        carries no tension, so :math:`M_x` has plateaux where the
+        section is wholly cracked and jumps where a fibre leaves the
+        active range.  A closed-form bound exists (see
+        :class:`AxialStateNotAttainable`) but is loose enough to call
+        an attainable state unattainable, which is the one error this
+        measurement must not make.
+
+        Parameters
+        ----------
+        M_tol : float, optional
+            Moment tolerance the reach is measured under [N.mm].
+            Default ``1e3``, matching ``solve_equilibrium``'s own
+            ``tol * 1000`` at the default force tolerance.
+        resolution : tuple of int, optional
+            ``(n_chi, n_eps)``.  Default
+            :attr:`AXIAL_REACH_RESOLUTION`.
+
+        Returns
+        -------
+        dict
+            ``N_min``, ``N_max`` : float
+                Extremes of the attainable axial force [N].
+            ``state_min``, ``state_max`` : tuple of float
+                ``(eps0, chi_x)`` achieving each extreme.
+            ``roots`` : int
+                Number of verified :math:`M_x = 0` roots found.  Zero
+                means the scan found nothing and the result must not
+                be used as a certificate.
+            ``resolution`` : tuple of int
+                The grid actually used.
+            ``M_tol`` : float
+
+        Notes
+        -----
+        The result is cached on the instance under the resolution and
+        tolerance it was computed with, because the only caller is a
+        failure path that may be reached many times in one diagram and
+        the section does not change between calls.
+
+        Examples
+        --------
+        >>> reach = solver.axial_reach_at_zero_moment()   # doctest: +SKIP
+        >>> reach["N_max"]                                # doctest: +SKIP
+        317016.36
+        """
+        n_chi, n_eps = (self.AXIAL_REACH_RESOLUTION if resolution is None
+                        else (int(resolution[0]), int(resolution[1])))
+        cache_key = (n_chi, n_eps, float(M_tol))
+        cached = self._axial_reach_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Strain window: the same element-complete range the axial
+        # bracket contracts to cover (N-15), widened by 1 % so a root
+        # sitting exactly on a limit is inside the sampled interval.
+        eps_lo = float(self.sec.bulk_material.eps_min)
+        eps_hi = 0.0
+        for r in self.sec.rebars:
+            eps_lo = min(eps_lo, float(r.material.eps_min))
+            eps_hi = max(eps_hi, float(r.material.eps_max))
+        for mat, _bulk, _idx, eps_init in self._tendon_groups:
+            eps_hi = max(eps_hi,
+                         float(mat.eps_max) - float(np.min(eps_init)))
+            eps_lo = min(eps_lo,
+                         float(mat.eps_min) - float(np.max(eps_init)))
+        eps_lo *= 1.01
+        eps_hi = eps_hi * 1.01 if eps_hi > 0.0 else 1.0e-3
+
+        # Curvatures: logarithmic on both signs plus zero, because the
+        # interesting roots sit over four decades of curvature and a
+        # linear grid would spend most of its points where nothing
+        # happens.
+        half = max(1, (n_chi - 1) // 2)
+        mags = np.logspace(-8.0, -2.0, half)
+        curvatures = np.concatenate([-mags[::-1], [0.0], mags])
+
+        grid = np.linspace(eps_lo, eps_hi, n_eps)
+        zeros = np.zeros_like(grid)
+        N_min = float("inf")
+        N_max = float("-inf")
+        state_min = state_max = (0.0, 0.0)
+        roots = 0
+        N_roots = []
+
+        my_peak = 0.0
+        for chi in curvatures:
+            Nv, Mxv, Myv = self.integrate_batch(
+                grid, np.full_like(grid, chi), zeros)
+            # Largest |My| anywhere on the scanned plane.  It is what
+            # decides whether the plane is the whole search space or
+            # only a slice of it -- measured, not inferred from the
+            # geometry declaration.
+            my_peak = max(my_peak, float(np.max(np.abs(Myv))))
+            crossings = np.where(np.diff(np.sign(Mxv)) != 0)[0]
+            for i in crossings:
+                a, b, fa = grid[i], grid[i + 1], Mxv[i]
+                for _ in range(60):
+                    mid = 0.5 * (a + b)
+                    _, fm, _ = self.integrate(mid, chi, 0.0)
+                    if fa * fm <= 0.0:
+                        b = mid
+                    else:
+                        a, fa = mid, fm
+                eps_root = 0.5 * (a + b)
+                N_root, Mx_root, My_root = self.integrate(
+                    eps_root, chi, 0.0)
+                if abs(Mx_root) > M_tol:
+                    continue            # a jump, not a root
+                # BOTH moments, not one.  The request this measurement
+                # answers is ``Mx = My = 0``; a state that zeroes Mx
+                # alone is not a state that satisfies it.  Measured on
+                # examples/Pannello_187x30.yaml, whose element layout
+                # is asymmetric about the y-axis: the Mx = 0 extremum
+                # there carries My = 4.736e+08 N.mm, and counting it
+                # made the reach look 2 042 789 N wide and produced a
+                # 'search_failed_inside_reach' verdict — a claim that
+                # a defect exists, issued by a half-blind instrument.
+                if abs(My_root) > M_tol:
+                    continue
+                roots += 1
+                N_roots.append(float(N_root))
+                if N_root < N_min:
+                    N_min, state_min = float(N_root), (eps_root, float(chi))
+                if N_root > N_max:
+                    N_max, state_max = float(N_root), (eps_root, float(chi))
+
+        if roots == 0:
+            N_min = N_max = 0.0
+        result = {
+            "N_min": N_min, "N_max": N_max,
+            "state_min": state_min, "state_max": state_max,
+            "roots": roots, "N_roots": tuple(sorted(N_roots)),
+            "my_peak": my_peak,
+            "on_plane_only": my_peak > float(M_tol),
+            "resolution": (n_chi, n_eps),
+            "M_tol": float(M_tol),
+        }
+        self._axial_reach_cache[cache_key] = result
+        return result
+
+    def _refuse_unattainable_axial(self, sol, N_target, M_tol):
+        r"""
+        Turn a mute pure-axial non-convergence into a named outcome.
+
+        Called on exactly one route: both target moments were
+        negligible, the whole solve chain failed, and the caller is
+        about to receive ``converged = False`` with no reason.  This
+        method measures the section's zero-moment reach and either
+
+        * labels it ``axial_state_not_attainable``, when the request
+          is outside the reach — the state does not exist and no
+          search will find it; or
+        * labels it ``search_failed_inside_reach``, when the request
+          is *inside* the reach — the state exists and the search
+          missed it, which is a defect and is named as one rather
+          than hidden.
+
+        **It does not raise**, and that is a deliberate choice with a
+        cost attached.  ``solve_equilibrium`` is called inside loops
+        that generate interaction domains and moment-curvature
+        curves, and those loops treat a non-converged point as a
+        point to skip.  Turning the return into an exception would
+        abort a whole diagram on one unattainable point, which is a
+        capability removed, not a capability added.  The refusal is
+        therefore carried **in the return contract**, and
+        :meth:`require_equilibrium` is the opt-in that promotes it to
+        :class:`AxialStateNotAttainable` for a caller that wants a
+        verdict rather than a curve.
+
+        Parameters
+        ----------
+        sol : dict
+            The non-converged result about to be returned.
+        N_target : float
+            Requested axial force [N].
+        M_tol : float
+            Moment tolerance in force [N.mm].
+
+        Returns
+        -------
+        dict
+            *sol*, with these keys added:
+
+            ``reason`` : str
+                One of ``'axial_state_not_attainable'``,
+                ``'search_failed_inside_reach'``,
+                ``'reach_not_measurable'``.
+            ``refusal`` : str
+                The reason in prose, with the numbers in it.
+            ``residual_rel`` : float
+                Relative force residual of the state returned.
+            ``attainable_N`` : tuple of float
+                The measured zero-moment reach ``(N_min, N_max)``.
+            ``attainable_state`` : tuple of float, optional
+                ``(eps0, chi_x)`` of the nearest state that exists;
+                present only when the request is outside the reach.
+            ``reach_resolution`` : tuple of int
+                Coarseness of the scan behind the two above.
+
+        Notes
+        -----
+        The verdict never travels alone.  ``residual_rel`` is written
+        next to it because ``converged`` is meaningless above certain
+        residual magnitudes -- the same reason the timeline dump
+        carries the relative residual and the tolerance alongside the
+        solver flag instead of publishing the flag by itself.
+
+        A reach measurement that finds **no** root is not evidence of
+        anything, and this method says so: it labels the outcome
+        ``reach_not_measurable`` and refuses to raise on it.  A
+        certificate produced by a blind instrument is the failure mode
+        this project spent Phase 19 removing.
+        """
+        scale = max(abs(N_target), 1.0)
+        sol["residual_rel"] = abs(
+            float(sol.get("N", float("nan"))) - N_target) / scale
+        # The tolerance the reach was measured under travels with the
+        # verdict.  Re-deriving it in ``require_equilibrium`` from the
+        # default argument would be a second definition of one fact.
+        sol["M_tol"] = float(M_tol)
+        reach = self.axial_reach_at_zero_moment(M_tol=M_tol)
+        sol["attainable_N"] = (reach["N_min"], reach["N_max"])
+        sol["reach_resolution"] = reach["resolution"]
+        if reach["roots"] == 0:
+            sol["reason"] = "reach_not_measurable"
+            sol["refusal"] = (
+                "the zero-moment reach of this section could not be "
+                "measured: the scan found no verified Mx = 0 root, so "
+                "nothing here is evidence either way.")
+            return sol
+        outside = (N_target > reach["N_max"] or N_target < reach["N_min"])
+        if outside and reach["on_plane_only"]:
+            # The scan holds chi_y = 0.  On a section that is not
+            # degenerate about x the solver may search chi_y as well,
+            # so a target outside the scanned plane is NOT proven
+            # unattainable: the measurement is a lower bound on the
+            # reach, not the reach.  Report the bound and decline the
+            # certificate.  Claiming "no such state" from a plane one
+            # did not visit is the error this whole item is about.
+            sol["reason"] = "axial_reach_not_certified"
+            sol["refusal"] = (
+                f"N = {N_target:.1f} N is outside the zero-moment "
+                f"reach measured on the chi_y = 0 plane, "
+                f"[{reach['N_min']:.1f}, {reach['N_max']:.1f}] N. "
+                f"That plane is not the whole search space here: the "
+                f"largest |My| on it is {reach['my_peak']:.4g} N.mm, "
+                f"above the {M_tol:g} N.mm tolerance, so the section "
+                f"is not symmetric about the reference y-axis and "
+                f"states with chi_y != 0 exist that the scan never "
+                f"visited.  The bound is a LOWER bound on the reach "
+                f"and is not a certificate of absence.")
+            return sol
+        if outside:
+            state = (reach["state_max"] if N_target > reach["N_max"]
+                     else reach["state_min"])
+            sol["reason"] = "axial_state_not_attainable"
+            sol["attainable_state"] = state
+            sol["refusal"] = str(AxialStateNotAttainable(
+                N_target, (reach["N_min"], reach["N_max"]),
+                state, M_tol, reach["resolution"]))
+            return sol
+        # Inside the range is not the same as attainable: the reach is
+        # sampled, not solved, and the attainable set has gaps where a
+        # fibre leaves the active range.  Only a verified root CLOSE to
+        # the target licenses the word "defect".
+        gap = min(abs(n - N_target) for n in reach["N_roots"])
+        if gap <= 0.01 * max(abs(N_target), 1.0):
+            sol["reason"] = "search_failed_inside_reach"
+            sol["refusal"] = (
+                f"N = {N_target:.1f} N is inside this section's "
+                f"measured zero-moment reach [{reach['N_min']:.1f}, "
+                f"{reach['N_max']:.1f}] N and a verified state sits "
+                f"{gap:.1f} N away from it, so a state exists and the "
+                f"search did not find it.  This is a defect, not a "
+                f"boundary.")
+            return sol
+        sol["reason"] = "reach_inconclusive"
+        sol["refusal"] = (
+            f"N = {N_target:.1f} N lies between the extremes of the "
+            f"measured zero-moment reach [{reach['N_min']:.1f}, "
+            f"{reach['N_max']:.1f}] N, but the nearest verified state "
+            f"is {gap:.1f} N away and the attainable set has gaps.  "
+            f"The scan, at {reach['resolution'][0]} curvatures x "
+            f"{reach['resolution'][1]} strains, cannot decide whether "
+            f"the state exists; it is not evidence either way.")
+        return sol
+
+    def require_equilibrium(self, N_target, Mx_target, My_target=0.0,
+                            **kwargs):
+        r"""
+        :meth:`solve_equilibrium`, but a refusal is raised.
+
+        For the caller that wants a **verdict** rather than a point on
+        a curve.  Behaves exactly like :meth:`solve_equilibrium` and
+        returns its dict, except that a result labelled
+        ``axial_state_not_attainable`` is turned into
+        :class:`AxialStateNotAttainable`.
+
+        Why the two are separate methods
+        --------------------------------
+        Interaction domains and moment-curvature curves call the
+        solver in loops and treat non-convergence as a point to skip.
+        If the solver raised, one unattainable point would abort a
+        whole diagram: a capability removed.  Keeping the raise out of
+        the default path and offering it here adds the strict
+        behaviour without taking the lenient one away.
+
+        Parameters
+        ----------
+        N_target, Mx_target, My_target : float
+            As :meth:`solve_equilibrium`.
+        **kwargs
+            Forwarded verbatim.
+
+        Returns
+        -------
+        dict
+            The solution, as :meth:`solve_equilibrium`.
+
+        Raises
+        ------
+        AxialStateNotAttainable
+            When the request is a pure-axial one that the section's
+            measured zero-moment reach does not contain.
+
+        See Also
+        --------
+        solve_equilibrium : the lenient form, which labels instead.
+        axial_reach_at_zero_moment : the measurement behind the label.
+        """
+        sol = self.solve_equilibrium(N_target, Mx_target, My_target,
+                                     **kwargs)
+        if sol.get("reason") == "axial_state_not_attainable":
+            raise AxialStateNotAttainable(
+                N_target, sol["attainable_N"], sol["attainable_state"],
+                sol.get("M_tol", kwargs.get("tol", 1e-3) * 1000.0),
+                sol["reach_resolution"])
+        return sol
+
     def solve_equilibrium(self, N_target, Mx_target, My_target=0.0,
                           eps0_init=0.0, chi_x_init=1e-6,
                           chi_y_init=0.0,
@@ -1067,6 +1818,30 @@ class FiberSolver:
             # eccentric *internal* self-stress (e.g. an eccentric bonded
             # tendon at prestress transfer). chi=0 cannot balance that
             # moment, so the full uniaxial/biaxial solve is required.
+            #
+            # N-15, the contract half.  This fall-through is a
+            # DECLARED route for a fast path that legitimately does
+            # not apply -- it is not, and must not be used as, a
+            # rescue for a fast path that is WRONG.  Until Phase 19
+            # it silently absorbed the missing tendon branch of
+            # ``_solve_pure_axial``: a strand-only section whose
+            # tensile target had no bracket came back non-converged
+            # here and was re-solved by ``_solve_uniaxial``, so the
+            # caller saw a right answer produced for the wrong
+            # reason and no test could see the defect from outside.
+            # The bracket is fixed at its own site; what is fixed
+            # here is the standing of this branch, which is now a
+            # stated contract with a named scope instead of an
+            # accidental screen.  ``_solve_pure_axial`` is
+            # independently answerable for covering every element
+            # class, and is tested directly, not through this route.
+
+        # N-17.  Everything below this point may fail; when the
+        # request was a PURE AXIAL one, a bare ``converged = False``
+        # cannot say which of two very different things happened, so
+        # the corridor is marked here and every exit through it is
+        # given a reason before it reaches the caller.
+        pure_axial = (abs(Mx_target) < M_tol and abs(My_target) < M_tol)
 
         # ----------------------------------------------------------
         #  Uniaxial or near-uniaxial
@@ -1074,16 +1849,24 @@ class FiberSolver:
         # Vertically-degenerate section: only chi_x is meaningful,
         # solve about the x-axis.
         if self._is_uniaxial(axis='x'):
-            return self._solve_uniaxial(
+            sol = self._solve_uniaxial(
                 N_target, Mx_target, eps0_init, chi_x_init,
                 tol, max_iter)
+            if pure_axial and not sol["converged"]:
+                return self._refuse_unattainable_axial(
+                    sol, N_target, M_tol)
+            return sol
 
         # Horizontally-degenerate section: only chi_y is meaningful,
         # solve about the y-axis.
         if self._is_uniaxial(axis='y'):
-            return self._solve_uniaxial_y(
+            sol = self._solve_uniaxial_y(
                 N_target, My_target, eps0_init, chi_y_init,
                 tol, max_iter)
+            if pure_axial and not sol["converged"]:
+                return self._refuse_unattainable_axial(
+                    sol, N_target, M_tol)
+            return sol
 
         # Near-uniaxial fast paths.  When one of the target moments
         # is negligible, try the corresponding 2-unknown solve in
@@ -1105,10 +1888,13 @@ class FiberSolver:
             if sol["converged"] and abs(sol["Mx"]) < M_tol:
                 return sol
 
-        return self._solve_biaxial(
+        sol = self._solve_biaxial(
             N_target, Mx_target, My_target,
             eps0_init, chi_x_init, chi_y_init,
             tol, max_iter)
+        if pure_axial and not sol["converged"]:
+            return self._refuse_unattainable_axial(sol, N_target, M_tol)
+        return sol
 
     # ------------------------------------------------------------------
     #  Pure axial solver  (1-unknown bisection)
@@ -1152,6 +1938,27 @@ class FiberSolver:
         Returns
         -------
         dict
+
+        Notes
+        -----
+        **Scan-range contract (N-15).**  The grid of step 1 must span
+        every section strain at which the section can be in axial
+        equilibrium, and it is built from **all three** element
+        classes -- bulk, ordinary reinforcement and tendons -- with
+        each tendon's own limits shifted by its locked-in strain,
+        :math:`\varepsilon_{\mathrm{sec}} = \varepsilon_p
+        - \varepsilon_{\mathrm{init}}`.  A range assembled from a
+        subset of the classes leaves part of the section's real
+        capacity with no bracket, and the routine then reports
+        ``converged=False`` for a load the section carries.
+
+        This routine is answerable for that on its own.  Its caller,
+        :meth:`solve_equilibrium`, routes a non-converged pure-axial
+        result onward to the uniaxial or biaxial solve, but that
+        route exists for the case where a zero-curvature state
+        genuinely cannot satisfy moment equilibrium -- **not** as a
+        rescue for an incorrect bracket here.  Correctness of this
+        routine is therefore tested by calling it directly.
         """
         sec = self.sec
 
@@ -1161,6 +1968,37 @@ class FiberSolver:
         for r in sec.rebars:
             eps_lo = min(eps_lo, r.material.eps_min)
             eps_hi = max(eps_hi, r.material.eps_max)
+        # --- Tendons (N-15) ---
+        # The scan range is a CONTRACT: it must span every strain the
+        # section can be in equilibrium at, or a target inside the
+        # section's real capacity has no bracket and the routine
+        # returns non-converged for a load the section carries.
+        # Before this it walked bulk and rebar only, so a tendon was
+        # absent from the range even though it is present in the
+        # integral the range is scanned with -- the same two-of-three
+        # assembly as N-14 (strain envelope) and N-16 (scan hull),
+        # here on the axial bracket.
+        #
+        # A tendon's own limits enter the SECTION strain range shifted
+        # by the locked-in strain its law is evaluated on top of:
+        #
+        #     eps_p = eps_sec + eps_init  =>  eps_sec = eps_p - eps_init
+        #
+        # On a section that also carries ordinary reinforcement the
+        # rebar limit is normally the wider one and this is inert; on
+        # a strand-only section -- a hollow-core or double-tee slab,
+        # the same geometry N-14 names -- ``eps_hi`` stayed at exactly
+        # 0.0 and the whole tensile branch of the scan did not exist.
+        # Measured on a 1200 x 200 slab with one 700 mm^2 strand at
+        # eps_pe = 0.0060: peak N reachable by the old range 819.0 kN
+        # against a true axial tensile capacity of 1112.3 kN, i.e.
+        # **26.37 % of the real capacity had no bracket**, and targets
+        # at 90 / 95 / 99 % of it all returned non-converged.
+        for _mat, _bulk_mat, _idx, eps_init in self._tendon_groups:
+            e0_min = float(np.min(eps_init))
+            e0_max = float(np.max(eps_init))
+            eps_lo = min(eps_lo, float(_mat.eps_min) - e0_max)
+            eps_hi = max(eps_hi, float(_mat.eps_max) - e0_min)
         eps_lo *= 1.01
         eps_hi *= 1.01
 

@@ -168,7 +168,7 @@ def print_sls_results(res):
     One block per stage: cumulative demand, solved plane, concrete
     stress extremes with locations, per-element accumulated stresses,
     check table with :math:`\eta` utilizations and the
-    uncracked-basis flag (Phase-7 D4 semantics), then the global
+    per-check verdicts, then the global
     verdict and the governing check.
 
     Parameters
@@ -205,36 +205,39 @@ def print_sls_results(res):
         if "checks" not in st:
             print("  (no limits attached: accumulation only)")
             continue
-        if st.get("basis_checked"):
-            flag = ("VIOLATED" if st["uncracked_basis_violated"]
-                    else "ok")
-            print(f"  uncracked basis: {flag}")
-        else:
-            print("  uncracked basis: not assessed (no fct_eff)")
         for ck in st["checks"]:
             if ck.get("skipped"):
                 print(f"    - {ck['name']:<28} SKIPPED "
                       f"({ck['reason']})")
                 continue
             verdict = "PASS" if ck["passed"] else "FAIL"
-            if ck.get("basis_valid") is False:
-                verdict += " [basis invalid]"
             if "eta" in ck:
                 print(f"    - {ck['name']:<28} "
                       f"{ck['value_MPa']:>9.3f} / "
                       f"{ck['limit_MPa']:>8.3f} MPa  "
                       f"eta={ck['eta']:.3f}  {verdict}")
             else:
+                # Decompression carries its magnitude as a STRAIN
+                # and carries no eta, because it has no capacity to
+                # divide by (Phase 29, Q3-E').  Printing the stress
+                # here used to contradict the verdict beside it.
                 print(f"    - {ck['name']:<28} "
-                      f"sigma_probe={ck['sigma_probe_MPa']:>8.3f} "
-                      f"MPa at {ck['probe_at']}  {verdict}")
+                      f"eps_probe={ck['value']:>12.6e}  "
+                      f"at {ck['probe_at']}  {verdict}")
         print(f"  stage verified: {st['verified']}")
 
     print("-" * 66)
     print(f"VERIFIED: {res['verified']}")
     if res.get("governing"):
         g = res["governing"]
-        print(f"governing: eta={g['eta']:.3f} — stage "
-              f"'{g['stage']}', check '{g['check']}'")
+        # eta is None where the governing check has no capacity to
+        # divide by -- decompression is the only one (Phase 29, Q3-E').
+        # Formatting None with ':.3f' raises, so the absence is printed
+        # as an absence rather than filled with a number.
+        eta_txt = ("n/a" if g.get("eta") is None
+                   else f"{g['eta']:.3f}")
+        state = "failed" if g.get("failed") else "governing"
+        print(f"governing: eta={eta_txt} — stage "
+              f"'{g['stage']}', check '{g['check']}' ({state})")
     print("=" * 66)
 

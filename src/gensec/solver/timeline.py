@@ -89,6 +89,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .section_state import PrestressAction, StagedDomainManager
+from .prestress_ledger import (PrestressLedger, STATE_STRESSED,
+                               STATE_BONDED)
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +103,233 @@ from .section_state import PrestressAction, StagedDomainManager
 #: §2): variable actions never enter the timeline, they are combination
 #: components.
 EVENT_KINDS = frozenset(
-    {"cast", "stress", "grout", "interval", "load", "point"}
+    {"cast", "stress", "grout", "interval", "load", "point", "retrofit"}
 )
+
+#: The keys a ``retrofit`` event may carry, and the **only** home of
+#: that set: :func:`_parse_retrofit_event` refuses anything outside it
+#: by name and prints this tuple beside the refusal.  Every one of them
+#: is required — there is no default effective stress, no default strain
+#: plane and no default clock, for the reason there is no default
+#: concrete class (D1b, ``PreexistingState``).
+RETROFIT_KEYS = ("concrete", "tendons")
+
+#: The keys of the ``concrete`` sub-block: the strain plane, the point
+#: it is declared about, and the concrete's own clock.  A plane without
+#: its reference point is not a plane: read about the wrong point it is
+#: wrong by :math:`\chi\,\Delta y`, silently, so ``x_ref`` and
+#: ``y_ref`` are as required as the three plane coefficients.
+#:
+#: The clock lives **here**, beside the plane it belongs to, and not at
+#: the top of the block: the two sub-blocks are then symmetric — each
+#: declared fact carries its own clock, the concrete's counted from
+#: casting and each cable's from its own jacking — and the two clocks
+#: cannot be confused for one another by position.
+RETROFIT_CONCRETE_KEYS = ("eps0", "chi_x", "chi_y", "x_ref", "y_ref",
+                          "age_days")
+
+#: The keys of one entry of the ``tendons`` mapping.  ``age_days`` is a
+#: **second, different clock** from ``concrete.age_days``: relaxation
+#: runs from the day a cable was tensioned, not from the day its
+#: concrete was cast, and on a member being retrofitted the two are
+#: decades apart.
+RETROFIT_TENDON_KEYS = ("sigma_pe", "age_days")
+
+
+def _retrofit_number(value, where, key):
+    r"""
+    Read one declared number, or refuse naming it.
+
+    Parameters
+    ----------
+    value : object
+        The declared value.
+    where : str
+        Human-readable position, used in the refusal.
+    key : str
+        The field name, used in the refusal.
+
+    Returns
+    -------
+    float
+
+    Raises
+    ------
+    ValueError
+        If the value is missing, not a number, or not finite.  A
+        non-finite declared state would propagate into the strain plane
+        of every fibre and the run would complete carrying it.
+    """
+    import math as _math
+
+    if value is None:
+        raise ValueError(
+            f"{where}: '{key}' is required and was not declared. "
+            f"GenSec derives no part of a pre-existing state: the whole "
+            f"point of declaring a retrofit is that these numbers come "
+            f"from a previous analysis, a site measurement or an "
+            f"external calculation, and nothing in the section says "
+            f"them.")
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{where}: '{key}'={value!r} is not a number.") from None
+    if not _math.isfinite(out):
+        raise ValueError(
+            f"{where}: '{key}'={value!r} is not finite.")
+    return out
+
+
+def _parse_retrofit_event(payload, index):
+    r"""
+    Parse and validate a ``retrofit`` event — the declared state of a
+    member already in service, before the history begins.
+
+    The physics of the retrofit is
+    :class:`~gensec.solver.posttension.PreexistingState`, which has
+    existed since Phase 24 with eight required fields and no defaults.
+    What did not exist until Phase 34 is any way to *say* it in a
+    document: ``io_yaml.py`` never named it, so a writer describing an
+    existing member with new cables got the analysis of a virgin
+    section and nothing told them (D1b-3).  This function is that
+    surface, and it lives here rather than in
+    :mod:`gensec.io_yaml` because ``construction_history`` is carried
+    raw to :meth:`ConstructionTimeline.from_block`: one home for the
+    parse of one block.
+
+    The declared form::
+
+        construction_history:
+          - retrofit:
+              concrete:
+                eps0:     -3.0e-4
+                chi_x:     1.5e-7
+                chi_y:     0.0
+                x_ref:   200.0
+                y_ref:   600.0
+                age_days: 14600.0
+              tendons:
+                P_old: {sigma_pe: 1100.0, age_days: 14200.0}
+
+    What the plane means, and what it does not
+    ------------------------------------------
+    The triple :math:`(\varepsilon_0, \chi_x, \chi_y)` about
+    :math:`(x_{\mathrm{ref}}, y_{\mathrm{ref}})` is the **total** strain
+    state of the existing concrete:
+
+    .. math::
+
+        \varepsilon_c(x, y) = \varepsilon_0
+            + \chi_x\,(y - y_{\mathrm{ref}})
+            - \chi_y\,(x - x_{\mathrm{ref}}),
+
+    existing prestress, permanent loads and the whole deferred history
+    already combined.  GenSec does not decompose it and does not ask
+    which part came from where: a decomposition it cannot verify would
+    be a guess dressed as an input.
+
+    Parameters
+    ----------
+    payload : dict
+        The event payload as written.
+    index : int
+        Position in the event stream, named in every refusal.
+
+    Returns
+    -------
+    dict
+        ``{"concrete_age_days": float, "plane": {...},
+        "tendons": {name: {"sigma_pe": float, "age_days": float}}}``,
+        every value read and validated.
+
+    Raises
+    ------
+    ValueError
+        A key outside :data:`RETROFIT_KEYS`,
+        :data:`RETROFIT_CONCRETE_KEYS` or :data:`RETROFIT_TENDON_KEYS`; a
+        missing required field; an empty tendon mapping; a
+        non-positive effective stress; a negative clock.  Every refusal
+        names the offending key **and** the valid set: naming only the
+        first says what went wrong, naming the second says what to
+        write instead.
+    """
+    where = f"construction_history[{index}] (retrofit)"
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"{where}: the payload must be a mapping carrying "
+            f"{list(RETROFIT_KEYS)}, got {payload!r}.")
+
+    unknown = sorted(set(payload) - set(RETROFIT_KEYS))
+    if unknown:
+        raise ValueError(
+            f"{where}: unknown field(s) {unknown}. A 'retrofit' event "
+            f"reads exactly these fields: {list(RETROFIT_KEYS)}. A "
+            f"field nobody reads is a declaration the engine will not "
+            f"act on, and the writer has no way to find that out.")
+
+    conc_spec = payload.get("concrete")
+    if not isinstance(conc_spec, dict):
+        raise ValueError(
+            f"{where}: 'concrete' is required and must be a mapping "
+            f"carrying {list(RETROFIT_CONCRETE_KEYS)}, got "
+            f"{conc_spec!r}. It is the strain state of the existing "
+            f"concrete, and GenSec cannot derive it: the history that "
+            f"produced it is not in this document.")
+    unknown = sorted(set(conc_spec) - set(RETROFIT_CONCRETE_KEYS))
+    if unknown:
+        raise ValueError(
+            f"{where}: unknown field(s) {unknown} in 'concrete'. The "
+            f"block reads exactly {list(RETROFIT_CONCRETE_KEYS)}.")
+    plane = {k: _retrofit_number(conc_spec.get(k), f"{where}.concrete", k)
+             for k in RETROFIT_CONCRETE_KEYS if k != "age_days"}
+    concrete_age = _retrofit_number(
+        conc_spec.get("age_days"), f"{where}.concrete", "age_days")
+    if concrete_age < 0.0:
+        raise ValueError(
+            f"{where}.concrete: 'age_days'={concrete_age!r} is "
+            f"negative. It is the age of the existing concrete at the "
+            f"instant this history begins, counted from casting.")
+
+    tendon_spec = payload.get("tendons")
+    if not isinstance(tendon_spec, dict) or not tendon_spec:
+        raise ValueError(
+            f"{where}: 'tendons' is required and must be a non-empty "
+            f"mapping {{tendon name: {{sigma_pe: ..., age_days: "
+            f"...}}}}. A retrofit with no pre-existing tendon is not a "
+            f"retrofit; declare no 'retrofit' event instead.")
+    tendons = {}
+    for name, spec in tendon_spec.items():
+        tw = f"{where}.tendons['{name}']"
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"{tw}: must be a mapping carrying "
+                f"{list(RETROFIT_TENDON_KEYS)}, got {spec!r}.")
+        unknown = sorted(set(spec) - set(RETROFIT_TENDON_KEYS))
+        if unknown:
+            raise ValueError(
+                f"{tw}: unknown field(s) {unknown}. A pre-existing "
+                f"tendon reads exactly {list(RETROFIT_TENDON_KEYS)}.")
+        sigma = _retrofit_number(spec.get("sigma_pe"), tw, "sigma_pe")
+        if sigma <= 0.0:
+            raise ValueError(
+                f"{tw}: 'sigma_pe'={sigma!r} is not strictly positive. "
+                f"It is the stress the cable is at NOW -- the jacking "
+                f"stress minus the whole deferred history of creep, "
+                f"shrinkage and relaxation -- and a cable at zero or "
+                f"negative stress is not a pre-existing tendon.")
+        age = _retrofit_number(spec.get("age_days"), tw, "age_days")
+        if age < 0.0:
+            raise ValueError(
+                f"{tw}: 'age_days'={age!r} is negative. It is the time "
+                f"since THIS cable was tensioned, a different clock "
+                f"from 'concrete.age_days': relaxation runs from the "
+                f"day a cable was jacked, not from the day its "
+                f"concrete was cast.")
+        tendons[str(name)] = {"sigma_pe": sigma, "age_days": age}
+
+    return {"concrete_age_days": concrete_age, "plane": plane,
+            "tendons": tendons}
 
 
 class TimelineEvent:
@@ -180,7 +407,9 @@ class ConstructionTimeline:
     """
 
     def __init__(self, events: List[TimelineEvent], points: Dict[str, int],
-                 losses_models=None):
+                 losses_models=None, zone_rheology=None,
+                 reference_modulus=None, rheology=None,
+                 tolerances=None, code=None):
         self.events = events
         self.points = points
         #: ``{name: LossModel}`` — the rheological models the
@@ -188,12 +417,173 @@ class ConstructionTimeline:
         #: declares no ``losses_models`` block, in which case the
         #: timeline is byte-identical to the pre-C5 behaviour.
         self.losses_models = dict(losses_models or {})
+        #: ``{zone name: {"model", "age", "curing"}}`` -- the rheological
+        #: identity of a zone, declared once and outside any interval
+        #: (P3).  It is what lets a ``cast`` know the substrate's
+        #: :math:`E_c(t)` when no interval mentions the substrate.
+        self.zone_rheology = dict(zone_rheology or {})
+        #: The code's conventional service modulus rule
+        #: (:class:`~gensec.materials.base.ReferenceModulusRule`), used
+        #: for a datum **only** when the model declares no time axis at
+        #: all.  ``None`` selects the shipped default of this build,
+        #: which is the Eurocode's; a model under another code passes
+        #: its own and no engine code changes.
+        self.reference_modulus = reference_modulus
+        #: The model's normative declaration
+        #: (:class:`~gensec.materials.codes.NormativeCode`), read from
+        #: the input's top-level ``code:``.  It is the one place a
+        #: model says which code it is verified to, and everything code
+        #: dependent is derived from it rather than re-decided per call
+        #: site.  ``None`` means the input declared none, in which case
+        #: the build's shipped rule applies and each material's own
+        #: stamp still governs it.
+        from ..materials.codes import resolve_code
+        self.code = (None if code is None
+                     else resolve_code(model_code=code))
+        #: ``'declared'`` | ``'on'`` | ``'off'``; see :meth:`has_time_axis`.
+        self.rheology = _normalise_rheology_switch(rheology)
+        #: The resolved numerical tolerances
+        #: (:class:`gensec.tolerances.Tolerances`).  Never ``None``:
+        #: a site that reads a tolerance must find one, not decide.
+        from ..tolerances import Tolerances
+        self.tolerances = (tolerances if isinstance(tolerances, Tolerances)
+                           else Tolerances.from_mapping(tolerances))
+
+    @property
+    def has_time_axis(self) -> bool:
+        r"""
+        Whether this analysis carries time-dependent behaviour.
+
+        Three states, because two of them are answers and the third is
+        an inference:
+
+        ``'declared'`` (default)
+            Inferred: true when *any* zone is given a rheological
+            identity through ``losses_models`` or ``zone_rheology``.
+        ``'on'``
+            Forced true.  A zone with no declared model then refuses
+            instead of falling back to a conventional modulus -- for a
+            model that must not quietly degrade into an indicative one.
+        ``'off'``
+            Forced false.  Creep, shrinkage and relaxation are not
+            integrated, and every datum is drawn at the code's
+            conventional modulus (:math:`E_{cm}` at 28 d under EN
+            1992-1-1).  This is a **declared approximation**, not a
+            defect: an engineer checking a section at
+            :math:`t = \infty` often wants the conventional answer,
+            which is coarser but reproducible and far cheaper to audit
+            than a full rheological walk.  What makes it legitimate is
+            that it was *asked for* -- the result is wrong in a way the
+            model states, which is the opposite of a silent default.
+            Declared ``interval.losses`` are then not integrated, and
+            the events they were declared on are listed in
+            :attr:`TimelineResolution.skipped_losses` so that no report
+            can present the result as a rheological one.
+
+        It is a property of the **model**, not of a zone, and
+        deliberately so: a model with a time axis in which one zone
+        declares no part of it is an incomplete declaration -- that
+        zone still restrains the ones that creep, at a stiffness nobody
+        stated (finding F-A) -- and must be refused, not filled in from
+        a conventional value.  Read per zone, this predicate would
+        re-open exactly the branch Phase 12 closed.
+
+        Returns
+        -------
+        bool
+        """
+        if self.rheology == "off":
+            return False
+        if self.rheology == "on":
+            return True
+        return bool(self.losses_models or self.zone_rheology)
+
+    def _reference_rule(self):
+        r"""
+        The reference-modulus rule to hand a datum resolution, or
+        ``None``.
+
+        Returns
+        -------
+        ReferenceModulusRule or None
+            ``None`` whenever the model has a time axis: there the age
+            is a declared fact and a conventional substitute for it is
+            the defect this phase removes.
+        """
+        if self.has_time_axis:
+            return None
+        if self.reference_modulus is not None:
+            return self.reference_modulus
+        # Resolve per material from its own stamp, so a model that
+        # mixes codes -- a precast beam under EN 1992-1-1 with a
+        # topping under ACI 318-19 -- has each element answered under
+        # the code it was declared with, instead of one rule applied
+        # to all of them.
+        #
+        # There is no fallback below this line.  Until Phase 21 an
+        # undeclared model got the build's shipped rule, which was the
+        # Eurocode's: the last surface on which a normative choice
+        # happened without being declared.  A material that reaches
+        # here with no declaration gets UNDECLARED, which refuses and
+        # names the omission -- and the loader refuses earlier still,
+        # so reaching here undeclared means the object was built in
+        # Python rather than loaded.
+        from ..materials.codes import CodeReferenceModulus, UNDECLARED
+        return CodeReferenceModulus(
+            fallback=self.code if self.code is not None else UNDECLARED)
 
     # -- construction --------------------------------------------------
 
     @classmethod
-    def from_block(cls, block: Sequence[dict], losses_models=None
-                   ) -> "ConstructionTimeline":
+    def from_document(cls, data, **kwargs) -> "ConstructionTimeline":
+        r"""
+        Build a timeline from a **parsed model document**.
+
+        The one home for *"which top-level keys a timeline is made
+        of"*.  :meth:`from_block` takes them apart, which means every
+        caller that builds a timeline by hand has to know the list --
+        and a caller that does not know it drops the key **silently**.
+        Measured: ``zone_rheology`` reached the timeline from exactly
+        one site in the tree, and every other construction path lost
+        it without a word.  A new timeline-level key added here is
+        inherited by every caller instead of forgotten by all but one.
+
+        Parameters
+        ----------
+        data : dict
+            A document as returned by
+            :func:`gensec.io_yaml.load_yaml`.
+        **kwargs
+            Forwarded to :meth:`from_block` -- e.g.
+            ``reference_modulus`` for a non-Eurocode build.
+
+        Returns
+        -------
+        ConstructionTimeline
+
+        Raises
+        ------
+        KeyError
+            If *data* carries no ``construction_history``.
+
+        See Also
+        --------
+        from_block : the parser this delegates to.
+        """
+        kwargs.setdefault("rheology", data.get("rheology"))
+        kwargs.setdefault("tolerances", data.get("tolerances"))
+        kwargs.setdefault("code", data.get("code"))
+        return cls.from_block(
+            data["construction_history"],
+            losses_models=data.get("losses_models"),
+            zone_rheology=data.get("zone_rheology"),
+            **kwargs)
+
+    @classmethod
+    def from_block(cls, block: Sequence[dict], losses_models=None,
+                   zone_rheology=None, reference_modulus=None,
+                   rheology=None,
+                   tolerances=None, code=None) -> "ConstructionTimeline":
         r"""
         Parse the YAML ``construction_history`` block into a timeline.
 
@@ -214,21 +604,32 @@ class ConstructionTimeline:
         ----------
         block : sequence of dict
             The parsed list.
+        losses_models : dict, optional
+            ``{name: LossModel}`` an ``interval`` may reference.
+        zone_rheology : dict, optional
+            ``{zone name: {"model", "age", "curing"}}`` -- see
+            :func:`gensec.io_yaml._parse_zone_rheology`.
 
         Returns
         -------
         ConstructionTimeline
+
+        An ``interval`` carrying a ``losses`` key is **accepted**: the
+        spec is validated here by
+        :func:`_validate_losses_spec` and integrated by the walk.  Until
+        Phase 8 it was refused, and this docstring went on declaring the
+        refusal for several phases after the refusal was removed -- a
+        declaration whose only effect was to tell a reader that an open
+        path was closed.  The exact dual of a silent fallback, and
+        removed for the same reason (Phase 31, task zero, Z-1).
 
         Raises
         ------
         ValueError
             Unknown event kind; malformed item (not a single-key
             mapping); duplicate point name; a point name colliding with
-            an event kind; an ``interval`` carrying a ``losses`` key
-            (deferred to Task 3, fail-loud).
-        NotImplementedError
-            An ``interval`` with a ``losses`` key — timeline losses land
-            in Task 3.
+            an event kind; a malformed or dangling ``interval.losses``
+            spec, refused by :func:`_validate_losses_spec`.
         """
         events: List[TimelineEvent] = []
         points: Dict[str, int] = {}
@@ -264,6 +665,35 @@ class ConstructionTimeline:
                 points[name] = len(events)
                 continue
 
+            if kind == "retrofit":
+                # A retrofit is not an event in the ordinary sense: it
+                # is the state the member is ALREADY in when the
+                # history opens.  Anything before it would be an event
+                # of a member whose state has not been said yet, so the
+                # position is a constraint and not a convention.
+                # Order matters between these two refusals.  A second
+                # retrofit is ALSO not first, so the ordinal check
+                # would answer it -- with the wrong diagnosis.  The
+                # more specific reason is taken first.
+                if any(e.kind == "retrofit" for e in events):
+                    raise ValueError(
+                        "construction_history: two 'retrofit' events. "
+                        "The pre-existing state is declared once, in "
+                        "full; two declarations are two homes for one "
+                        "fact and nothing would say which to believe.")
+                if events:
+                    raise ValueError(
+                        f"construction_history[{len(events)}]: a "
+                        f"'retrofit' must be the first entry of the "
+                        f"history. It declares the state the member is "
+                        f"already in before anything happens; an event "
+                        f"placed before it would act on a member whose "
+                        f"state has not been declared yet.")
+                events.append(TimelineEvent(
+                    kind, _parse_retrofit_event(payload, len(events)),
+                    len(events)))
+                continue
+
             if kind == "interval" and isinstance(payload, dict) \
                     and "losses" in payload:
                 _validate_losses_spec(payload["losses"], losses_models,
@@ -274,7 +704,11 @@ class ConstructionTimeline:
                                         else {"value": payload},
                                         len(events)))
 
-        return cls(events, points, losses_models=losses_models)
+        return cls(events, points, losses_models=losses_models,
+                   zone_rheology=zone_rheology,
+                   reference_modulus=reference_modulus,
+                   rheology=rheology, tolerances=tolerances,
+                   code=code)
 
     # -- validation ----------------------------------------------------
 
@@ -467,6 +901,113 @@ class ConstructionTimeline:
 
     # -- resolution walk ----------------------------------------------
 
+    # -- the declared pre-existing state (D1b-3) -----------------------
+
+    @property
+    def retrofit(self):
+        r"""
+        The parsed ``retrofit`` payload, or ``None``.
+
+        One home for *"does this history begin on an existing
+        member"*.  The event is constrained by :meth:`from_block` to be
+        the first entry and to occur at most once, so this property
+        reads position 0 and nothing else; a search over the whole
+        stream would suggest the constraint is softer than it is.
+
+        Returns
+        -------
+        dict or None
+        """
+        if self.events and self.events[0].kind == "retrofit":
+            return self.events[0].payload
+        return None
+
+    def _build_preexisting(self, section):
+        r"""
+        Turn the declared ``retrofit`` event into the physics object.
+
+        The declaration is written in **tendon names**, because that is
+        what a document can say; the driver is written in **tendon
+        indices**, because that is what a section array is.  This
+        method is the single translation between the two, and it is the
+        only place in the walk that knows both.
+
+        Every refusal here names the tendon and the remedy.  In
+        particular a cable declared pre-existing *and* named by a
+        ``stress`` or ``grout`` event is refused rather than resolved:
+        a cable was jacked before this history or during it, it cannot
+        be both, and nothing in the document says which declaration to
+        believe.  The driver raises the same refusal one level down
+        (``already grouted and listed in `order```), but by then the
+        message speaks of indices the writer never wrote.
+
+        Parameters
+        ----------
+        section : GenericSection
+            The built section; supplies the tendon names, coordinates
+            and moduli.
+
+        Returns
+        -------
+        gensec.solver.posttension.PreexistingState or None
+            ``None`` when the history declares no ``retrofit``, in
+            which case every caller below is byte-identical to the
+            pre-Phase-34 behaviour.
+
+        Raises
+        ------
+        ValueError
+            An unknown tendon name; a declared cable that a ``stress``
+            or ``grout`` event also names.
+        """
+        payload = self.retrofit
+        if payload is None:
+            return None
+        from .posttension import PreexistingState
+
+        where = "construction_history[0] (retrofit)"
+        known = [(getattr(t, "name", None) or f"tendon_{k}")
+                 for k, t in enumerate(
+                     getattr(section, "tendons", []) or [])]
+
+        # A cable cannot be jacked before this history AND during it.
+        touched = set()
+        for ev in self.events:
+            if ev.kind in ("stress", "grout"):
+                touched.update(_event_tendon_refs(ev))
+
+        sigma_pe, ages = {}, {}
+        for name, spec in payload["tendons"].items():
+            if name not in known:
+                raise ValueError(
+                    f"{where}: declares tendon '{name}', which the "
+                    f"section does not carry. Known tendons: "
+                    f"{known}.")
+            if name in touched:
+                raise ValueError(
+                    f"{where}: tendon '{name}' is declared "
+                    f"pre-existing and is also named by a 'stress' or "
+                    f"'grout' event of this same history. A cable was "
+                    f"jacked before this history began or it is jacked "
+                    f"during it; it cannot be both, and nothing here "
+                    f"says which declaration to believe. Remove it "
+                    f"from the 'retrofit' block, or remove the event.")
+            j = _tendon_local_index(section, name)
+            sigma_pe[j] = float(spec["sigma_pe"])
+            ages[j] = float(spec["age_days"])
+
+        plane = payload["plane"]
+        return PreexistingState(
+            sigma_pe=sigma_pe,
+            eps0=float(plane["eps0"]),
+            chi_x=float(plane["chi_x"]),
+            chi_y=float(plane["chi_y"]),
+            x_ref=float(plane["x_ref"]),
+            y_ref=float(plane["y_ref"]),
+            concrete_age_days=float(payload["concrete_age_days"]),
+            tendon_age_days=ages,
+        )
+
     def resolve(self, section, demand_db: dict, *,
                 tol: float = 1e-10, max_iter: int = 100) -> "TimelineResolution":
         r"""
@@ -539,6 +1080,14 @@ class ConstructionTimeline:
         stage_prefix: List[dict] = []
         # tendons already grouted (for pre/post + interleave detection)
         grouted: set = set()
+        # ``{tendon: step index at which it became bonded}``, the step
+        # counted in JACKS pulled so far.  This is the timeline's half of
+        # the Phase-22 staged-injection repair: it is what lets the driver
+        # put an already-injected tendon into the section the NEXT jack is
+        # pulled against.  Measured cost of not doing it, on a 400x1200
+        # with three tendons: the elastic-shortening loss comes out 5.1 %
+        # too large (``22_0 §1``).
+        grout_step: Dict[str, int] = {}
         stressed: Dict[str, int] = {}  # tendon -> event index of stress
         pre_post: Dict[str, str] = {}
         # reconciled grouting strain per tendon, and the jacking stress
@@ -555,6 +1104,22 @@ class ConstructionTimeline:
         t_stress: Dict[str, float] = {}      # tendon -> clock at stressing
         zone_age0: Dict[int, float] = {}     # zone   -> age at the clock
         zone_curing: Dict[int, float] = {}   # zone   -> t_s
+        # A zone declared in ``zone_rheology`` and NOT cast by this
+        # history is there from t = 0, so its declared age is its age at
+        # the clock right now.  A zone that IS cast gets its age seeded
+        # at its own ``cast`` event instead -- the declared age is "how
+        # old when the timeline first sees it", and for a cast zone that
+        # instant is the cast.  Seeding here rather than lazily is what
+        # makes the age available to the very first event.
+        cast_zones = {_resolve_zone(e.payload["zone"], zone_names)
+                      for e in self.events if e.kind == "cast"}
+        for ref, spec in self.zone_rheology.items():
+            z = _resolve_zone(ref, zone_names)
+            if z in cast_zones:
+                continue
+            zone_age0[z] = float(spec["age"])
+            if spec.get("curing") is not None:
+                zone_curing[z] = float(spec["curing"])
         # The concrete stress HISTORY, per zone: [(age_at_application,
         # stress_plane)].  Creep obeys Boltzmann superposition, so a
         # stress standing for years creeps far less over the next interval
@@ -562,17 +1127,28 @@ class ConstructionTimeline:
         # is which (reading a stress back with the instantaneous modulus
         # gives the wrong number).  The walk must carry it.
         creep_history: Dict[int, list] = {}
+        # The demand the history above is synchronised at.  A ``load``
+        # between two intervals moves the demand without touching the
+        # history, and the resulting stress increment has an age of
+        # application like any other -- carrying the pair (history, the
+        # demand it stands at) is what lets the next interval date it.
+        # ``None`` until the first interval seeds the history.
+        creep_history_demand = None
         relax_from: Dict[str, tuple] = {}
-        # The SERVICE datum of every staged zone -- distinct from the
-        # capacity datum in ``bulk_planes`` (F4).  Both say "this zone is
-        # unstressed at its own casting"; they differ because one is drawn
-        # by the ULS solver and the other by the linear service solve.
-        service_datums: Dict[int, tuple] = {}
         # The frozen emission: {event_index: section_ops}.  Computed ONCE,
         # here; the compiler REPLAYS it and never re-derives.  Losses are
         # timeline physics, frozen like the casting datums.
         losses_ops: Dict[int, dict] = {}
         losses_trace: Dict[int, list] = {}
+        # The per-tendon, per-step record of the walk.  Built here, once,
+        # and frozen onto the resolution: it is the only object that
+        # knows which tendons were demand-side and which resistance-side
+        # at each step -- the information ``_check_staged`` destroys when
+        # it accumulates ``_prestress_actions`` into three scalars.
+        ledger = PrestressLedger(tag="")
+        # ``interval`` events whose declared losses were not integrated
+        # because rheology is off (see ``has_time_axis``).
+        skipped_losses: List[int] = []
 
         # Elements (rebars/tendons) contained in castable zones do not
         # exist before their zone is cast; and a *post-tensioned* tendon
@@ -595,7 +1171,75 @@ class ConstructionTimeline:
                                            | set(initial_off))
                 ops.setdefault("release", False)
 
+        # ---- D1b-3: seed the declared pre-existing state -------------
+        # The retrofit is not an event that happens; it is the state
+        # the member is in before the first one does.  So it is applied
+        # HERE, before the walk starts, and the walk then sees an
+        # ordinary section that already carries bonded cables.
+        #
+        # Three books are seeded, and each one is read by a different
+        # consumer downstream:
+        #
+        # * ``grouted`` / ``grout_step`` -- the driver's view of which
+        #   cables stiffen the section a later jack is pulled against
+        #   (Phase 22).  ``grout_step = 0`` says "bonded from before
+        #   the first jack of this sequence", which is what
+        #   ``bonded_before`` means at step 0;
+        # * ``grout_eps_init`` -- the locked-in strain the cable
+        #   enters the resisting section with, formed by the
+        #   declaration object from the declared plane and effective
+        #   stress, never re-derived here;
+        # * the emitted stage -- ``activate`` + ``eps_override``, the
+        #   same pair a ``grout`` event emits, so that every consumer
+        #   of the stage prefix (auto datums, the SLS walk, the
+        #   staged domain) sees one section and not two.
+        preexisting = self._build_preexisting(section)
+        pre_local: Dict[str, int] = {}
+        if preexisting is not None:
+            import numpy as _np
+            from .posttension import _resolve_Ep, _tendon_geometry
+            names = sorted(self.retrofit["tendons"],
+                           key=lambda n: _tendon_local_index(section, n))
+            pre_local = {n: _tendon_local_index(section, n) for n in names}
+            order_idx = sorted(preexisting.tendons)
+            # Coordinates and moduli read from the driver's own
+            # accessors, not re-derived off the Tendon objects: a
+            # tendon's ``x`` may be ``None`` (centred by default) and
+            # its modulus may come from either ``Ep`` or ``E``.  Both
+            # facts already have a home.
+            _x, _y, _Ap = _tendon_geometry(section)
+            _Ep = _resolve_Ep(section, None, len(_x))
+            xs = _np.array([float(_x[j]) for j in order_idx])
+            ys = _np.array([float(_y[j]) for j in order_idx])
+            eps_arr = preexisting.locked_in_strain(
+                xs, ys, _np.array([float(_Ep[j]) for j in order_idx]))
+            by_local = {j: float(eps_arr[k])
+                        for k, j in enumerate(order_idx)}
+            ops = {"activate": [], "eps_override": {}}
+            for name, j in pre_local.items():
+                grouted.add(name)
+                grout_step[name] = 0
+                pre_post[name] = "pre-existing"
+                grout_eps_init[name] = by_local[j]
+                ui = _tendon_union_index(section, name)
+                ops["activate"].append(ui)
+                ops["eps_override"][ui] = by_local[j]
+                if ledger is not None:
+                    ledger.record_state(0, name, STATE_BONDED,
+                                        sigma=float(
+                                            preexisting.sigma_pe[j]))
+            _emit({"name": "retrofit[0]", "components": [],
+                   "section_ops": ops})
+
         for ev in self.events:
+            if ev.kind == "retrofit":
+                # Already applied above, before the walk began.  Not a
+                # no-op reached by falling through: an explicit skip,
+                # so that a reader of the loop does not have to prove
+                # the absence of a branch.
+                continue
+            t_at_event = t_now
+            loads_here: List[dict] = []
             if ev.kind == "load":
                 dref = ev.payload.get("demand")
                 if dref not in demand_db:
@@ -606,6 +1250,9 @@ class ConstructionTimeline:
                     )
                 d = demand_db[dref]
                 cumN += d["N"]; cumMx += d["Mx"]; cumMy += d["My"]
+                loads_here.append({"demand": str(dref), "N": float(d["N"]),
+                                   "Mx": float(d["Mx"]),
+                                   "My": float(d["My"])})
                 _emit({"name": f"load[{ev.index}]",
                        "components": [{"ref": dref, "factor": 1.0}]})
 
@@ -620,16 +1267,40 @@ class ConstructionTimeline:
                     # assignment stays *here* so the map grows with the
                     # walk (F-B reads it mid-walk).
                     pre_post[t] = pre_post_all[t]
+                    ledger.record_state(
+                        ev.index, t, STATE_STRESSED,
+                        sigma=stress_sigma.get(t), pre_post=pre_post[t])
                 _emit({"name": f"stress[{ev.index}]", "components": []})
 
             elif ev.kind == "grout":
                 grout_now = [t for t in _event_tendon_refs(ev)
                              if t not in grouted]
+                # The state at the grout: the same prefix resolution the
+                # casting datum uses, so both datums see one section.
+                n_zones_now = len(zone_names) or 1
+                not_cast_now = [z for z in range(1, n_zones_now)
+                                if z not in cast_so_far]
+                if not stage_prefix:
+                    grout_state = mgr.initial_state()
+                else:
+                    _st, _h, _b, _d = mgr.resolve_stages(
+                        stage_prefix, initially_inactive=not_cast_now)
+                    grout_state = _st[-1]
                 eps_map = self._reconcile_grout(
                     section, grout_now, stress_sigma,
-                    (cumN, cumMx, cumMy), ev)
+                    (cumN, cumMx, cumMy), ev, ledger=ledger,
+                    state=grout_state, zone_names=zone_names,
+                    zone_ages=zone_age0, grout_step=dict(grout_step),
+                    preexisting=preexisting)
                 grout_eps_init.update(eps_map)
                 grouted.update(grout_now)
+                # From now on these tendons stiffen the section that any
+                # LATER jack is pulled against.  The step index is the
+                # number of jacks pulled so far, i.e. len(stress_sigma):
+                # the sequence the driver replays is exactly the tendons
+                # stressed up to this point, in stress order.
+                for _t in grout_now:
+                    grout_step[_t] = len(stress_sigma)
                 # Emit the grouting into the walk's stage prefix too, so a
                 # later ``cast`` computes its auto datum on a substrate
                 # that already carries the bonded tendon at its reconciled
@@ -654,7 +1325,14 @@ class ConstructionTimeline:
                 spec = ev.payload.get("losses")
                 stage = {"name": f"interval[{ev.index}]", "components": [],
                          "time": float(days) if days is not None else None}
-                if spec:
+                if spec and not self.has_time_axis:
+                    # Declared, and deliberately not integrated: the
+                    # model asked for the conventional answer.  Recorded
+                    # rather than dropped -- a skipped creep model that
+                    # leaves no trace cannot be told apart from one that
+                    # was never read.
+                    skipped_losses.append(ev.index)
+                elif spec:
                     if days is None:
                         raise ValueError(
                             f"construction_history[{ev.index}]: an "
@@ -663,13 +1341,13 @@ class ConstructionTimeline:
                             f"relaxation are all functions of elapsed "
                             f"time; there is nothing to integrate over."
                         )
-                    (ops, tr, creep_history,
+                    (ops, tr, creep_history, creep_history_demand,
                      relax_from) = self._interval_losses(
                         section, mgr, stage_prefix, cast_so_far,
                         (cumN, cumMx, cumMy), spec, float(days), zone_names,
                         t_now, t_stress, zone_age0, zone_curing,
-                        creep_history, relax_from, service_datums, ev, tol,
-                        max_iter)
+                        creep_history, creep_history_demand, relax_from,
+                        ev, tol, max_iter)
                     if ops:
                         stage["section_ops"] = ops
                     losses_ops[ev.index] = ops
@@ -689,10 +1367,21 @@ class ConstructionTimeline:
                               float(datum_spec["chi_y"]))
                     explicit[zi] = triple
                     datums[zi] = triple
+                    # An explicit datum is not solved for, so there is
+                    # no residual.  Said, not left blank.
+                    ledger.record_zone(
+                        ev.index, zi,
+                        datum_convergence={
+                            "solved": False,
+                            "cause": "the datum is declared explicitly "
+                                     "in the construction history; no "
+                                     "equilibrium was solved for it.",
+                        })
                 elif datum_spec == "auto":
                     triple = self._auto_datum(
-                        mgr, stage_prefix, cast_so_far, zi,
-                        (cumN, cumMx, cumMy), ev, tol, max_iter)
+                        section, mgr, stage_prefix, cast_so_far, zi,
+                        (cumN, cumMx, cumMy), zone_names, zone_age0,
+                        ev, tol, max_iter, ledger=ledger)
                     datums[zi] = triple
                 else:
                     raise ValueError(
@@ -701,10 +1390,17 @@ class ConstructionTimeline:
                         f"{{eps0, chi_x, chi_y}} mapping, got "
                         f"{datum_spec!r}."
                     )
-                service_datums[zi] = self._service_datum(
-                    section, mgr, stage_prefix, cast_so_far, zi,
-                    (cumN, cumMx, cumMy), zone_names, zone_age0,
-                    zone_curing, tol, max_iter)
+                spec_zr = self._zone_rheology_entry(zi, zone_names)
+                if spec_zr is not None:
+                    # "How old when the timeline first sees it" -- and
+                    # for a cast zone that instant is this one.
+                    zone_age0[zi] = float(spec_zr["age"])
+                    if spec_zr.get("curing") is not None:
+                        zone_curing[zi] = float(spec_zr["curing"])
+                ledger.record_zone(ev.index, zi,
+                                   auto_datum=datums[zi],
+                                   origin=("explicit" if zi in explicit
+                                           else "auto"))
                 cast_so_far.append(zi)
                 _emit({"name": f"cast[{ev.index}]",
                        "components": [],
@@ -714,120 +1410,196 @@ class ConstructionTimeline:
                                         _zone_elements(section, zi)
                                         if e not in pt_tendons]}})
 
+            # -- the per-step record (Phase 13) ------------------------
+            # Written by the walk, at the instant it is true, so that a
+            # machine-readable dump reads what happened instead of
+            # re-deriving it from the event list.  ``t_days`` is the
+            # clock at which the step *completes*: for every kind but
+            # ``interval`` that equals ``t_days_start``, and for an
+            # ``interval`` the pair plus ``duration_days`` states the
+            # span the step covers.
+            ledger.record_step(
+                ev.index,
+                kind=ev.kind,
+                t_days_start=float(t_at_event),
+                t_days=float(t_now),
+                duration_days=float(t_now - t_at_event),
+                zones_active=[0] + sorted(cast_so_far),
+                zones_cast_here=([zi] if ev.kind == "cast" else []),
+                loads_applied=loads_here,
+                demand_cumulative={"N": float(cumN), "Mx": float(cumMx),
+                                   "My": float(cumMy)},
+                rheology=self._rheology_snapshot(
+                    zone_names, zone_age0, zone_curing,
+                    [0] + sorted(cast_so_far)),
+            )
+
         return TimelineResolution(
             datums=datums, explicit_datums=explicit,
             pre_post=pre_post, grouted=frozenset(grouted),
             stressed=dict(stressed), grout_eps_init=grout_eps_init,
             stress_sigma=stress_sigma, losses_ops=losses_ops,
-            losses_trace=losses_trace)
+            losses_trace=losses_trace, ledger=ledger,
+            skipped_losses=tuple(skipped_losses))
 
-    def _service_datum(self, section, mgr, stage_prefix, cast_so_far, zi,
-                       demand, zone_names, zone_age0, zone_curing, tol,
-                       max_iter):
+    def _rheology_snapshot(self, zone_names, zone_age0, zone_curing,
+                           zones_active):
         r"""
-        The **service** casting datum of zone *zi* — the twin of
-        :meth:`_auto_datum`, drawn with the *linear* view (C5, finding
-        F4).
+        Per-zone rheological provenance at one instant of the walk.
 
-        :meth:`_auto_datum` solves the substrate with the ULS view
-        (design constitutive laws, non-linear) and writes
-        :math:`(-\varepsilon_0, -\chi_x, -\chi_y)` into
-        ``bulk_planes``.  That is the right datum for the **resistance
-        domain**: the new zone enters it from its own zero.
+        This is **time-dependent provenance**, the same species as a
+        :class:`~gensec.materials.base.DeclaredRule`'s ``source`` one
+        floor down: a run that does not say at what age it let the
+        concrete flow is not reproducible, however exact its numbers
+        are.
 
-        It is the *wrong* datum for the **losses**, which are a
-        linear-viscoelastic, service-level calculation.  Negating a
-        ULS-drawn plane against a service-drawn one leaves a residue of
-        order :math:`10^{-4}` of strain, i.e. a few MPa of stress that a
-        freshly-cast zone does not actually carry — enough, on a young
-        topping, to trip the non-linear-creep limit and stop the run.
-        "A zone is unstressed at its own casting" is physics; it must not
-        depend on which solver drew the plane.
+        Three quantities per zone, and the distinction between the
+        first two is the whole point:
 
-        So the walk draws **both**: the ULS datum into ``bulk_planes``
-        (capacity), and this one into ``TimelineResolution`` (service).
-        Neither is derived from the other.
+        ``age_declared``
+            what the document states -- how old the zone is *when the
+            timeline first sees it*.  An input.
+        ``age_derived``
+            how old it is **now**, the declared age plus every
+            ``interval`` the walk has crossed since.  A consequence of
+            the path, and it moves if an interval is inserted.
+        ``declared_at``
+            which of the two declaration sites said it,
+            ``'zone_rheology'`` or ``'interval.losses'``.
+
+        Parameters
+        ----------
+        zone_names : sequence of str
+        zone_age0 : dict
+            ``{zone index: derived age [days]}`` as the walk holds it.
+        zone_curing : dict
+            ``{zone index: curing age [days]}``.
+        zones_active : sequence of int
+            Zone indices that exist at this instant.
 
         Returns
         -------
-        tuple of float
-            :math:`(-\varepsilon_0, -\chi_x, -\chi_y)` of the linear
-            service solve, or ``(0, 0, 0)`` if no rheological model is in
-            play (the field is then never read).
-
-        Notes
-        -----
-        Uses each zone's own :math:`E_c(t)` from its loss model when one
-        is declared for it; otherwise the material's own SLS modulus.  A
-        model that declares no ``losses_models`` never reaches here.
+        dict
+            ``{zone index: {...}}``.  A zone with no declared model
+            carries ``model = None`` and a ``cause`` saying so, which
+            the dump turns into a recorded absence rather than a
+            silent gap.
         """
-        from .losses import (_zone_material, _zone_drying_geometry
-                             as _zone_drying, _UNCAST_PLACEHOLDER_E)
-        from .sls import resolve_sls_moduli, sls_view
-        from .section_state import materialize_view
-        from .integrator import FiberSolver
-
-        if not self.losses_models:
-            return (0.0, 0.0, 0.0)
-        N, Mx, My = demand
-        if abs(N) < 1e-30 and abs(Mx) < 1e-30 and abs(My) < 1e-30:
-            return (0.0, 0.0, 0.0)
-
-        n_zones = len(zone_names) or 1
-        not_cast = [z for z in range(1, n_zones)
-                    if z not in cast_so_far and z != zi]
-        if not stage_prefix:
-            state = mgr.initial_state()
-        else:
-            states, _h, _b, _d = mgr.resolve_stages(
-                stage_prefix, initially_inactive=not_cast + [zi])
-            state = states[-1]
-
-        # moduli of the substrate as it stands at the cast
-        mod = {}
-        for z in range(n_zones):
-            mat = _zone_material(section, z)
-            if z == zi or not bool(state.bulk_active[z]):
-                mod[id(mat)] = _UNCAST_PLACEHOLDER_E
-                continue
-            lm = self._zone_loss_model(z, zone_names)
-            if lm is None:
-                mod[id(mat)] = _UNCAST_PLACEHOLDER_E
+        out = {}
+        for z in sorted(set(int(v) for v in zones_active)):
+            spec = self._zone_rheology_entry(z, zone_names)
+            model = self._zone_loss_model(z, zone_names)
+            name = zone_names[z] if z < len(zone_names) else f"zone_{z}"
+            if spec is not None:
+                site = "zone_rheology"
+            elif model is not None:
+                site = "interval.losses"
             else:
-                A_c, u_d = _zone_drying(section, z)
-                prov = (lm.provider if lm.provider.A_c is not None
-                        else lm.provider.with_geometry(A_c, u_d))
-                mod[id(mat)] = prov.E_c(zone_age0.get(z, 28.0))
+                site = None
+            entry = {
+                "zone_name": str(name),
+                "model": (None if spec is None else str(spec["model"])),
+                "age_declared": (None if spec is None
+                                 else float(spec["age"])),
+                "age_derived": (None if z not in zone_age0
+                                else float(zone_age0[z])),
+                "curing": (None if z not in zone_curing
+                           else float(zone_curing[z])),
+                "declared_at": site,
+            }
+            if site is None:
+                entry["cause"] = (
+                    f"zone '{name}' declares no rheological model: it "
+                    f"appears neither in 'zone_rheology' nor in any "
+                    f"'interval.losses'.  Its age is therefore not "
+                    f"tracked and no E_c(t) is attributed to it.")
+            out[z] = entry
+        return out
 
-        view = materialize_view(section, state)
-        solver = FiberSolver(sls_view(view, resolve_sls_moduli(section, mod)))
-        sol = solver.solve_equilibrium(N, Mx, My, tol=tol, max_iter=max_iter)
-        if not sol["converged"]:
-            raise ValueError(
-                f"construction_history: the *service* casting datum of "
-                f"zone '{zone_names[zi]}' did not converge under the "
-                f"cumulative demand (N={N / 1e3:.1f} kN, "
-                f"Mx={Mx / 1e6:.1f} kN·m).  A linear view should always "
-                f"converge -- the substrate is likely degenerate."
-            )
-        return (-sol["eps0"], -sol["chi_x"], -sol["chi_y"])
+    def _zone_rheology_entry(self, z, zone_names):
+        r"""
+        The :attr:`zone_rheology` entry of zone *z*, or ``None``.
+
+        Parameters
+        ----------
+        z : int
+        zone_names : sequence of str
+
+        Returns
+        -------
+        dict or None
+            ``{"model", "age", "curing"}``.
+        """
+        for ref, spec in self.zone_rheology.items():
+            if _resolve_zone(ref, zone_names) == z:
+                return spec
+        return None
 
     def _zone_loss_model(self, z, zone_names):
-        r"""The loss model any ``interval`` declares for zone *z*, or
-        ``None``.  Read from the events, so the datum drawn at a cast
-        knows the rheology the zone will later be given."""
+        r"""
+        The rheological model of zone *z*, or ``None``.
+
+        Two declaration sites, one fact, and a guard between them:
+
+        1. :attr:`zone_rheology` --- the zone's declared identity, its
+           one home.  Reachable from **any** event, which is what lets a
+           ``cast`` draw its datum on the substrate's :math:`E_c(t)`
+           even when no ``interval`` mentions the substrate.
+        2. the ``interval.losses`` entries --- the pre-P3 site, kept
+           because it is what every shipped model uses.  Scanned over
+           *all* events, future ones included, so the identity a zone
+           will be given later is already known at its cast.
+
+        A zone declared in both must name the **same** model.  Two homes
+        for one fact are permitted only while they are enforced to
+        agree; unenforced redundancy is two chances to be wrong and none
+        to notice (F7's lesson, 12_0 §2).
+
+        Parameters
+        ----------
+        z : int
+        zone_names : sequence of str
+
+        Returns
+        -------
+        LossModel or None
+
+        Raises
+        ------
+        ValueError
+            The two sites name different models for the same zone.
+        """
+        declared = self._zone_rheology_entry(z, zone_names)
+        name_declared = declared["model"] if declared else None
+
+        name_interval = None
         for ev in self.events:
             if ev.kind != "interval":
                 continue
             for ref, spec in (ev.payload.get("losses") or {}).items():
-                if _resolve_zone(ref, zone_names) == z:
-                    return self.losses_models.get(spec.get("model"))
-        return None
+                if _resolve_zone(ref, zone_names) != z:
+                    continue
+                if spec.get("model") is not None and name_interval is None:
+                    name_interval = spec.get("model")
+
+        if (name_declared is not None and name_interval is not None
+                and name_declared != name_interval):
+            zn = zone_names[z] if z < len(zone_names) else str(z)
+            raise ValueError(
+                f"zone '{zn}' is given two different rheological models: "
+                f"'{name_declared}' in 'zone_rheology' and "
+                f"'{name_interval}' in an 'interval.losses'.  A zone has "
+                f"one concrete; declare it once, in 'zone_rheology', and "
+                f"let the intervals reference the zone."
+            )
+        name = name_declared if name_declared is not None else name_interval
+        return self.losses_models.get(name) if name is not None else None
 
     def _interval_losses(self, section, mgr, stage_prefix, cast_so_far,
                          demand, spec, days, zone_names, t_now, t_stress,
-                         zone_age0, zone_curing, creep_history, relax_from,
-                         service_datums, ev, tol, max_iter):
+                         zone_age0, zone_curing, creep_history,
+                         creep_history_demand, relax_from,
+                         ev, tol, max_iter):
         r"""
         Compute the time-dependent losses of one ``interval`` (C5).
 
@@ -871,6 +1643,12 @@ class ConstructionTimeline:
             intervals by the walk.  Mutated in place.
         creep_history : dict
             ``{zone: [(tau, sigma_plane)]}``.  Carried across intervals.
+        creep_history_demand : tuple of float or None
+            The ``(N, Mx, My)`` *creep_history* is synchronised at.  The
+            difference against the cumulative demand standing now is
+            everything the ``load`` events between the two intervals
+            added, and it is dated at this interval's start rather than
+            left to flow zero days.  ``None`` before the first interval.
         ev : TimelineEvent
         tol, max_iter :
             Forwarded to the service solve.
@@ -878,7 +1656,8 @@ class ConstructionTimeline:
         Returns
         -------
         tuple
-            ``(section_ops, trace, creep_history)``.
+            ``(section_ops, trace, creep_history, creep_history_demand,
+            relax_from)``.
 
         Raises
         ------
@@ -968,23 +1747,182 @@ class ConstructionTimeline:
             # its relaxation clock starts at t = 0.
             tendon_ages0[nm] = max(0.0, t_now - t_stress.get(nm, 0.0))
 
-        ops, trace, creep_history, relax_from = expand_losses(
+        (ops, trace, creep_history, creep_history_demand,
+         relax_from) = expand_losses(
             section, state, models=models, demand=demand,
             zone_ages_t0=ages0, zone_ages_t=ages1, zone_curing_ages=curing,
             tendon_ages_t0=tendon_ages0, interval_days=days,
-            history=creep_history, relax_from=relax_from,
-            service_datums=service_datums, label=f"interval[{ev.index}]")
-        return ops, trace, creep_history, relax_from
+            history=creep_history, history_demand=creep_history_demand,
+            relax_from=relax_from, label=f"interval[{ev.index}]")
+        return (ops, trace, creep_history, creep_history_demand,
+                relax_from)
 
-    def _auto_datum(self, mgr, stage_prefix, cast_so_far, zi, demand,
-                    ev, tol, max_iter) -> Tuple[float, float, float]:
+    def _zone_providers(self, section, zone_names, n_zones):
+        r"""
+        Geometry-bound rheological provider of every modelled zone.
+
+        The provider is bound to the zone's own drying geometry
+        (:math:`A_c`, :math:`u`) here because the caller is the only
+        party that knows it: the timeline holds the section, the
+        rheological model does not.
+
+        Parameters
+        ----------
+        section : GenericSection
+        zone_names : sequence of str
+        n_zones : int
+
+        Returns
+        -------
+        dict
+            ``{zone index: RheologicalModel}``, only for zones an
+            ``interval`` declares a loss model for.
+        """
+        from .losses import _zone_drying_geometry
+
+        out = {}
+        for z in range(n_zones):
+            lm = self._zone_loss_model(z, zone_names)
+            if lm is None:
+                continue
+            A_c, u_d = _zone_drying_geometry(section, z)
+            p = lm.provider
+            out[z] = p if p.A_c is not None else p.with_geometry(A_c, u_d)
+        return out
+
+    def _datum_view(self, section, state, zone_names, zone_ages, *,
+                    casting_zone=None, moduli=None):
+        r"""
+        The **service** view a datum is drawn on, and its modulus map.
+
+        The one home for this construction (rule 5).  Three sites need
+        it and they must agree to the last digit, because a datum drawn
+        on one modulus and read back on another leaves a residue
+        :math:`E_p\,(\varepsilon_{\mathrm{sec,read}}
+        - \varepsilon_{\mathrm{sec,draw}})` at every tendon -- which
+        is the whole of the F4/F5 defect, measured at
+        :math:`+7.08` MPa on the flagship (12_5 §7).
+
+        The view is the materialized state of the section, linearised
+        by :func:`~gensec.solver.sls.sls_view` at the moduli
+        :class:`~gensec.solver.sls.DatumPolicy` resolves.  Same state,
+        same geometry, same solver reference as the resistance
+        bundle -- only the constitutive law is replaced, because a
+        datum is a service fact and the design law describes a concrete
+        that does not exist (12_0 §0).
+
+        Parameters
+        ----------
+        section : GenericSection
+        state : SectionState
+            The state the datum is drawn at.
+        zone_names : sequence of str
+        zone_ages : dict
+            ``{zone index: age [days]}`` at this instant.
+        casting_zone : int or None, optional
+            The zone being cast, held absent for its own solve.
+        moduli : dict, optional
+            Explicit per-slot overrides.  They win over the policy
+            (12_7 §2): an override that a provider could silently
+            outrank would be a dead override by design.
+
+        Returns
+        -------
+        tuple
+            ``(FiberSolver, MaterialMap)``.
+
+        Raises
+        ------
+        ValueError
+            A zone exists at this instant and neither declares a
+            rheological model nor receives an explicit modulus.  The
+            message carries :meth:`~gensec.solver.sls.DatumPolicy.explain`'s
+            note, which says what to do about it.
+        """
+        from .sls import sls_view
+        from .section_state import materialize_view
+        from .integrator import FiberSolver
+
+        modmap = self._datum_moduli(section, state, zone_names, zone_ages,
+                                    casting_zone=casting_zone,
+                                    moduli=moduli)
+        view = materialize_view(section, state)
+        return FiberSolver(sls_view(view, modmap)), modmap
+
+    def _datum_moduli(self, section, state, zone_names, zone_ages, *,
+                      casting_zone=None, moduli=None):
+        r"""
+        The service moduli a datum is drawn at -- **one** resolution.
+
+        Both datum sites (the casting datum and the grout
+        reconciliation) resolve here, through the single
+        :func:`~gensec.solver.sls.resolve_moduli`, with the ratified
+        precedence
+
+        .. math::
+
+            \text{explicit} \;\rightarrow\;
+            \text{policy} \;\rightarrow\; \text{raise}
+
+        (12_7 §2).  An explicit override that a provider could outrank
+        would be a dead override by design, which is the same class of
+        defect as a dead override by accident.
+
+        Parameters
+        ----------
+        section : GenericSection
+        state : SectionState
+        zone_names : sequence of str
+        zone_ages : dict
+            ``{zone index: age [days]}`` at this instant.
+        casting_zone : int or None, optional
+        moduli : dict, optional
+            Explicit per-slot overrides.
+
+        Returns
+        -------
+        MaterialMap
+
+        Raises
+        ------
+        ValueError
+            A zone exists here and neither declares a rheological
+            model, nor is covered by a reference rule, nor receives an
+            explicit modulus.
+        """
+        from .sls import DatumPolicy, resolve_moduli
+
+        n_zones = int(np.asarray(state.bulk_active).size)
+        providers = self._zone_providers(section, zone_names or [], n_zones)
+        return resolve_moduli(
+            section,
+            DatumPolicy(state=state, providers=providers,
+                        ages=zone_ages or {}, casting_zone=casting_zone,
+                        reference=self._reference_rule()),
+            explicit=dict(moduli or {}),
+        )
+
+    def _auto_datum(self, section, mgr, stage_prefix, cast_so_far, zi,
+                    demand, zone_names, zone_ages, ev, tol, max_iter,
+                    moduli=None, ledger=None) -> Tuple[float, float, float]:
         r"""
         Compute the ``auto`` datum for zone *zi* at a ``cast`` event (C3).
 
-        Solves the pre-cast bundle (the section as it exists *before*
-        this cast — i.e. the current ``stage_prefix``, with every
-        not-yet-cast zone held inactive) under the cumulative
+        Solves the pre-cast substrate (the section as it exists
+        *before* this cast — i.e. the current ``stage_prefix``, with
+        every not-yet-cast zone held inactive) under the cumulative
         characteristic *demand*, and negates the converged plane.
+
+        The solve runs on the **service** view (:meth:`_datum_view`),
+        not on the resistance bundle.  A datum is the statement *"this
+        zone is unstressed at this instant"*, and an instant of the
+        real structure is elastic and service-level; the design law,
+        with :math:`\gamma_c` and :math:`\alpha_{cc}` folded into its
+        tangent, describes a concrete 30–41 % too soft and would lock
+        in that error as the zone's own zero (12_0 §1).  What is kept
+        from the earlier design is the *state*: the same materialized
+        view the verification domain is built from, linearised — no
+        parallel section construction, no drift.
 
         The plane is affine in :math:`(\Delta x, \Delta y)` about the
         pinned solver reference (full-polygon centroid), so negating the
@@ -994,6 +1932,8 @@ class ConstructionTimeline:
 
         Parameters
         ----------
+        section : GenericSection
+            The base section; the service view is materialized from it.
         mgr : StagedDomainManager
         stage_prefix : list of dict
             Stages for every physical event emitted so far (this cast
@@ -1005,8 +1945,22 @@ class ConstructionTimeline:
             The zone about to be cast.
         demand : tuple of float
             ``(N, Mx, My)`` cumulative characteristic demand [N, N·mm].
+        zone_names : sequence of str
+        zone_ages : dict
+            ``{zone index: age [days]}`` of every zone at this cast.
         ev : TimelineEvent
         tol, max_iter : float, int
+        moduli : dict, optional
+            Explicit per-slot moduli, forwarded to :meth:`_datum_view`.
+        ledger : PrestressLedger, optional
+            When given, the **convergence of this solve** is recorded
+            against zone *zi*: relative residual, the tolerance it was
+            judged against, the iteration count and the solver's own
+            flag.  Recorded here, at the measurement, rather than
+            reconstructed later from a second solve -- a reconstruction
+            would be a second home for the number, and the number in
+            question is the one Phase 12 found mis-stated in one of its
+            two homes (``12_12`` §2).
 
         Returns
         -------
@@ -1016,7 +1970,13 @@ class ConstructionTimeline:
         Raises
         ------
         ValueError
-            If the pre-cast bundle does not converge under *demand*.
+            If the pre-cast substrate does not converge under *demand*,
+            or if a zone that exists at this instant has neither a
+            rheological model nor an explicit modulus.
+
+        See Also
+        --------
+        _datum_view : the one home of the service view.
         """
         n_zones = _n_zones(mgr)
         # zones not yet cast (and not base) are inactive for this solve:
@@ -1033,34 +1993,45 @@ class ConstructionTimeline:
             states, _hashes, _bundles, _deact = mgr.resolve_stages(
                 stage_prefix, initially_inactive=not_cast)
             state = states[-1]
-        solver = _state_solver(mgr, state)
 
         N, Mx, My = demand
         if abs(N) < 1e-30 and abs(Mx) < 1e-30 and abs(My) < 1e-30:
+            # No demand, no deformation, no datum to lock in.  Returned
+            # before the view is built so that a section with nothing to
+            # resolve is never asked to resolve it.  The dump is told
+            # *that this is why* there is no residual to report, rather
+            # than being left to read a missing key.
+            if ledger is not None:
+                ledger.record_zone(
+                    ev.index, zi,
+                    datum_convergence={
+                        "solved": False,
+                        "cause": "no cumulative demand at this cast; "
+                                 "the datum is identically zero and no "
+                                 "equilibrium was solved.",
+                    })
             return (0.0, 0.0, 0.0)
+
+        solver, _modmap = self._datum_view(
+            section, state, zone_names, zone_ages,
+            casting_zone=zi, moduli=moduli)
 
         sol = solver.solve_equilibrium(N, Mx, My, tol=tol,
                                        max_iter=max_iter)
 
-        # Convergence is judged on the *relative* equilibrium residual,
-        # not solely on the solver's ``converged`` flag.  That flag uses
-        # an **absolute** force/moment tolerance, which on a partially
-        # deactivated (staged) substrate can floor slightly above ``tol``
-        # for large-magnitude moments — a false negative even though the
-        # returned plane reproduces the demand to machine precision.  We
-        # therefore accept when the plane reproduces (N, Mx, My) to a
-        # relative machine-precision residual, and raise only on a
-        # genuine residual failure (a substrate that truly cannot carry
-        # its own construction loads is a real finding, not a warning).
+        conv = _datum_plane_residual(sol, demand,
+                                     tolerances=self.tolerances)
+        if ledger is not None:
+            ledger.record_zone(ev.index, zi,
+                               datum_convergence=dict(conv, solved=True))
+
         scale_N = max(abs(N), 1.0)
         scale_M = max(abs(Mx), abs(My), 1.0)
-        res_ok = (abs(sol["N"] - N) / scale_N < 1e-9
-                  and abs(sol["Mx"] - Mx) / scale_M < 1e-9
-                  and abs(sol["My"] - My) / scale_M < 1e-9)
-        if not (sol["converged"] or res_ok):
+        if not conv["accepted"]:
             raise ValueError(
                 f"construction_history[{ev.index}]: auto datum for zone "
                 f"{zi} failed — the substrate did not reach equilibrium "
+                f"on the service view "
                 f"under the cumulative characteristic construction demand "
                 f"(N={N/1e3:.1f} kN, Mx={Mx/1e6:.1f} kN·m, "
                 f"My={My/1e6:.1f} kN·m); relative residual "
@@ -1074,7 +2045,10 @@ class ConstructionTimeline:
     # -- prestress reconciliation (driver reuse) ----------------------
 
     def _reconcile_grout(self, section, grout_now, stress_sigma, base_demand,
-                         ev) -> Dict[str, float]:
+                         ev, ledger=None, state=None, zone_names=None,
+                         zone_ages=None, moduli=None,
+                         grout_step=None,
+                         preexisting=None) -> Dict[str, float]:
         r"""
         Reconciled locked-in strain for the tendons grouted at *ev*.
 
@@ -1108,12 +2082,20 @@ class ConstructionTimeline:
         byte-equivalent to calling the driver directly (``10_3`` §5
         axis-1).
 
-        Scope: a single-bulk post-tensioning where every grouted tendon
-        was stressed **before** any grouting (the standard "stress all,
-        then grout all").  Grouting in stages (a second ``grout`` after a
-        prior one) is the intra-sequence bonded-stiffness case and is
-        **not** modelled — it raises, pointing at
-        ``6_8-WARNING_intra_sequence_bonded.md``.
+        Scope: a single-bulk post-tensioning.  Grouting **in stages** --
+        stress, inject, stress the next against a section that now
+        contains the first -- is modelled from Phase 22: the walk hands
+        the driver a ``bonded_before`` schedule and a ``pending`` set, and
+        the driver rebuilds its resisting view at each step.  What is
+        still refused **here** is the **retrofit**: tendons already
+        bonded before the timeline begins.  The driver models it from
+        Phase 24 when the state that comes with it is declared
+        (:class:`~gensec.solver.posttension.PreexistingState`); what
+        this walk lacks is the declaration surface -- no timeline event
+        and no YAML block states the effective stress, strain plane and
+        two clocks of an existing member, so the case cannot be
+        expressed here at all (D1b-3,
+        ``6_8-WARNING_intra_sequence_bonded.md`` §2 case 2).
 
         Parameters
         ----------
@@ -1128,6 +2110,27 @@ class ConstructionTimeline:
             [N, N·mm].
         ev : TimelineEvent
             The grout event (for error messages).
+        state : SectionState, optional
+            The construction state at the grout: which zones exist, with
+            which datums.  Handed to the driver so the tendon is
+            stressed against the section that exists, not against every
+            zone the section will ever have.
+        zone_names : sequence of str, optional
+        zone_ages : dict, optional
+            ``{zone index: age [days]}`` at the grout, for the service
+            moduli the datum is drawn on.
+        moduli : dict, optional
+            Explicit per-slot overrides, forwarded to the resolution.
+        ledger : PrestressLedger, optional
+            When given, the **per-sub-step photograph** of the driver is
+            recorded into it: for every jacking stage, the current
+            stress and concrete strain at *every* tendon, plus the
+            cumulative demand.  The driver already computes all of it
+            (:class:`~gensec.solver.posttension.PosttensionStageResult`);
+            before the ledger existed the whole result was discarded
+            after a single number per tendon was read out of it, so the
+            section's state at each stressing -- the thing an engineer
+            actually wants to see -- was computed and thrown away.
 
         Returns
         -------
@@ -1139,9 +2142,6 @@ class ConstructionTimeline:
         ValueError
             A tendon is grouted without a prior ``stress`` (no jacking
             stress to reconcile).
-        NotImplementedError
-            Staged grouting (a prior grout already bonded tendons) — the
-            intra-sequence case.
         """
         if not grout_now:
             return {}
@@ -1155,7 +2155,8 @@ class ConstructionTimeline:
                 f"grouted."
             )
 
-        from .posttension import solve_posttension_sequence, grout
+        from .posttension import (solve_posttension_sequence,
+                                  grout_selfconsistent)
 
         tendons = list(getattr(section, "tendons", []) or [])
         nt = len(tendons)
@@ -1168,18 +2169,206 @@ class ConstructionTimeline:
             sigma_arr[li] = float(s)
             order.append(li)
 
+        # Every tendon of the section gets a declared role, because the
+        # driver refuses to guess (``IntraSequenceUndeclared``).  A tendon
+        # this walk has not stressed yet is PENDING: at this instant it is
+        # neither a load nor a resistance element, and before Phase 22 the
+        # driver read its absence from ``order`` as "already grouted" and
+        # refused an ordinary staged-injection history at its FIRST grout.
+        pending = sorted(set(range(nt)) - set(order))
+        # ---- D1b-3: the roles a retrofit changes ---------------------
+        # Three declared roles and no fourth (``order`` / ``pending`` /
+        # ``already_bonded``).  A pre-existing cable belongs to the
+        # third, and the driver refuses every way of saying it twice:
+        #
+        # * it must leave ``pending``, which means NOT YET stressed;
+        # * its ``sigma_p0`` slot must be NaN, because that slot is the
+        #   stress a jack of THIS sequence applies and an existing
+        #   cable has none -- a finite number there is either a
+        #   duplicate of the declared effective stress or a
+        #   contradiction of it, and nothing would say which.
+        #
+        # None of this bypasses a refusal: it is the walk finally
+        # saying which role each cable has, which is what the driver
+        # has asked for since Phase 22.
+        pre_set = set(preexisting.tendons) if preexisting is not None \
+            else set()
+        if pre_set:
+            pending = [p for p in pending if p not in pre_set]
+            for _j in pre_set:
+                sigma_arr[_j] = float("nan")
+        # ... and a tendon this walk has ALREADY grouted is bonded from the
+        # step at which it was injected: the number of jacks that had been
+        # pulled at that moment, which is exactly the ``bonded_before``
+        # index of the closed form.  ``grout_step`` is carried by the walk
+        # rather than re-derived here -- the walk is the only object that
+        # knows the event order, and re-deriving it would be a second home
+        # for one fact.
+        # ``bonded_before`` schedules a grouting that happens INSIDE
+        # this sequence, so it may only name cables the sequence
+        # stresses.  A pre-existing cable is bonded before the
+        # sequence starts and is declared through ``already_bonded``;
+        # the walk keeps it in its own ``grout_step`` book because the
+        # interleave guards read that book, but it does not travel to
+        # the driver under a name that means something else.
+        schedule = {li: int(step)
+                    for li, step in (
+                        (_tendon_local_index(section, t), st)
+                        for t, st in (grout_step or {}).items())
+                    if li not in pre_set}
         bN, bMx, bMy = base_demand
-        result = solve_posttension_sequence(
-            section, sigma_p0=sigma_arr, order=order,
-            base_N=bN, base_Mx=bMx, base_My=bMy)
+        modmap = None
+        if state is not None:
+            modmap = self._datum_moduli(section, state, zone_names,
+                                        zone_ages, moduli=moduli)
+        if preexisting is None:
+            result = solve_posttension_sequence(
+                section, sigma_p0=sigma_arr, order=order,
+                pending=pending, bonded_before=schedule,
+                base_N=bN, base_Mx=bMx, base_My=bMy,
+                base_state=state, modmap=modmap)
+        else:
+            # On a retrofit the cumulative demand cannot be a
+            # ``base_*``.  ``base_*`` is **debit-free by contract** --
+            # it is the state before anything is anchored, so nothing
+            # can be charged for it.  Here cables ARE anchored from
+            # step 0, and a sollecitazione therefore costs them
+            # stress.  ``applied_at={0: ...}`` is the parameter for
+            # exactly that case, gated inside the driver on the bond
+            # state; passing the same triple as ``base_*`` would
+            # swallow the debit silently, which is the unconservative
+            # direction for sigma_p at the critical section.
+            #
+            # The driver refuses the two together, and the refusal is
+            # not worked around: ``base_*`` is left at zero and the
+            # whole triple travels through the parameter that debits.
+            applied = ({0: (bN, bMx, bMy)}
+                       if (bN, bMx, bMy) != (0.0, 0.0, 0.0) else None)
+            result = solve_posttension_sequence(
+                section, sigma_p0=sigma_arr, order=order,
+                pending=pending, bonded_before=schedule,
+                already_bonded=preexisting, applied_at=applied,
+                base_state=state, modmap=modmap)
 
         grout_local = [_tendon_local_index(section, t) for t in grout_now]
-        gres = grout(section, result, indices=grout_local)
 
-        by_local = {rec["tendon"]: rec["eps_init"]
-                    for rec in gres.report["reconciliation"]}
-        return {t: float(by_local[_tendon_local_index(section, t)])
-                for t in grout_now}
+        # The demand the section carries *after* the grout: the base
+        # demand plus whatever the still-ungrouted tendons keep applying
+        # as loads.  The grouted ones are gone from the demand side --
+        # they are internal now, and keeping them would be the §F
+        # double-count.
+        # The cables that are STILL LOADS: stressed here, not grouted
+        # here, and not pre-existing.  A pre-existing cable is bonded
+        # before the sequence begins and its force already lives
+        # inside the declared concrete strain plane, so asking for its
+        # demand-side action would count it twice -- which is what the
+        # driver's refusal says, and why the set is named rather than
+        # the refusal suppressed.
+        eff_only = [j for j in range(nt)
+                    if j not in grout_local and j not in pre_set]
+        eff = {j: a for j, a in
+               zip(eff_only, result.effective_actions(only=eff_only))}
+        aN, aMx, aMy = bN, bMx, bMy
+        for j, act in eff.items():
+            aN += float(act.N)
+            aMx += float(act.Mx)
+            aMy += float(act.My)
+
+        gres, by_local, n_it, res_rel = grout_selfconsistent(
+            section, result, grout_local,
+            demand_after=(aN, aMx, aMy),
+            base_state=state, modmap=modmap,
+            readback_rel=self.tolerances.grout_readback_rel)
+        eps_map = {t: float(by_local[_tendon_local_index(section, t)])
+                   for t in grout_now}
+
+        if ledger is not None:
+            self._record_driver(ledger, section, ev, result, eps_map,
+                                stress_sigma)
+            # The closure marker travels with the datum, attached to the
+            # cell ``_record_driver`` has just opened -- after it, not
+            # before, so that no state is written twice and the recorded
+            # state stays exactly what it was.  Before Phase 13 the
+            # iteration count and the residue were computed here and
+            # dropped on the floor, so a dump had no way to tell a datum
+            # that reached its fixed point from one left at the single
+            # pass, which carries the O(n*rho) residue Phase 12 measured
+            # at -7.08 MPa on the flagship.  Per tendon because the
+            # datum is per tendon, even though the iteration is shared.
+            closure = dict(gres.report["closure"])
+            for t in grout_now:
+                cell = ledger.at(ev.index, t)
+                if cell is not None:
+                    cell.closure = closure
+        return eps_map
+
+    @staticmethod
+    def _record_driver(ledger, section, ev, result, eps_map,
+                       stress_sigma) -> None:
+        r"""
+        Write the driver's per-stage photograph into *ledger*.
+
+        One row per ``(stage, tendon)``: the section does not change
+        during a stressing sequence -- the resistance view is tendon-free
+        and constant (``6_8-WARNING_intra_sequence_bonded.md``) -- what
+        changes is the strain plane, the per-tendon stress as later
+        tendons take their elastic-shortening debit, and the accumulated
+        demand.  Those three are the photograph.
+
+        Parameters
+        ----------
+        ledger : PrestressLedger
+        section : GenericSection
+        ev : TimelineEvent
+            The ``grout`` event whose reconciliation ran the driver.
+        result : PosttensionSequenceResult
+        eps_map : dict
+            ``{tendon_name: eps_init}`` for the tendons grouted here.
+        stress_sigma : dict
+            ``{tendon_name: sigma_p0}`` as declared at jacking.
+        """
+        # Naming: the tree's ONE convention (``_tendon_local_index`` and
+        # its four siblings), not a second one.  The previous form,
+        # ``getattr(t, "name", f"T{i}")``, had two faults that the
+        # ``getattr`` inventory of Phase 13 surfaced and a measurement
+        # confirmed (finding F-N1): ``name`` is a dataclass field that
+        # defaults to ``None``, so the fallback never fired and an
+        # unnamed tendon was recorded under the literal key ``"None"`` --
+        # two unnamed tendons collapsing into one cell -- and that key
+        # matched nothing in ``_tendon_name_index``, so the substep rows
+        # and the state rows of the same ledger were keyed differently
+        # and a join across them dropped silently.
+        names = [t.name or f"tendon_{k}"
+                 for k, t in enumerate(section.tendons or [])]
+        # Attribute access, not ``getattr`` with a default: every field
+        # read below is mandatory on ``PosttensionStageResult``, so a
+        # default could only ever mask the dataclass changing under us.
+        # ``converged`` defaulting to ``True`` was the worst of them --
+        # a silent default that *asserts* the thing it stands in for --
+        # and this photograph is serialised into a versioned dump, where
+        # a silent default is permanent (13_0 §11).
+        for st in result.stages:
+            si = int(st.stage_index)
+            jacked = int(st.stressed_tendon)
+            dem = tuple(st.cumulative_demand)
+            for li, nm in enumerate(names):
+                ledger.record_substep(
+                    ev.index, si, nm,
+                    sigma_p=float(st.sigma_p[li]),
+                    eps_c=float(st.eps_c[li]),
+                    jacked=bool(li == jacked),
+                    demand_N=float(dem[0]),
+                    demand_Mx=float(dem[1]),
+                    demand_My=float(dem[2]),
+                    converged=bool(st.converged))
+        # The grouted tendons flip to the resistance side HERE, at their
+        # post-loss effective stress and reconciled datum.
+        for t, eps_init in eps_map.items():
+            li = _tendon_local_index(section, t)
+            ledger.record_state(
+                ev.index, t, STATE_BONDED,
+                sigma=float(result.sigma_p_after[li]),
+                eps_init=float(eps_init))
 
     # -- compiler ------------------------------------------------------
 
@@ -1255,12 +2444,14 @@ class ConstructionTimeline:
             prefix = self.events[:plen]
 
             self._check_interleave(prefix, combo.get("name"))
+            self._check_load_between_jacks(prefix, combo.get("name"))
             self._warn_defaulted_history(prefix, hist_factors,
                                          combo.get("name"), point)
 
             stages = self._emit_prefix_stages(
                 prefix, resolution, section, demand_db,
-                hist_factors, gamma_P, gamma_P_provider)
+                hist_factors, gamma_P, gamma_P_provider,
+                combo_name=combo.get("name"), point=point)
 
             # the combination's own variable part, appended as stage(s)
             stages.extend(self._emit_variable_stages(combo))
@@ -1275,7 +2466,8 @@ class ConstructionTimeline:
     # -- compiler internals -------------------------------------------
 
     def _emit_prefix_stages(self, prefix, resolution, section, demand_db,
-                            hist_factors, gamma_P, provider) -> List[dict]:
+                            hist_factors, gamma_P, provider,
+                            combo_name=None, point=None) -> List[dict]:
         r"""
         Lower the prefix events to stages (one per event).
 
@@ -1284,8 +2476,55 @@ class ConstructionTimeline:
         yet present) and activated at their zone's ``cast`` event, so the
         emitted stage list satisfies the engine's containment invariant
         exactly (mirrors :meth:`resolve`).
+
+        An **emission ledger** is built alongside the stages and left on
+        ``resolution.emission_ledgers[(combo_name, point)]``.  It has two
+        jobs.  First, the grouting stage cancels a tendon's demand-side
+        action by **negating what was recorded** rather than rebuilding
+        :math:`P = \sigma_{p0} A_p \gamma_P` a second time (F-C): two
+        independent computations of one force agree only until somebody
+        edits one of them.  Second, the single-side invariant
+
+        .. math::
+
+            A \oplus B = \text{true},
+            \qquad
+            A = \text{resistance-side},
+            \quad
+            B = \text{demand-side},
+
+        is **asserted** over the finished ledger, unconditionally, at the
+        end of the lowering -- not left as a comment and not hidden
+        behind a debug switch.  The check is a walk over the ledger with
+        no equilibrium in it, and what it catches (prestress counted
+        twice, or lost) is not an error worth deferring.
+
+        Parameters
+        ----------
+        prefix : sequence of TimelineEvent
+        resolution : TimelineResolution
+        section : GenericSection
+        demand_db : dict
+        hist_factors : dict
+        gamma_P : float
+        provider : callable or None
+        combo_name : str, optional
+            Combination name, for the ledger key and error messages.
+        point : str, optional
+            Anchor point name, likewise.
+
+        Returns
+        -------
+        list of dict
+            The lowered stages.
+
+        Raises
+        ------
+        SingleSideViolation
+            The XOR invariant failed at some ``(step, tendon)``.
         """
         zone_names = list(getattr(section, "zone_names", []) or [])
+        led = PrestressLedger(tag=f"{combo_name or 'combo'}@{point or '-'}")
         nonbase = _nonbase_elements(section)
         pt_tendons = _posttension_union_indices(self, section)
         initial_off = sorted(set(nonbase) | set(pt_tendons))
@@ -1318,13 +2557,13 @@ class ConstructionTimeline:
 
             elif ev.kind == "stress":
                 acts = self._stress_actions(
-                    ev, resolution, section, gamma_P)
+                    ev, resolution, section, gamma_P, ledger=led)
                 _emit({"name": f"stress[{ev.index}]", "components": [],
                        "_prestress_actions": acts})
 
             elif ev.kind == "grout":
                 ops, drop = self._grout_stage(
-                    ev, resolution, section, gamma_P)
+                    ev, resolution, section, gamma_P, ledger=led)
                 _emit({"name": f"grout[{ev.index}]", "components": [],
                        "section_ops": ops, "_prestress_actions": drop})
 
@@ -1340,10 +2579,15 @@ class ConstructionTimeline:
                 if ops:
                     stage["section_ops"] = ops
                 _emit(stage)
+
+        # The invariant, asserted -- always, not optionally.
+        led.assert_single_side(
+            context=f"combination '{combo_name}' at '{point}'")
+        resolution.emission_ledgers[(combo_name, point)] = led
         return stages
 
-    def _stress_actions(self, ev, resolution, section, gamma_P
-                        ) -> List[PrestressAction]:
+    def _stress_actions(self, ev, resolution, section, gamma_P,
+                        ledger=None) -> List[PrestressAction]:
         r"""
         Emit demand-side prestress actions for a ``stress`` event.
 
@@ -1353,9 +2597,30 @@ class ConstructionTimeline:
         capacity-side (they enter the domain bonded with ``eps_pe`` when
         the zone casts) and contribute **no** demand increment, so
         :math:`\gamma_P` has nothing to scale for them (by design).
+
+        Parameters
+        ----------
+        ev : TimelineEvent
+        resolution : TimelineResolution
+        section : GenericSection
+        gamma_P : float
+        ledger : PrestressLedger, optional
+            Every emitted action is recorded into it **as emitted**, with
+            :math:`\gamma_P` already baked in, so that the cancellation
+            at grouting is an exact negation rather than a second
+            reconstruction (F-C).
+
+        Returns
+        -------
+        list of PrestressAction
         """
         acts: List[PrestressAction] = []
         for t in _event_tendon_refs(ev):
+            if ledger is not None:
+                ledger.record_state(
+                    ev.index, t, STATE_STRESSED,
+                    sigma=resolution.stress_sigma.get(t),
+                    pre_post=resolution.pre_post.get(t))
             if resolution.pre_post.get(t) != "post":
                 continue
             tinfo = _tendon_info(section, t)
@@ -1375,9 +2640,11 @@ class ConstructionTimeline:
                     act.N * gamma_P, act.Mx * gamma_P, act.My * gamma_P,
                     label=act.label, origin=act.origin)
             acts.append(act)
+            if ledger is not None:
+                ledger.record_emission(ev.index, t, act)
         return acts
 
-    def _grout_stage(self, ev, resolution, section, gamma_P):
+    def _grout_stage(self, ev, resolution, section, gamma_P, ledger=None):
         r"""
         Emit the grouting stage: activate + reconciled ``eps_init``, and
         cancel the tendon's demand-side action (single-side invariant).
@@ -1401,6 +2668,16 @@ class ConstructionTimeline:
         explicit; :math:`\gamma_P` is applied to the drop exactly as it
         was to the stressing load, so the cancellation is exact.
 
+        Parameters
+        ----------
+        ev : TimelineEvent
+        resolution : TimelineResolution
+        section : GenericSection
+        gamma_P : float
+        ledger : PrestressLedger, optional
+            The emission ledger.  When present the drop is the
+            **negation of what it recorded** (F-C).
+
         Returns
         -------
         tuple
@@ -1408,6 +2685,21 @@ class ConstructionTimeline:
             ``{"activate": [...], "eps_override": {...}}``;
             ``drop_actions`` is the list of cancelling
             :class:`PrestressAction` for the grouted tendons.
+
+        Notes
+        -----
+        The pre-ledger implementation rebuilt
+        :math:`P = \sigma_{p0} A_p \gamma_P` from
+        ``resolution.stress_sigma`` and negated *that* -- a second,
+        independent computation of a force the ``stress`` stage had
+        already computed.  Two homes for one fact.  It also fired for
+        **any** tendon carrying a jacking stress, while the emission
+        fired only for post-tensioned ones, so a pre-tensioned tendon
+        reaching a ``grout`` event received a negative action that never
+        had a positive twin -- prestress conjured out of nothing, with
+        nothing to catch it.  Negating the recorded emission closes both
+        at once: nothing is cancelled that was not emitted, and the
+        cancellation is exact by construction.
         """
         activate: List[int] = []
         eps_override: Dict[int, float] = {}
@@ -1417,16 +2709,14 @@ class ConstructionTimeline:
             activate.append(ui)
             if t in resolution.grout_eps_init:
                 eps_override[ui] = resolution.grout_eps_init[t]
-            sigma = resolution.stress_sigma.get(t)
-            if sigma is not None:
-                tinfo = _tendon_info(section, t)
-                P = float(sigma) * float(tinfo["Ap"]) * gamma_P
-                a = PrestressAction.from_force(
-                    P, tinfo["x"], tinfo["y"],
-                    x_ref=tinfo["x_ref"], y_ref=tinfo["y_ref"],
-                    label=f"grout_drop:{t}", origin="timeline_grout_drop")
-                drop.append(PrestressAction(
-                    -a.N, -a.Mx, -a.My, label=a.label, origin=a.origin))
+            if ledger is None:
+                continue
+            ledger.record_state(
+                ev.index, t, STATE_BONDED,
+                sigma=resolution.stress_sigma.get(t),
+                pre_post=resolution.pre_post.get(t),
+                eps_init=resolution.grout_eps_init.get(t))
+            drop.extend(ledger.cancel(ev.index, t, _negate_action))
         return ({"activate": activate, "eps_override": eps_override}, drop)
 
     @staticmethod
@@ -1440,12 +2730,21 @@ class ConstructionTimeline:
     @staticmethod
     def _check_interleave(prefix, combo_name) -> None:
         r"""
-        Raise on a ``stress`` after a ``grout`` of the same tendon (A9).
+        Raise on a ``stress`` after a ``grout`` **of the same tendon**.
 
-        The intra-sequence bonded-stiffness hazard documented in
-        ``6_8-WARNING_intra_sequence_bonded.md``: once a tendon is
-        grouted, stressing it (or any tendon sharing the just-changed
-        bonded section) is not modelled.  Fail-loud.
+        Re-stressing a cable already bonded to the concrete around it is
+        a different mechanical problem from jacking a free one: the jack
+        no longer pulls against the anchorages alone, and the tendon is
+        no longer a demand-side load.  GenSec does not model it.
+        Fail-loud.
+
+        The scope is exactly the same tendon, and since Phase 22 that is
+        also all it should be.  This docstring used to claim the check
+        covered "any tendon sharing the just-changed bonded section" --
+        it never did (the code has always intersected the event's own
+        tendon refs only), and it no longer should: stressing ANOTHER
+        tendon against an already-injected one is the staged-injection
+        case, which is now modelled through ``bonded_before``.
         """
         grouted: set = set()
         for ev in prefix:
@@ -1463,6 +2762,109 @@ class ConstructionTimeline:
                         f"all tendons before grouting, or split the "
                         f"model."
                     )
+
+    @staticmethod
+    def _check_load_between_jacks(prefix, combo_name) -> None:
+        r"""
+        Raise on a ``load`` interposed between two jacking events while a
+        tendon is stressed but not yet grouted.
+
+        The scope boundary of the sectional post-tensioning driver, made
+        loud.  The reasoning belongs to the driver and is written once,
+        in full, in
+        :func:`~gensec.solver.posttension.solve_posttension_sequence`
+        and in
+        :class:`~gensec.solver.posttension.LoadBetweenJacksNotModelled`:
+        an ungrouted tendon has no strain compatibility with the section,
+        so its force change follows a member-level integral that a
+        sectional model cannot evaluate, and the local value it *can*
+        evaluate is unconservative for :math:`\sigma_p` at the critical
+        section.
+
+        The condition is deliberately narrow — three clauses, all
+        required:
+
+        1.  the event is a ``load``;
+        2.  it falls **between** two ``stress`` events, i.e. at least one
+            jacking event precedes it and at least one follows it;
+        3.  at that instant at least one tendon is **stressed and not yet
+            grouted**.
+
+        Each exclusion is a case that *is* modelled, not an oversight:
+
+        * a load **before the first jack** is the meaning of
+          ``base_N``/``base_Mx``/``base_My`` — the state at the start of
+          the sequence — **as long as nothing is anchored at that
+          instant**, which is the case for every history this walk can
+          compile.  It stops being true on a *retrofit*, where tendons
+          grouted before the sequence began are anchored from the first
+          step and a sollecitazione therefore costs them stress;
+          ``base_*`` is debit-free by contract and would swallow that
+          silently.  The driver's ``applied_at={step: (N, Mx, My)}``
+          is the parameter for it, gated on the same bond-state
+          condition as clause 3.  Unreachable from here: the timeline
+          carries no declaration surface for an existing member (D1b-3),
+          so a retrofit cannot enter this walk at all;
+        * a load **after the last jack** is not interposed in a sequence;
+          there is no subsequent jacking event whose debit it would
+          contaminate;
+        * a load acting when every stressed tendon is **already
+          grouted** is compatible in strain with the section and is
+          resolved by the ordinary bonded path.
+
+        Parameters
+        ----------
+        prefix : sequence of TimelineEvent
+            The event prefix being compiled, in physical order.
+        combo_name : str or None
+            Combination name, for the message.
+
+        Raises
+        ------
+        gensec.solver.posttension.LoadBetweenJacksNotModelled
+            Naming the tendons, the load event and the two jacking
+            events it falls between.
+
+        See Also
+        --------
+        ConstructionTimeline._check_interleave : the sibling guard, for a
+            ``stress`` after a ``grout`` of the same tendon.
+        """
+        stress_idx = [k for k, ev in enumerate(prefix)
+                      if ev.kind == "stress"]
+        if len(stress_idx) < 2:
+            # Fewer than two jacks: nothing can fall *between* two.
+            return
+
+        first_stress, last_stress = stress_idx[0], stress_idx[-1]
+
+        stressed: set = set()
+        grouted: set = set()
+        for k, ev in enumerate(prefix):
+            if ev.kind == "stress":
+                stressed.update(_event_tendon_refs(ev))
+                continue
+            if ev.kind == "grout":
+                grouted.update(_event_tendon_refs(ev))
+                continue
+            if ev.kind != "load":
+                continue
+            if not (first_stress < k < last_stress):
+                continue
+            open_tendons = sorted(stressed - grouted)
+            if not open_tendons:
+                continue
+            prev_j = max(j for j in stress_idx if j < k)
+            next_j = min(j for j in stress_idx if j > k)
+            from .posttension import LoadBetweenJacksNotModelled
+            raise LoadBetweenJacksNotModelled(
+                tendons=open_tendons,
+                load_index=prefix[k].index,
+                load_demand=prefix[k].payload.get("demand", "?"),
+                prev_stress_index=prefix[prev_j].index,
+                next_stress_index=prefix[next_j].index,
+                combo_name=combo_name,
+            )
 
     @staticmethod
     def _warn_defaulted_history(prefix, hist_factors, combo_name,
@@ -1534,11 +2936,13 @@ class TimelineResolution:
 
     __slots__ = ("datums", "explicit_datums", "pre_post", "grouted",
                  "stressed", "grout_eps_init", "stress_sigma",
-                 "losses_ops", "losses_trace")
+                 "losses_ops", "losses_trace", "ledger",
+                 "emission_ledgers", "skipped_losses")
 
     def __init__(self, datums, explicit_datums, pre_post, grouted,
                  stressed, grout_eps_init=None, stress_sigma=None,
-                 losses_ops=None, losses_trace=None):
+                 losses_ops=None, losses_trace=None, ledger=None,
+                 skipped_losses=()):
         self.datums = datums
         self.explicit_datums = explicit_datums
         self.pre_post = pre_post
@@ -1557,7 +2961,27 @@ class TimelineResolution:
         #: for reporting.  GenSec's purpose is to give the engineer every
         #: number it used, not only the one it acted on.
         self.losses_trace = losses_trace or {}
+        #: Indices of the ``interval`` events whose declared ``losses``
+        #: were **not** integrated, because the model turned rheology
+        #: off.  Empty in every other case.  A report that does not say
+        #: this is a report that misdescribes its own result.
+        self.skipped_losses = tuple(skipped_losses)
         self.stress_sigma = stress_sigma or {}
+        #: :class:`~gensec.solver.prestress_ledger.PrestressLedger` -- the
+        #: per-tendon, per-step record of the resolution walk.  Public
+        #: and queryable: ``resolution.ledger.state_of("P1", upto=4)``,
+        #: ``resolution.ledger.at(6, "P1").sigma``.  Timeline physics,
+        #: computed once here and never re-derived.
+        self.ledger = ledger if ledger is not None else PrestressLedger()
+        #: ``{zone_index: (eps0, chi_x, chi_y)}`` -- the SERVICE casting
+        #: datum, twin of ``datums`` (which is the ULS one).  Previously
+        #: computed in the walk and dropped on the floor; the datum
+        #: fingerprint needs to read it (F4/F5).
+        #: ``{(combination, point): PrestressLedger}`` -- the compile-time
+        #: emission ledgers.  Separate from :attr:`ledger` because
+        #: :math:`\gamma_P` belongs to the combination, not the timeline,
+        #: so the actions actually emitted differ per combination.
+        self.emission_ledgers = {}
 
 
 # ---------------------------------------------------------------------------
@@ -1856,6 +3280,32 @@ def _posttension_union_indices(timeline, section) -> List[int]:
     return sorted(out)
 
 
+def _negate_action(act: PrestressAction) -> PrestressAction:
+    r"""
+    The exact opposite of *act*, label and origin retagged.
+
+    The cancelling twin of a demand-side prestress action.  Built by
+    negation of the emitted triple, never by recomputing the force, so
+    :math:`\gamma_P` and every rounding decision baked into the emission
+    are cancelled exactly rather than approximately.
+
+    Parameters
+    ----------
+    act : PrestressAction
+
+    Returns
+    -------
+    PrestressAction
+        ``(-N, -Mx, -My)``.
+    """
+    label = getattr(act, "label", "") or ""
+    return PrestressAction(
+        -act.N, -act.Mx, -act.My,
+        label=label.replace("stress:", "grout_drop:", 1)
+        if label.startswith("stress:") else f"grout_drop:{label}",
+        origin="timeline_grout_drop")
+
+
 def _classify_pre_post(events, section) -> Dict[str, str]:
     r"""
     Pre/post classification of every stressed tendon — **the one home**.
@@ -1915,6 +3365,200 @@ def _classify_pre_post(events, section) -> Dict[str, str]:
     return out
 
 
+def _normalise_rheology_switch(value):
+    r"""
+    Normalise the ``rheology`` switch to ``'declared'``/``'on'``/``'off'``.
+
+    Accepts ``None`` (declared), the booleans, and the strings
+    ``'declared'``, ``'auto'``, ``'on'``, ``'off'``, ``'true'``,
+    ``'false'``, ``'yes'``, ``'no'``, in any case.
+
+    Parameters
+    ----------
+    value : None or bool or str
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        On anything else.  A misspelt switch that fell through to the
+        default would silently re-enable a rheology the model asked to
+        turn off -- the class of quiet mismodel this project refuses.
+    """
+    if value is None:
+        return "declared"
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    text = str(value).strip().lower()
+    if text in ("declared", "auto"):
+        return "declared"
+    if text in ("on", "true", "yes", "1"):
+        return "on"
+    if text in ("off", "false", "no", "0", "none"):
+        return "off"
+    raise ValueError(
+        f"'rheology' must be one of 'declared' (the default: follow the "
+        f"model's own declarations), 'on' (refuse any zone that declares "
+        f"no rheological model) or 'off' (no creep, shrinkage or "
+        f"relaxation; every datum at the code's conventional modulus), "
+        f"got {value!r}."
+    )
+
+
+def _datum_plane_accepted(sol, demand, rel_tol=None,
+                          tolerances=None) -> bool:
+    r"""
+    Whether a datum solve reproduced its demand.
+
+    **One home for one acceptance rule.**  The solver's own
+    ``converged`` flag is judged on an *absolute* force/moment
+    residual, so on a section carrying moments of order
+    :math:`10^{8}` N·mm the flag asks for a relative precision of
+    :math:`10^{-14}`, which ``float64`` cannot deliver.  It therefore
+    reports failure on planes that are exact.  Measured on the
+    flagship's topping datum:
+
+    .. math::
+
+        N,\,M_x \;\text{exact};\qquad
+        M_y = -2.79\times10^{-9}\ \mathrm{N\,mm}
+        \;\text{against a target of }0,
+
+    a relative residual of :math:`1.3\times10^{-17}` on a scale of
+    :math:`2.2\times10^{8}` -- reported as *not converged* after 100
+    iterations.
+
+    The rule was already corrected once, inside
+    :meth:`ConstructionTimeline._auto_datum`, and **not** in its twin
+    ``_service_datum``; the twin then stopped the flagship the moment
+    the datum retarget changed its stage prefix.  One criterion living
+    in two places, only one of them repaired, is F7's lesson applied
+    to convergence instead of to datums.  It lives here now, so a
+    third datum site inherits it rather than re-deriving it.
+
+    A genuine residual failure still raises at the call site: a
+    substrate that truly cannot carry its own construction loads is a
+    real finding, not a warning.
+
+    Parameters
+    ----------
+    sol : dict
+        A ``solve_equilibrium`` result: ``converged``, ``N``, ``Mx``,
+        ``My``.
+    demand : tuple of float
+        The target ``(N, Mx, My)`` [N, N·mm].
+    rel_tol : float, optional
+        Overrides both tolerances with one number.  ``None`` (the
+        default) reads them from *tolerances*.
+    tolerances : Tolerances, optional
+        The resolved tolerance set; the shipped defaults if absent.
+
+    Returns
+    -------
+    bool
+
+    Notes
+    -----
+    Scope, stated because it is narrower than the defect: 27 sites in
+    ``src/`` read ``sol["converged"]`` and only the datum sites are
+    covered here.  The others are registered, not fixed -- moving them
+    would move numbers, and this phase moves numbers only on purpose.
+    """
+    return _datum_plane_residual(sol, demand, rel_tol=rel_tol,
+                                 tolerances=tolerances)["accepted"]
+
+
+def _datum_plane_residual(sol, demand, rel_tol=None,
+                          tolerances=None) -> dict:
+    r"""
+    The residual of a datum solve, **and** what it was judged against.
+
+    Companion of :func:`_datum_plane_accepted`, which derives its
+    boolean from this dict rather than recomputing the arithmetic:
+    two computations of one acceptance would be two homes for one
+    fact, and the fact here is precisely the one Phase 12 found
+    mis-stated in one of its two homes.
+
+    It exists because the machine-readable dump must record the
+    residual and the tolerance, never the solver's ``converged``
+    flag.  That flag is judged on an *absolute* residual, so it is
+    structurally meaningless above :math:`10^{8}` N·mm and has already
+    caused one defect (``12_12`` §2).  Serialising it would freeze the
+    trap into a versioned format, where it becomes permanent.
+
+    .. math::
+
+        r_N = \frac{|N_{\text{sol}} - N|}{\max(|N|,\,1)},
+        \qquad
+        r_M = \max_{c \in \{x, y\}}
+              \frac{|M_{c,\text{sol}} - M_c|}
+                   {\max(|M_x|,\,|M_y|,\,1)}
+
+    Parameters
+    ----------
+    sol : dict
+        A ``solve_equilibrium`` result.
+    demand : tuple of float
+        The target ``(N, Mx, My)`` [N, N·mm].
+    rel_tol : float, optional
+        Overrides both tolerances with one number.
+    tolerances : Tolerances, optional
+        The resolved tolerance set; the shipped defaults if absent.
+
+    Returns
+    -------
+    dict
+        ``residual_force_rel``, ``residual_moment_rel``,
+        ``tolerance_force_rel``, ``tolerance_moment_rel``,
+        ``iterations``, ``solver_flag`` and the derived ``accepted``.
+
+    Notes
+    -----
+    ``accepted`` is redundant on purpose: it is
+
+    .. math::
+
+        \texttt{solver\_flag} \;\vee\;
+        \bigl(r_N < \text{tol}_N \wedge r_M < \text{tol}_M\bigr),
+
+    so a reader of the dump can re-derive it from the numbers beside
+    it, **and** can see which of the two disjuncts carried it.  A
+    boolean recomputable from its ingredients is a checkable
+    assertion; an opaque one is a request for trust.
+
+    ``solver_flag`` is carried rather than dropped precisely because
+    it is the untrustworthy term: it is what the engine's rule reads
+    first, so a dump that omitted it would describe an acceptance
+    rule GenSec does not use.  Recording the flag as *one disjunct
+    beside its residual* is the opposite of recording it alone.
+    """
+    if tolerances is None:
+        from ..tolerances import Tolerances
+        tolerances = Tolerances()
+    tol_N = rel_tol if rel_tol is not None else tolerances.equilibrium_force_rel
+    tol_M = rel_tol if rel_tol is not None else tolerances.equilibrium_moment_rel
+    N, Mx, My = (float(v) for v in demand)
+    scale_N = max(abs(N), 1.0)
+    scale_M = max(abs(Mx), abs(My), 1.0)
+    r_N = abs(float(sol["N"]) - N) / scale_N
+    r_M = max(abs(float(sol["Mx"]) - Mx) / scale_M,
+              abs(float(sol["My"]) - My) / scale_M)
+    flag = bool(sol.get("converged"))
+    return {
+        "residual_force_rel": r_N,
+        "residual_moment_rel": r_M,
+        "tolerance_force_rel": float(tol_N),
+        "tolerance_moment_rel": float(tol_M),
+        "iterations": (None if sol.get("iterations") is None
+                       else int(sol["iterations"])),
+        "solver_flag": flag,
+        "accepted": bool(flag or (r_N < tol_N and r_M < tol_M)),
+    }
+
+
 def _n_zones(mgr) -> int:
     r"""Number of bulk zones known to a StagedDomainManager."""
     for attr in ("_n_zones", "n_zones"):
@@ -1969,3 +3613,4 @@ def _zone_elements(section, zone_index: int) -> List[int]:
     r"""Union indices of the elements contained in *zone_index*."""
     parents = _union_parents(section)
     return [i for i in range(parents.size) if int(parents[i]) == zone_index]
+# GENSEC-COMPLETE phase=34 utc=2026-09-06T10:33:16Z sha256=c4dcaf6457de64aede6cbe9d737abb62b8f56218179182426c8ca73d60ad7e69 body_lines=3615

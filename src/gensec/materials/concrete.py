@@ -33,7 +33,8 @@ not available the pure-NumPy path is used transparently.
 
 import numpy as np
 from dataclasses import dataclass
-from .base import Material
+from .base import (Material, NormativeChoiceNotDeclared,
+                   ReferenceModulus)
 
 # ------------------------------------------------------------------
 #  Optional Numba acceleration
@@ -199,11 +200,33 @@ class Concrete(Material):
     Parameters
     ----------
     fck : float
-        Characteristic cylinder strength [MPa].
-    gamma_c : float, optional
-        Partial safety factor. Default 1.5.
-    alpha_cc : float, optional
-        Long-term coefficient. Default 0.85.
+        Characteristic cylinder strength [MPa].  **Required**: a
+        concrete class is a declaration, and this container invents
+        none.
+    gamma_c : float
+        Partial factor on the concrete.  **Required**, and supplied by
+        the module that owns the clause -- for the Eurocode,
+        :mod:`gensec.materials.ec2_properties` reading EN 1992-1-1
+        §2.4.2.4.  This container carries it and does not
+        choose it.
+    long_term_reduction_factor : float
+        Dimensionless factor multiplying :math:`f_{ck}` before the
+        partial factor divides it, so that
+
+        .. math::
+
+            f_{cd} \;=\; k_{lt}\,\frac{f_{ck}}{\gamma_{c}} .
+
+        **Required**, and deliberately *not* named after any clause:
+        EN 1992-1-1 §3.1.6(1)P calls its own value
+        :math:`\alpha_{cc}` and recommends 0.85, and that symbol lives
+        in the Eurocode module where the clause lives.  A code that
+        applies no material-side long-term reduction supplies 1.0 here
+        as an explicit proxy rather than leaving a Eurocode-named
+        field to be filled with a value the document never states.
+        The neutral name also leaves room for the tension-branch
+        counterpart :math:`\alpha_{ct}` without either factor being
+        mistaken for the other.
     n_parabola : float, optional
         Parabolic exponent. Default 2.0.
     eps_c2 : float, optional
@@ -230,17 +253,85 @@ class Concrete(Material):
         ``True`` when both ``fct > 0`` and ``Ec > 0``.
     """
 
-    fck: float = 25.0
-    gamma_c: float = 1.5
-    alpha_cc: float = 0.85
+    fck: float
+    gamma_c: float
+    long_term_reduction_factor: float
     n_parabola: float = 2.0
     eps_c2: float = -0.002
     eps_cu2: float = -0.0035
     fct: float = 0.0
     Ec: float = 0.0
 
+    def reference_modulus(self):
+        r"""
+        :math:`E_{cm}` at the 28-day reference age [MPa].
+
+        Read from this material's own EC2 bridge, not recomputed, so
+        the number a datum is drawn on and the number the material's
+        other clauses use are the same object's answer (rule 5).
+        Verified equal to ``EC2RheologicalModel(fck).E_c(28.0)`` to the
+        last digit: 35 220.462 MPa at :math:`f_{ck} = 40`.
+
+        .. math::
+
+            E_{cm} = 22\,000\left(\frac{f_{cm}}{10}\right)^{0.3},
+            \qquad f_{cm} = f_{ck} + 8 \quad [\mathrm{MPa}]
+
+        Returns
+        -------
+        ReferenceModulus
+
+        Raises
+        ------
+        NotImplementedError
+            If the bridge carries no ``ecm``.
+        """
+        from .codes import UNDECLARED, resolve_code
+        code = getattr(self, "code", None)
+        if code is None:
+            # A material built outside the loader carries no
+            # declaration.  It may still be governed by its own class:
+            # a Concrete that carries an EC2 property object was built
+            # through the EC2 bridge, and that IS a declaration.  A
+            # bare Concrete(fck=...) is not, and gets UNDECLARED, which
+            # declines and says why.
+            code = (resolve_code(material_type="concrete_ec2_gen1")
+                    if getattr(self, "ec2", None) is not None
+                    else UNDECLARED)
+        return code.reference_modulus(self)
+
     def __post_init__(self):
-        self.fcd = self.alpha_cc * self.fck / self.gamma_c
+        r"""
+        Validate the declared reduction and publish :math:`f_{cd}`.
+
+        The three inputs are checked here rather than trusted, because
+        a non-positive one propagates as a *number* -- a zero
+        :math:`f_{cd}` yields zero capacity everywhere with nothing
+        raised, which is the silent-failure shape this project
+        refuses.  Each refusal names the field, the value seen and
+        why the value cannot stand.
+
+        Raises
+        ------
+        ValueError
+            If any of :math:`f_{ck}`, :math:`\gamma_{c}` or
+            :math:`k_{lt}` is not strictly positive.
+        """
+        for _name, _value in (("fck", self.fck),
+                              ("gamma_c", self.gamma_c),
+                              ("long_term_reduction_factor",
+                               self.long_term_reduction_factor)):
+            if not (_value > 0.0):
+                raise ValueError(
+                    f"Concrete.{_name} = {_value!r} is not positive. "
+                    f"All three of fck, gamma_c and "
+                    f"long_term_reduction_factor must be strictly "
+                    f"positive: they multiply and divide into f_cd, so "
+                    f"a zero or negative value would publish a design "
+                    f"strength of zero or of the wrong sign and every "
+                    f"capacity computed from it would come out silently "
+                    f"wrong rather than raising.")
+        self.fcd = self.long_term_reduction_factor * self.fck / self.gamma_c
         self.tension_enabled = (self.fct > 0.0) and (self.Ec > 0.0)
         self.eps_ct = self.fct / self.Ec if self.tension_enabled else 0.0
 

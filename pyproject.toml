@@ -13,6 +13,14 @@ dependencies = [
     "matplotlib>=3.6",
     "pyyaml>=6.0",
     "shapely>= 2.0",
+    # gensec.api is part of the library, not of the GUI: it declares
+    # its request/response schemas with pydantic and imports nothing
+    # from fastapi.  Until Phase 36 pydantic arrived only as a
+    # transitive requirement of fastapi, itself only in the [gui]
+    # extra, so an install without [gui] left tests/test_api.py at
+    # exit 2 in collection (Z-11).  A dependency of a library module
+    # is a dependency of the library.
+    "pydantic>=2.9",
     "triangle",
     "setuptools_scm",        # Necessary for dynamic versioning
 ]

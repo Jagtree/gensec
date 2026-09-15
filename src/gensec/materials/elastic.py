@@ -37,11 +37,11 @@ machinery (initial-strain offsets, embedded-area subtraction,
 multi-material zones) as the ULS path.
 
 The law is *unbounded*: it never caps, never crushes, and carries
-tension symmetrically.  This is deliberate — the uncracked SLS basis is
-linear by definition, and its *validity* (tensile stress below the
-effective tensile strength) is assessed downstream as a verification
-verdict, never inside the constitutive law (see
-``uncracked_basis_violated`` in :mod:`gensec.solver.sls`).
+tension symmetrically.  This is deliberate: the law is what it says it
+is.  A concrete that must release in tension is not this class but
+:class:`gensec.materials.service_concrete.ServiceConcrete`, which
+carries its own ``fct_eff`` and is what the SLS view uses since Phase
+27.
 
 Notes
 -----
@@ -59,7 +59,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .base import Material
+from .base import Material, ReferenceModulus
 
 
 @dataclass
@@ -99,6 +99,22 @@ class LinearElastic(Material):
     E: float = 0.0
     eps_lim: float = 0.05
     name: str = ""
+
+    def reference_modulus(self):
+        r"""
+        The declared modulus [MPa], at no reference age.
+
+        A linear law has no design/service distinction to get wrong:
+        the tangent is the secant is the modulus, and it is the number
+        the engineer wrote.
+
+        Returns
+        -------
+        ReferenceModulus
+        """
+        return ReferenceModulus(
+            value=float(self.E), reference_age=None,
+            source="declared directly on the linear-elastic law")
 
     def __post_init__(self):
         if not np.isfinite(self.E) or self.E <= 0.0:
@@ -198,3 +214,4 @@ class LinearElastic(Material):
         """
         eps = np.asarray(eps, dtype=float)
         return np.full_like(eps, self.E)
+# GENSEC-COMPLETE phase=30 utc=2026-09-04T07:30:41Z sha256=d45ad5d266b606945a50b29fd2ce4bc413b4141ff657d6f00230d49a2c6bdc78 body_lines=216

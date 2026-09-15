@@ -23,6 +23,8 @@ Core constitutive laws:
 
 - :class:`Material` — abstract base class.
 - :class:`Concrete` — parabola-rectangle (EC2).
+- :class:`ServiceConcrete` — EN 1992-1-1 (3.14) with a capped
+  tension branch, the service law.
 - :class:`Steel` — elastic-plastic with hardening.
 - :class:`PrestressingSteel` — generic bilinear diagram (EC2 §3.3).
 - :class:`TabulatedMaterial` — arbitrary curve from data points.
@@ -34,6 +36,8 @@ EC2 / EN 10025 property classes:
 - :class:`Steel_EN10025_2` — structural steel per EN 10025-2.
 - :func:`concrete_from_ec2` — bridge: fben2 -> Concrete.
 - :func:`concrete_from_class` — bridge: class name -> Concrete.
+- :func:`service_concrete_from_ec2` — bridge: fben2 ->
+  ServiceConcrete.
 - :func:`steel_from_en10025` — bridge: EN 10025 -> Steel.
 - :func:`prestress_from_ec2` — bridge: fbpren -> PrestressingSteel.
 - :func:`prestress_from_class` — bridge: designation -> PrestressingSteel.
@@ -41,6 +45,7 @@ EC2 / EN 10025 property classes:
 
 from .base import Material
 from .concrete import Concrete
+from .service_concrete import ServiceConcrete
 from .steel import Steel, PrestressingSteel
 from .tabulated import TabulatedMaterial
 from .ec2_properties import fben2, ConcClassFck
@@ -48,15 +53,18 @@ from .prestress_properties import fbpren, PrestressClassData
 from .en10025_properties import Steel_plate, Steel_EN10025_2
 from .ec2_bridge import (
     concrete_from_ec2, concrete_from_class, steel_from_en10025,
+    service_concrete_from_ec2,
     prestress_from_ec2, prestress_from_class,
 )
 
 __all__ = [
-    "Material", "Concrete", "Steel", "PrestressingSteel",
+    "Material", "Concrete", "ServiceConcrete", "Steel",
+    "PrestressingSteel",
     "TabulatedMaterial",
     "fben2", "ConcClassFck",
     "fbpren", "PrestressClassData",
     "Steel_plate", "Steel_EN10025_2",
     "concrete_from_ec2", "concrete_from_class", "steel_from_en10025",
+    "service_concrete_from_ec2",
     "prestress_from_ec2", "prestress_from_class",
 ]

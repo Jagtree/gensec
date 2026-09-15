@@ -7,11 +7,23 @@
 #  bw = web width.
 # ================================================================
 
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
 materials:
   concrete_1:
     type: concrete_ec2_gen1
     class: C25/30
 
+    ls: "F"
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
   steel_1:
     type: steel
     fyk: 450.0
@@ -49,7 +61,6 @@ demands:
 
 output:
   # v0.3.0 utilization flags (the two 3-D defaults).
-  preset: standard
   eta_norm: true
   eta_norm_beta: true
   generate_mx_my: true

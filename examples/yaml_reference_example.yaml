@@ -38,6 +38,13 @@
 #  used in the section / rebars / tendons blocks.  ``Material.name``
 #  is set to the key automatically.
 
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
 materials:
 
   # ----------------------------------------------------------------
@@ -49,7 +56,7 @@ materials:
     type: concrete_ec2_gen1_custom
     fck: 49.8             # characteristic cylinder strength [MPa] (required)
     gamma_c: 1.4          # partial safety factor          (default 1.5)
-    alpha_cc: 0.85        # long-term coefficient          (default 0.85)
+    long_term_reduction_factor: 0.85        # long-term coefficient          (default 0.85)
     n_parabola: 2.0       # parabolic exponent             (default 2.0)
     eps_c2: -0.002        # peak-stress strain             (default -0.002)
     eps_cu2: -0.0035      # ultimate strain                (default -0.0035)
@@ -149,8 +156,11 @@ materials:
 #  (b) GENERIC -- ``shape`` + ``params`` (this file).  Shapes and
 #      their params:
 #        rect         B, H
-#        circle       D, resolution (default 64)
-#        annulus      D_ext, D_int, resolution
+#        circle       D, segments_per_quadrant (mandatory)
+#        annulus      D_ext, D_int, segments_per_quadrant (mandatory)
+#                     segments_per_quadrant counts segments per
+#                     QUADRANT: the boundary gets 4*n vertices and
+#                     departs from the curve by R*(1-cos(pi/4n)).
 #        tee          bf, hf, bw, hw
 #        inv_tee      bf, hf, bw, hw
 #        h            bf, hf_top, hf_bot, bw, hw
@@ -511,3 +521,4 @@ output:
   # -- API-session knobs (consumed by the api/server layer) --
   # n_points: 400              # uniaxial N-M resolution of the session
   # n_angles_3d_surface: 72    # lazy 3-D surface resolution
+# GENSEC-COMPLETE phase=30 utc=2026-09-04T07:30:41Z sha256=458fa7bfb1960c303fee082479d0c68c5601ffa39da8d6cb9f173c3d1ceaad61 body_lines=523

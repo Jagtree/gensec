@@ -1,189 +1,384 @@
-├── 📁 .claude
-│   ├── 📄 settings.json
-│   └── 📄 settings.local.json
-├── 📁 .github
-│   ├── 📁 workflows
-│   │   └── 📄 cla.yml
-│   └── 📄 pull_request_template.md
-├── 📁 .pytest_cache
-│   ├── 📁 v
-│   │   └── 📁 cache
-│   │       ├── 📄 lastfailed
-│   │       └── 📄 nodeids
-│   ├── 📄 .gitignore
-│   ├── 📄 CACHEDIR.TAG
-│   └── 📄 README.md
-├── 📁 docs
-│   ├── 📁 _templates
-│   │   └── 📁 sidebar
-│   │       └── 📄 versioning.html
-│   ├── 📁 api
-│   │   ├── 📄 gensec.cli.rst
-│   │   ├── 📄 gensec.geometry.rst
-│   │   ├── 📄 gensec.io_yaml.rst
-│   │   ├── 📄 gensec.materials.rst
-│   │   ├── 📄 gensec.output.rst
-│   │   ├── 📄 gensec.solver.rst
-│   │   └── 📄 index.rst
-│   ├── 📁 architecture
-│   │   ├── 📄 architecture_io.rst
-│   │   ├── 📄 architecture_overview.rst
-│   │   └── 📄 architecture_solver.rst
-│   ├── 📁 theory
-│   │   ├── 📄 constitutive_laws.rst
-│   │   ├── 📄 construction_timeline.rst
-│   │   ├── 📄 demand_verification.rst
-│   │   ├── 📄 fiber_method.rst
-│   │   ├── 📄 ideal_gross_properties.rst
-│   │   ├── 📄 integration_methods.rst
-│   │   └── 📄 nm_diagram.rst
-│   ├── 📁 user_guide
-│   │   ├── 📄 examples.rst
-│   │   ├── 📄 installation.rst
-│   │   ├── 📄 quickstart.rst
-│   │   ├── 📄 sign_conventions.rst
-│   │   └── 📄 yaml_reference.rst
-│   ├── 📄 about.rst
-│   ├── 📄 changelog.rst
-│   ├── 📄 ci_and_versioning.rst
-│   ├── 📄 conf.py
-│   ├── 📄 developer.rst
-│   └── 📄 index.rst
-├── 📁 src
-│   ├── 📁 gensec
-│   │   ├── 📁 _docs_assets
-│   │   │   └── 📁 static
-│   │   │       └── 📁 logo
-│   │   │           ├── 📄 .gitignore
-│   │   │           ├── 📄 Logo GenSec con anello modulare.png
-│   │   │           ├── 📄 logo_alone.png
-│   │   │           ├── 📄 logo_photoshop.psd
-│   │   │           └── 📄 logolight.png
-│   │   ├── 📁 geometry
-│   │   │   ├── 📄 __init__.py
-│   │   │   ├── 📄 fiber.py
-│   │   │   ├── 📄 geometry.py
-│   │   │   ├── 📄 primitives.py
-│   │   │   ├── 📄 properties.py
-│   │   │   └── 📄 section.py
-│   │   ├── 📁 materials
-│   │   │   ├── 📄 __init__.py
-│   │   │   ├── 📄 base.py
-│   │   │   ├── 📄 concrete.py
-│   │   │   ├── 📄 ec2_bridge.py
-│   │   │   ├── 📄 ec2_properties.py
-│   │   │   ├── 📄 elastic.py
-│   │   │   ├── 📄 en10025_properties.py
-│   │   │   ├── 📄 prestress_properties.py
-│   │   │   ├── 📄 steel.py
-│   │   │   ├── 📄 tabulated.py
-│   │   │   └── 📄 verification_limits.py
-│   │   ├── 📁 output
-│   │   │   ├── 📄 __init__.py
-│   │   │   ├── 📄 _polydraw.py
-│   │   │   ├── 📄 export.py
-│   │   │   ├── 📄 geometry_plot.py
-│   │   │   ├── 📄 plots.py
-│   │   │   ├── 📄 report.py
-│   │   │   └── 📄 summary.py
-│   │   ├── 📁 solver
-│   │   │   ├── 📄 __init__.py
-│   │   │   ├── 📄 analysis.py
-│   │   │   ├── 📄 capacity.py
-│   │   │   ├── 📄 check.py
-│   │   │   ├── 📄 integrator.py
-│   │   │   ├── 📄 posttension.py
-│   │   │   ├── 📄 prestress_transfer.py
-│   │   │   ├── 📄 section_state.py
-│   │   │   ├── 📄 sls.py
-│   │   │   ├── 📄 timeline.py
-│   │   │   └── 📄 timeline_run.py
-│   │   ├── 📄 .coverage
-│   │   ├── 📄 __init__.py
-│   │   ├── 📄 __main__.py
-│   │   ├── 📄 _about.py
-│   │   ├── 📄 _presets.py
-│   │   ├── 📄 _version.py
-│   │   ├── 📄 api.py
-│   │   ├── 📄 cli.py
-│   │   ├── 📄 io_yaml.py
-│   │   └── 📄 server.py
-│   ├── 📁 gensec.egg-info
-│   │   ├── 📄 .gitignore
-│   │   ├── 📄 dependency_links.txt
-│   │   ├── 📄 entry_points.txt
-│   │   ├── 📄 PKG-INFO
-│   │   ├── 📄 requires.txt
-│   │   ├── 📄 SOURCES.txt
-│   │   └── 📄 top_level.txt
-│   └── 📄 todo_postit.txt
-├── 📁 tests
-│   ├── 📄 __init__.py
-│   ├── 📄 test_analysis.py
-│   ├── 📄 test_api.py
-│   ├── 📄 test_capacity_v2.py
-│   ├── 📄 test_check.py
-│   ├── 📄 test_infrastructure.py
-│   ├── 📄 test_materials.py
-│   ├── 📄 test_phase7_sls.py
-│   ├── 📄 test_phase8_task1.py
-│   ├── 📄 test_phase8_task2.py
-│   ├── 📄 test_phase8_task3.py
-│   ├── 📄 test_posttension.py
-│   ├── 📄 test_prestress_transfer.py
-│   ├── 📄 test_prestress_uls_unbonded.py
-│   ├── 📄 test_properties.py
-│   ├── 📄 test_section_state.py
-│   ├── 📄 test_server.py
-│   ├── 📄 test_solver_biaxial.py
-│   ├── 📄 test_solver_uniaxial.py
-│   ├── 📄 test_v030_regressions.py
-│   └── 📄 test_validate_prestress_phase1.py
-├── 📁 validazione
-│   └── 📄 Dati_AS.docx
-├── 📁 web
-│   ├── 📁 js
-│   │   ├── 📄 api.js
-│   │   ├── 📄 app.jsx
-│   │   ├── 📄 data.jsx
-│   │   ├── 📄 demo_data.jsx
-│   │   ├── 📄 panels.jsx
-│   │   ├── 📄 plotly_helpers.jsx
-│   │   ├── 📄 plots.jsx
-│   │   └── 📄 tweaks.jsx
-│   └── 📄 index.html
-├── 📄 .coveragerc
-├── 📄 .gitignore
-├── 📄 benchmark_numba_lazy_all_examples.ps1
-├── 📄 CHANGELOG_v0_2_0.md
-├── 📄 CHANGELOG_v0_3_0.md
-├── 📄 CHANGELOG_v0_3_2.md
-├── 📄 CHANGELOG_v0_3_3.md
-├── 📄 CLA.md
-├── 📄 COMMERCIAL_LICENSE.md
-├── 📄 CONTRIBUTING.md
-├── 📄 generate_version.py
-├── 📄 gensec.code-workspace
-├── 📄 gettree.py
-├── 📄 lazy_all_examples.ps1
-├── 📄 lazy_preparefor_git.ps1
-├── 📄 lazy_run_prestress_tests_outofpytest.ps1
-├── 📄 LICENSE
-├── 📄 NOTICE
-├── 📄 profile_gensec.py
-├── 📄 pyproject.toml
-├── 📄 README.md
-├── 📄 run_bulk_prestrain_validation_new.py
-├── 📄 run_phase3_validation.py
-├── 📄 run_phase4_yaml_validation.py
-├── 📄 run_phase7_sls_validation.py
-├── 📄 run_phase8_task1_validation.py
-├── 📄 run_phase8_task2_validation.py
-├── 📄 run_phase8_task3_validation.py
-├── 📄 run_posttension_sequence_validation.py
-├── 📄 run_posttension_shortening_validation.py
-├── 📄 run_prestress_action_validation.py
-├── 📄 run_prestress_uls_unbonded_validation.py
-├── 📄 setup_licensing.py
-├── 📄 tree_output.txt
-└── 📄 uv.lock
+# GenSec — repository tree
+# generated 2026-08-29T00:00Z
+
+.
+  gensec_phase24.bundle
+  .gitignore
+  CHANGELOG_v0_2_0.md
+  CHANGELOG_v0_3_0.md
+  CHANGELOG_v0_3_2.md
+  CHANGELOG_v0_3_3.md
+  README.md
+  REPO_MAP.md
+  pyproject.toml
+  tree_output.txt
+  .fingerprints/
+    00_baseline.txt
+    01_after_p1.txt
+    02_current.txt
+    03_p1_final.txt
+    04_after_p2.txt
+    05_after_p3a.txt
+    06_after_ledger.txt
+    06_datum_PRE_P3.txt
+    06_datum_PRE_P3_D2.txt
+    07_after_p3.txt
+    07_datum_AFTER_P3.txt
+    08_after_phase13.txt
+    08_datum_after_phase13.txt
+    09_pre_FM1.txt
+    10_after_FM1.txt
+    11_datum_after_FM1.txt
+    12_datum_pre_B.txt
+    12_datum_pre_B_v2.txt
+    12_pre_B.txt
+    12_pre_B_v2.txt
+    13_after_B.txt
+    13_after_B_v2.txt
+    13_datum_after_B.txt
+    13_datum_after_B_v2.txt
+    14_after_C.txt
+    14_datum_after_C.txt
+    16_00_datum_PRE.txt
+    16_00_numeric_PRE.txt
+    16_01_datum_POST_A.txt
+    16_01_numeric_POST_A.txt
+    16_02_datum_POST_B.txt
+    16_02_numeric_POST_B.txt
+    16_03_datum_POST_C.txt
+    16_03_numeric_POST_C.txt
+    17_00_domain_PRE.txt
+    17_01_datum_POST.txt
+    17_01_domain_POST.txt
+    17_01_numeric_POST.txt
+    19_00_datum_PRE.txt
+    19_00_domain_PRE.txt
+    19_00_numeric_PRE.txt
+    19_01_datum_POST.txt
+    19_01_domain_POST.txt
+    19_01_numeric_POST.txt
+    22_00_datum_PRE.txt
+    22_00_domain_PRE.txt
+    22_00_numeric_PRE.txt
+    22_01_datum_POST.txt
+    22_01_domain_POST.txt
+    22_01_numeric_POST.txt
+    23_00_numeric_PRE.txt
+    23_01_datum_POST.txt
+    23_01_domain_POST.txt
+    23_01_numeric_POST.txt
+    24_00_datum_PRE.txt
+    24_00_domain_PRE.txt
+    24_00_numeric_PRE.txt
+    24_01_datum_POST.txt
+    24_01_domain_POST.txt
+    24_01_numeric_POST.txt
+  claude_scratch/
+    _triage_dump.py
+    probe_axial.py
+    probe_axial2.py
+    probe_d1_blindness.py
+    probe_d1_intra_sequence.py
+    probe_namemap.py
+    probe_nm.py
+    probe_nm2.py
+    suite_cut.py
+  docs/
+    about.rst
+    architecture_io.rst
+    architecture_overview.rst
+    architecture_solver.rst
+    changelog.rst
+    ci_and_versioning.rst
+    conf.py
+    constitutive_laws.rst
+    construction_timeline.rst
+    demand_verification.rst
+    developer.rst
+    examples.rst
+    fiber_method.rst
+    gensec_cli.rst
+    gensec_geometry.rst
+    gensec_io_yaml.rst
+    gensec_materials.rst
+    gensec_output.rst
+    gensec_solver.rst
+    ideal_gross_properties.rst
+    index.rst
+    installation.rst
+    integration_methods.rst
+    nm_diagram.rst
+    quickstart.rst
+    sign_conventions.rst
+    yaml_reference.rst
+  examples/
+    P60-60_1_update.yaml
+    Pannello_187x30.yaml
+    Pannello_30x187.yaml
+    biaxial_column.yaml
+    example_aci318.yaml
+    example_annulus.yaml
+    example_biaxial_column.yaml
+    example_composite_losses.yaml
+    example_composite_losses_fb_gap.yaml
+    example_composite_timeline.yaml
+    example_composite_topping.yaml
+    example_custom.yaml
+    example_external_tendon.yaml
+    example_input.yaml
+    example_prestress.yaml
+    example_staged_construction.yaml
+    example_staged_cracking.yaml
+    example_staged_injection.yaml
+    example_strand_only_slab.yaml
+    example_tee.yaml
+    example_v2_1.yaml
+    test_exotic.yaml
+    vcaslu_1.yaml
+    yaml_reference_example.yaml
+  handoff/
+    0-prestress_implementation_plan.md
+    00_BOOTSTRAP.md
+    1-CHANGELOG_prestress_phase1.md
+    10_0-GENSEC_PHASE8_TIMELINE_MASTER_PLAN.md
+    10_0b-GENSEC_DECISION_MAP_FINAL.md
+    10_1-GENSEC_TASK1_ENGINE_PRIMER.md
+    10_2-GENSEC_TASK1_RECAP.md
+    10_3-GENSEC_TASK2_TIMELINE_PRIMER.md
+    10_4-GENSEC_TASK2_RECAP.md
+    10_5-GENSEC_TASK3_CLOSURE_PRIMER.md
+    10_6-GENSEC_PRESTRESS_ARC_CLOSURE.md
+    11_0-GENSEC_PHASE5_C5_RECAP.md
+    12_0-GENSEC_DATUM_UNIFICATION_PRIMER.md
+    12_0b-GENSEC_PRECLOSURE_REVIEW_HANDOFF.md
+    12_0c-GENSEC_FB_FC1_MICRO_RECAP.md
+    12_0d-GENSEC_MATERIAL_IDENTITY_DECISION.md
+    12_1-GENSEC_PHASE12_P00_P1_RECAP.md
+    12_10-GENSEC_LEDGER_RECAP.md
+    12_11-GENSEC_P3_PARZIALE.md
+    12_12-GENSEC_PHASE12_CHIUSURA.md
+    12_2-GENSEC_PHASE12_HANDOFF.md
+    12_3-GENSEC_PHASE12_P2_RECAP.md
+    12_4-GENSEC_PHASE12_HANDOFF.md
+    12_5-GENSEC_PHASE12_STATO_INCOMPLETO.md
+    12_6-GENSEC_P3_ESECUZIONE.md
+    12_7-GENSEC_P3_RATIFICHE.md
+    12_8-GENSEC_DOMINIO_DICHIARATO.md
+    12_9-GENSEC_P3A_RECAP.md
+    13_0-GENSEC_DUMP_SCHEMA.md
+    13_1-GENSEC_PHASE13_CHIUSURA.md
+    13_2-PROMPT_FASE14.md
+    14_1-GENSEC_PHASE14_MCR.md
+    15_0-GENSEC_LEDGER_15.md
+    15_1-GENSEC_PHASE15_RECAP.md
+    16_0-GENSEC_LEDGER_16.md
+    16_1-GENSEC_PHASE16_RECAP.md
+    17_0-GENSEC_LEDGER_17.md
+    17_1-GENSEC_PHASE17_RECAP.md
+    17_2-GENSEC_N9_TRIAGE.md
+    18_0-GENSEC_LEDGER_18.md
+    18_1-GENSEC_PHASE18_RECAP.md
+    18_W-GENSEC_PHASE18_WIP.md
+    19_0-GENSEC_LEDGER_19.md
+    19_1-GENSEC_PHASE19_RECAP.md
+    2-PATCH_solve_equilibrium.md
+    2-PHASE2_prestress_changes.md
+    20_0-GENSEC_LEDGER_20.md
+    20_1-GENSEC_PHASE20_RECAP.md
+    21_0-GENSEC_LEDGER_21.md
+    21_1-GENSEC_PHASE21_RECAP.md
+    22_0-GENSEC_LEDGER_22.md
+    22_1-GENSEC_PHASE22_RECAP.md
+    23_0-GENSEC_LEDGER_23.md
+    23_1-GENSEC_PHASE23_RECAP.md
+    24_0-GENSEC_LEDGER_24.md
+    24_1-GENSEC_PHASE24_RECAP.md
+    3-GENSEC_PHASE3_RECAP.md
+    4-GENSEC_prestress_roadmap_review.md
+    5_0-PRESTRESS_ACTION_PHASE1_CLOSE.md
+    5_1-GENSEC_prestress_roadmap_review.md
+    6_3-GENSEC_PHASE4_YAML_RECAP.md
+    6_4-GENSEC_PLOTS_MC_HOTFIX_RECAP.md
+    6_5-GENSEC_STEPC_VALIDATOR_RECAP.md
+    6_6-GENSEC_STEPC_STATUS_AND_NEXT.md
+    6_7-GENSEC_STEPC_DRIVER_RECAP.md
+    6_8-GENSEC_STEPC_INTEGRATION_RECAP.md
+    6_8-WARNING_intra_sequence_bonded.md
+    7_0-GENSEC_PHASE5_PRIMER.md
+    7_1-GENSEC_PHASE5_BULK_KERNEL_PATCH.md
+    8_1-GENSEC_PHASE6_UNBONDED_EXTERNAL_PRIMER.md
+    8_2-GENSEC_PRESTRESS_SEQUENCE_PRIMER.md
+    8_3-GENSEC_PHASE6_HANDOFF_RECAP.md
+    8_4-GENSEC_NEXT_STEP_HANDOFF.md
+    9_0-GENSEC_PHASE7_SLS_PRIMER.md
+    GENSEC_C5_PHASE5_HANDOFF.md
+    GENSEC_COMPOSABILITY_HANDOFF.md
+    HOTFIX_F6_F7_SLS.md
+    HOTFIX_F6_SLS_EXTREME_FIBRE.md
+    TASK3_CLOSURE_AND_RESUME.md
+  patchers/
+    _patchkit.py
+    p00_measurement_blockers.py
+    p01_content_digest.py
+    p02_modulus_map.py
+    p03a_declared_domain.py
+    p03a_part1_base.py
+    p03a_part2_base2.py
+    p03a_part3_rheology.py
+    p03a_part4_guard.py
+    p03a_part5_yaml.py
+    p03a_part6_provenance.py
+    p12_ledger.py
+    run_p3_close.py
+    run_phase13_dump.py
+    run_phase14_cracking.py
+    run_phase15_memory.py
+    run_phase16_tendon.py
+    run_phase17_tools.py
+    run_phase18_scope.py
+    run_phase19_hull.py
+    run_phase20_axial.py
+    run_phase21_codes.py
+    run_phase22_staged.py
+    run_phase23_declared_reduction.py
+    run_phase24_declared_retrofit.py
+    _p3_wip/
+      edit.py
+      s04_datum_policy.py
+      s05_auto_datum.py
+      s05b_zone_rheology_a.py
+      s05b_zone_rheology_b.py
+      s06_posttension.py
+      s06_rest.py
+  src/
+    todo_postit.txt
+    gensec/
+      __init__.py
+      __main__.py
+      _about.py
+      _presets.py
+      _version.py
+      api.py
+      cli.py
+      io_yaml.py
+      server.py
+      tolerances.py
+      geometry/
+        __init__.py
+        fiber.py
+        geometry.py
+        primitives.py
+        properties.py
+        section.py
+      materials/
+        __init__.py
+        base.py
+        codes.py
+        concrete.py
+        ec2_bridge.py
+        ec2_properties.py
+        elastic.py
+        en10025_properties.py
+        prestress_properties.py
+        rheology.py
+        steel.py
+        tabulated.py
+        verification_limits.py
+      output/
+        __init__.py
+        _polydraw.py
+        export.py
+        geometry_plot.py
+        plots.py
+        report.py
+        summary.py
+        timeline_dump.py
+        timeline_projections.py
+      solver/
+        __init__.py
+        analysis.py
+        capacity.py
+        check.py
+        integrator.py
+        losses.py
+        posttension.py
+        prestress_ledger.py
+        prestress_transfer.py
+        section_state.py
+        sls.py
+        timeline.py
+        timeline_run.py
+  tests/
+    __init__.py
+    aci209_falsification.py
+    run_bulk_prestrain_validation_new.py
+    run_material_identity_falsification.py
+    run_p01_digest_validation.py
+    run_p02_modulus_validation.py
+    run_phase3_validation.py
+    run_phase4_yaml_validation.py
+    run_phase5_c5_validation.py
+    run_phase7_sls_validation.py
+    run_phase8_task1_validation.py
+    run_phase8_task2_validation.py
+    run_phase8_task3_validation.py
+    run_posttension_sequence_validation.py
+    run_posttension_shortening_validation.py
+    run_prestress_action_validation.py
+    run_prestress_uls_unbonded_validation.py
+    test_analysis.py
+    test_api.py
+    test_capacity_v2.py
+    test_check.py
+    test_infrastructure.py
+    test_materials.py
+    test_phase12_domain.py
+    test_phase12_ledger.py
+    test_phase12_p2.py
+    test_phase12_p3_closure.py
+    test_phase12_p3_red.py
+    test_phase13_dump.py
+    test_phase14_cracking.py
+    test_phase15_boltzmann.py
+    test_phase15_mechanical_strain.py
+    test_phase16_early_age.py
+    test_phase16_tendon_consumers.py
+    test_phase17_tools.py
+    test_phase18_scope.py
+    test_phase19_hull.py
+    test_phase20_axial.py
+    test_phase21_codes.py
+    test_phase22_intra_sequence.py
+    test_phase23_declared_reduction.py
+    test_phase24_retrofit.py
+    test_phase5_c5.py
+    test_phase7_sls.py
+    test_phase8_task1.py
+    test_phase8_task2.py
+    test_phase8_task3.py
+    test_posttension.py
+    test_prestress_transfer.py
+    test_prestress_uls_unbonded.py
+    test_properties.py
+    test_section_state.py
+    test_server.py
+    test_solver_biaxial.py
+    test_solver_uniaxial.py
+    test_v030_regressions.py
+    test_validate_prestress_phase1.py
+  tools/
+    datum_fingerprint.py
+    domain_fingerprint.py
+    element_class_baseline.txt
+    element_class_inventory.py
+    element_class_reasons.py
+    getattr_inventory.py
+    getattr_reasons.py
+    make_phase19_patcher.py
+    make_phase20_patcher.py
+    make_phase21_patcher.py
+    make_phase22_patcher.py
+    make_phase23_patcher.py
+    numeric_fingerprint.py
+    selfcheck_inventory.py
+    selfcheck_matrix.py

@@ -246,7 +246,7 @@ def test_equilibrium_and_sls_invariant():
       concrete is subtracted at the **section** strain — the hard
       correctness invariant.
     """
-    c = Concrete(fck=40)
+    c = Concrete(fck=40, gamma_c=1.5, long_term_reduction_factor=0.85)
     ps = PrestressingSteel(f_p01d=1600 / 1.15, sigma_ud=1860.0,
                            eps_ud=0.0315, Ep=195000.0)
     B, H = 400.0, 800.0

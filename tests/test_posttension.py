@@ -81,6 +81,27 @@ class LinearElastic:
     def tangent_array(self, eps):
         return np.full_like(np.asarray(eps, dtype=float), self.E)
 
+    def content_token(self):
+        r"""
+        Declared content of this law: the modulus and the strain limit.
+
+        A custom material takes part in the section identity only if
+        it says what it is made of.  This stub is duck-typed — it does
+        not subclass :class:`~gensec.materials.base.Material` — so no
+        token is inherited and the contract has to be met explicitly,
+        exactly as it would be by a user-supplied constitutive law.
+
+        Returns
+        -------
+        bytes
+        """
+        from gensec.materials.base import digest_bytes, encode_value
+        return digest_bytes(
+            encode_value("tests.test_posttension.LinearElastic"),
+            encode_value(float(self.E)),
+            encode_value(float(self._lim)),
+        )
+
 
 # ---------------------------------------------------------------------------
 #  Section fixtures
@@ -302,20 +323,36 @@ def test_input_guards():
         solve_posttension_sequence(bare, sigma_p0=[], Ep=EP)
 
 def test_intra_sequence_guards_raise():
+    r"""
+    The two undeclared-input guards, asserted by their **named** class.
+
+    Phase 24 moved both off ``NotImplementedError``: what they refuse is
+    an input nobody declared, not a physics GenSec cannot do, and the
+    CLI reads the difference — ``NotImplementedError`` prints "outside
+    GenSec's modelled scope", a false statement about a case that is
+    modelled the moment the numbers arrive.  Asserting the named classes
+    is stricter than asserting either base, and it does not go green on
+    an unrelated ``ValueError`` from three frames down.
+    """
+    import pytest
+    from gensec.solver.posttension import (IntraSequenceUndeclared,
+                                           PreexistingStateUndeclared)
+
     sec = _section([H / 2, H / 2 + 150.0, H / 2 - 150.0])   # 3 tendons
     sp0 = [SP0, SP0, SP0]
-    # subset order -> NotImplementedError (not a generic ValueError)
-    import pytest
-    with pytest.raises(NotImplementedError):
+    # A strict subset of `order`: a tendon with no declared role.
+    with pytest.raises(IntraSequenceUndeclared):
         solve_posttension_sequence(sec, sigma_p0=sp0, Ep=EP, order=[0, 1])
-    # declared pre-bonded tendon -> NotImplementedError
-    with pytest.raises(NotImplementedError):
+    # A bare index list: WHICH tendons are already grouted, not at what
+    # stress and not in what concrete.
+    with pytest.raises(PreexistingStateUndeclared):
         solve_posttension_sequence(sec, sigma_p0=sp0, Ep=EP,
                                    already_bonded=[0])
-    # out-of-range already_bonded -> ValueError
+    # Out of range is a use error and stays distinct from the
+    # declaration boundary, as it was before.
     with pytest.raises(ValueError):
         solve_posttension_sequence(sec, sigma_p0=sp0, Ep=EP,
-                                    already_bonded=[9])
+                                   already_bonded=[9])
 
 
 if __name__ == "__main__":          # pragma: no cover

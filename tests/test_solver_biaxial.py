@@ -27,7 +27,7 @@ class BiaxialTestBase(unittest.TestCase):
         self.fyd = 450.0 / 1.15
         self.Es = 200000.0
         self.eps_yd = self.fyd / self.Es
-        self.concrete = Concrete(fck=25.0)
+        self.concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.steel = Steel(fyk=450.0)
         A_bar = np.pi / 4 * 20**2
         self.sec = RectSection(
@@ -231,7 +231,7 @@ class TestAsymmetricSection(unittest.TestCase):
     """
 
     def setUp(self):
-        concrete = Concrete(fck=25.0)
+        concrete = Concrete(fck=25.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         steel = Steel(fyk=450.0)
         A_bar = np.pi / 4 * 20**2
         # Asymmetric: 3 bars on x=40, 1 bar on x=260

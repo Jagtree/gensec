@@ -25,7 +25,7 @@ slope of each linear segment.
 """
 
 import numpy as np
-from .base import Material
+from .base import Material, _class_token, digest_bytes, encode_value
 
 
 class TabulatedMaterial(Material):
@@ -75,6 +75,30 @@ class TabulatedMaterial(Material):
         de = np.diff(strains)
         self._slopes = ds / de           # shape (n_segments,)
         self._seg_bounds = strains       # breakpoints (n_points,)
+
+    def content_token(self) -> bytes:
+        r"""
+        Reproducible digest of the tabulated law.
+
+        Overrides the dataclass-field default of
+        :meth:`gensec.materials.base.Material.content_token`, which
+        this class cannot use: it is a plain class, so it has no
+        fields to walk.  The declared content is the curve itself —
+        the strain and stress arrays.  The segment slopes cached at
+        construction are functions of those two arrays and add no
+        discrimination; ``name`` is excluded here as everywhere.
+
+        Returns
+        -------
+        bytes
+            Digest of length
+            :data:`gensec.materials.base.DIGEST_SIZE`.
+        """
+        return digest_bytes(
+            _class_token(type(self)),
+            encode_value("strains"), encode_value(self._strains),
+            encode_value("stresses"), encode_value(self._stresses),
+        )
 
     @property
     def eps_min(self):

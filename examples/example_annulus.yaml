@@ -8,11 +8,23 @@
 #  to the curved boundary if needed.
 # ================================================================
 
+# The model's normative declaration. GenSec derives nothing without
+# it: f_ck is an input, the code is what turns it into a modulus, and
+# the two disagree by 33.9 % at C25. Declared once here; a material
+# may override it with its own 'code:', and 'code: custom' means the
+# input supplies every code-dependent value itself.
+code: ec2
+
 materials:
   concrete_1:
     type: concrete_ec2_gen1
     class: C35/45
 
+    ls: "F"
+    loadtype: "slow"
+    TypeConc: "R"
+    NA: "French"
+    time: 28
   steel_1:
     type: steel
     fyk: 500.0
@@ -27,7 +39,7 @@ section:
   params:
     D_ext: 1200
     D_int: 800
-    resolution: 64
+    segments_per_quadrant: 64
   bulk_material: concrete_1
   mesh_size: 25
   mesh_method: grid
@@ -66,3 +78,4 @@ output:
   generate_moment_curvature: false
   generate_polar_ductility: false
   generate_3d_moment_curvature: false
+# GENSEC-COMPLETE phase=37 utc=2026-09-11T05:30:50Z sha256=1badc313bf4f58506946e5ddf8bd52714a94435302086a980f91d6b8208dabd8 body_lines=80

@@ -49,7 +49,7 @@ V4   decompression probe: geometry and pass/fail flip across the
 V5   fail-loud guards (missing modulus, dead override, leaving
      elements, compound transition, invalid LinearElastic)
 V6   entering elements: staged attribution vs. total read
-V7   uncracked-basis flag semantics (D4)
+V7   no basis qualifier survives (Phase 27)
 V8   affine/fiber accumulator consistency (debug flag, all runs)
 V9   superposition sanity: two half increments == one increment
 V10  per-stage transformed properties (exact, tendon differential
@@ -103,7 +103,7 @@ def _check(label, ok, detail=""):
 
 
 def _build_section():
-    conc = Concrete(fck=35.0)
+    conc = Concrete(fck=35.0, gamma_c=1.5, long_term_reduction_factor=0.85)
     conc.name = "C35"
     st = Steel(fyk=450.0)
     st.name = "B450C"
@@ -244,7 +244,7 @@ def v1_transfer(sec, moduli):
         sec, [{"name": "transfer", "state": s0,
                "increment": (0.0, M0, 0.0)}],
         moduli=moduli, x_ref=XR, y_ref=YR,
-        debug_check_affine=True)
+        )
 
     # F6 / Option A: EN 1992-1-1 7.2 limits sigma_c at the EXTREME FIBRE
     # of the section, not at the centroid of the outermost row of a
@@ -304,7 +304,7 @@ def v2_v3_service_and_loss(sec, moduli):
          {"name": "service", "state": s1, "increment": (0, dM, 0)},
          {"name": "losses", "state": s2}],
         moduli=moduli, x_ref=XR, y_ref=YR,
-        debug_check_affine=True)
+        )
 
     y_bot = 0.0
 
@@ -406,7 +406,7 @@ def v4_decompression(sec, moduli):
             sec, [{"name": "t", "state": s0,
                    "increment": (0.0, M, 0.0), "limits": lim}],
             moduli=moduli, x_ref=XR, y_ref=YR,
-            debug_check_affine=True)
+            )
         dec = [c for c in res["stages"][0]["checks"]
                if c["name"].startswith("decompression")][0]
         verdicts[tag] = dec
@@ -416,19 +416,26 @@ def v4_decompression(sec, moduli):
                             else ("below", "above"))
     _check(f"V4 decompression passes {pass_side} M*",
            verdicts[pass_side]["passed"],
-           f"sigma_probe "
-           f"{verdicts[pass_side]['sigma_probe_MPa']:.4f}")
+           f"eps_probe "
+           f"{verdicts[pass_side]['value']:.6e}")
     _check(f"V4 decompression fails {fail_side} M*",
            not verdicts[fail_side]["passed"],
-           f"sigma_probe "
-           f"{verdicts[fail_side]['sigma_probe_MPa']:.4f}")
+           f"eps_probe "
+           f"{verdicts[fail_side]['value']:.6e}")
     _check("V4 probe geometry (tensile side of the tendon)",
            verdicts[fail_side]["probe_at"] == (XR, y_probe),
            f"probe at {verdicts[fail_side]['probe_at']}, "
            f"expected {(XR, y_probe)}")
-    _check("V4 probe stress magnitude at boundary",
-           abs(verdicts["above"]["sigma_probe_MPa"]) < 0.2
-           and abs(verdicts["below"]["sigma_probe_MPa"]) < 0.2)
+    # Phase 29: the record publishes the STRAIN the verdict is taken
+    # on, and publishes no stress beside it -- on a cracking law the
+    # two disagree past eps_ct.  The same statement, in strain: both
+    # sides of M* sit within 0.2 MPa of the decompression boundary.
+    _check("V4 probe strain magnitude at boundary",
+           abs(verdicts["above"]["value"]) < 0.2 / EC
+           and abs(verdicts["below"]["value"]) < 0.2 / EC)
+    _check("V4 no second number beside the verdict",
+           all("sigma_probe_MPa" not in verdicts[t]
+               for t in ("above", "below")))
 
 
 # ==================================================================
@@ -479,13 +486,15 @@ def v5_guards(sec, moduli):
     _raises(ValueError, lambda: LinearElastic(E=-1.0),
             "V5 LinearElastic(E<0) raises")
     _raises(ValueError,
-            lambda: StressLimits(sigma_c_comp=-3.0),
+            lambda: StressLimits(k_c=-3.0),
             "V5 StressLimits negative threshold raises")
     _raises(ValueError,
             lambda: ec2_stress_limits("transfer"),
             "V5 ec2_stress_limits without fck raises")
     _raises(ValueError,
-            lambda: ec2_stress_limits("transfer", fck=30.0, k9=1.0),
+            lambda: ec2_stress_limits(
+                "transfer", k9=1.0,
+                custom_zone_strengths={"base": {"f_ck": 30.0}}),
             "V5 ec2_stress_limits unknown override raises")
 
     # eps-only + loss path still healthy after the guard batch.
@@ -523,7 +532,7 @@ def v6_entering(sec, moduli):
         [{"name": "a", "state": s0, "increment": (0, M0, 0)},
          {"name": "b", "state": s1, "increment": (0, M1 - M0, 0)}],
         moduli=moduli, x_ref=XR, y_ref=YR,
-        debug_check_affine=True)
+        )
 
     u0 = _solve_u(sec, (0.0, M0), tendon_in=False, eps_pe=0.0)
     u1_hi = _solve_u(sec, (0.0, M1), tendon_in=True, eps_pe=EPS_PE)
@@ -547,31 +556,57 @@ def v6_entering(sec, moduli):
 
 
 # ==================================================================
-#  V7 — uncracked-basis flag (D4)
+#  V7 — no basis qualifier survives (Phase 27)
 # ==================================================================
 
 def v7_basis_flag(sec, moduli):
+    r"""
+    The uncracked-basis flag of Phase-7 D4 is gone, and so is every
+    field that hung off it.
+
+    It existed because a linear view with no tensile ceiling could
+    report a concrete carrying more tension than any concrete carries,
+    and the flag was the only thing that said so.  With the service law
+    in the view the state is unreachable, so the warning has outlived
+    its cause; a warning that leaves no correction lever teaches a
+    reader to ignore warnings.  A check now passes or it does not.
+
+    Phase 30 removed the last remnant.  Until then this function still
+    passed ``fct_eff=3.2`` into the limit set, to show that declaring
+    it changed nothing -- but a field that can be declared and is never
+    read is itself the defect, not the demonstration of one.  The
+    threshold is gone from ``StressLimits``; ``f_ct,eff`` is declared
+    on the concrete, where it is read.
+    """
     s0 = _state([1, 1, 1], [1, 1, 1], EPS_PE, 0)
-    lim = ec2_stress_limits("characteristic", fck=35.0, fyk=450.0,
-                            fpk=1860.0, fct_eff=3.2)
+    lim = ec2_stress_limits("characteristic", fyk=450.0,
+                            fpk=1860.0)
     res = verify_sls_staged(
         sec, [{"name": "big M", "state": s0,
                "increment": (0.0, 600.0e6, 0.0), "limits": lim}],
         moduli=moduli, x_ref=XR, y_ref=YR)
     st = res["stages"][0]
-    _check("V7 basis violated flag", st["uncracked_basis_violated"])
-    _check("V7 stage not verified", st["verified"] is False)
-    dep = [c for c in st["checks"] if not c.get("skipped")
-           and c["basis_dependent"]]
-    _check("V7 basis-dependent checks marked invalid",
-           all(c.get("basis_valid") is False for c in dep))
-    _check("V7 informative values retained",
-           all("value_MPa" in c or "sigma_probe_MPa" in c
-               for c in dep))
+    _check("V7 basis flag removed",
+           "uncracked_basis_violated" not in st
+           and "basis_checked" not in st)
+    live = [c for c in st["checks"] if not c.get("skipped")]
+    _check("V7 checks present", bool(live))
+    _check("V7 no basis qualifier on any check",
+           all("basis_dependent" not in c and "basis_valid" not in c
+               for c in live))
+    # Phase 29: a capacity-bearing check carries value_MPa; the one
+    # check with no capacity -- decompression -- carries "value", a
+    # strain.  Both are magnitudes; neither is a stress reported
+    # beside a verdict taken on something else.
+    _check("V7 every check carries its number",
+           all("value_MPa" in c or "value" in c for c in live))
+    _check("V7 only decompression carries no eta",
+           all(("eta" in c) == (not c["name"].startswith(
+               "decompression")) for c in live))
 
     # Member-level unbonded check is basis-independent.
-    lim2 = ec2_stress_limits("characteristic", fck=35.0,
-                             fpk=1860.0, fct_eff=3.2)
+    lim2 = ec2_stress_limits("characteristic",
+                             fpk=1860.0)
     res2 = verify_sls_staged(
         sec, [{"name": "u", "state": s0,
                "increment": (0.0, 600.0e6, 0.0), "limits": lim2,
@@ -581,7 +616,8 @@ def v7_basis_flag(sec, moduli):
           if c["name"] == "tendon_stress[T_ext]"][0]
     _check("V7 unbonded member-level check present",
            ub["provenance"] == "member_level" and ub["passed"]
-           and "basis_valid" not in ub)
+           and "basis_valid" not in ub
+           and "basis_dependent" not in ub)
 
 
 # ==================================================================
@@ -634,10 +670,16 @@ def v10_transformed(sec, moduli):
     modmap = resolve_sls_moduli(sec, moduli)
     from gensec.solver.section_state import materialize_view
     vw = sls_view(materialize_view(sec, s0), modmap)
+    # Since Phase 27 the view carries the materials the map resolved.
+    # The bulk zone is LinearElastic here only because ``moduli``
+    # declares a number, and a number declares a straight line; the
+    # elements are handed through unchanged, so the view holds the very
+    # objects the section declared.  What is checked is that the base
+    # section is not mutated, which was always the point.
     _check("V10 sls_view leaves base materials untouched",
            isinstance(sec.bulk_material, Concrete)
            and isinstance(vw.bulk_material, LinearElastic)
-           and sec.rebars[0].material is not vw.rebars[0].material)
+           and sec.rebars[0].material is vw.rebars[0].material)
 
 
 # ==================================================================
@@ -672,3 +714,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+# GENSEC-COMPLETE phase=32 utc=2026-09-05T13:56:13Z sha256=9c905874022acdca2f66de0098cce4e2570aa9a96435cc7de5e3a7ebccb9e179 body_lines=716

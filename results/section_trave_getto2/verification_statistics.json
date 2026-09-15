@@ -1,0 +1,29 @@
+{
+  "demands": {
+    "n_total": 34,
+    "n_verified": 18,
+    "n_fail": 16,
+    "eta_max": 1.747,
+    "eta_mean": 1.2360735294117646,
+    "eta_p95": 1.740305,
+    "eta_p99": 1.747,
+    "eta_median": 0.9741,
+    "governing_name": "SLV_02",
+    "governing_rank": 1,
+    "all_verified": false
+  },
+  "combinations": {
+    "n_total": 20,
+    "n_verified": 20,
+    "n_fail": 0,
+    "eta_max": 0.9247,
+    "eta_mean": 0.91478,
+    "eta_p95": 0.9247,
+    "eta_p99": 0.9247,
+    "eta_median": 0.91345,
+    "governing_name": "SLE_08_car",
+    "governing_rank": 1,
+    "all_verified": true
+  },
+  "all_verified": false
+}

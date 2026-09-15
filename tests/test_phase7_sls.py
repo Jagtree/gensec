@@ -97,7 +97,7 @@ class _SLSCaseBase(unittest.TestCase):
 
     @staticmethod
     def _build_section():
-        conc = Concrete(fck=35.0)
+        conc = Concrete(fck=35.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         conc.name = "C35"
         st = Steel(fyk=450.0)
         st.name = "B450C"
@@ -179,7 +179,6 @@ class _SLSCaseBase(unittest.TestCase):
         kw.setdefault("moduli", self.moduli)
         kw.setdefault("x_ref", XR)
         kw.setdefault("y_ref", YR)
-        kw.setdefault("debug_check_affine", True)
         return verify_sls_staged(self.sec, stages, **kw)
 
 
@@ -409,8 +408,11 @@ class TestDecompression(_SLSCaseBase):
         self.assertFalse(verdicts[fail_side]["passed"])
         self.assertEqual(verdicts[fail_side]["probe_at"],
                          (XR, y_probe))
+        # Phase 29: the magnitude is the strain, and no stress is
+        # published beside it.  Same statement, in strain.
         self.assertLess(
-            abs(verdicts[fail_side]["sigma_probe_MPa"]), 0.2)
+            abs(verdicts[fail_side]["value"]), 0.2 / EC)
+        self.assertNotIn("sigma_probe_MPa", verdicts[fail_side])
 
 
 # ==================================================================
@@ -419,27 +421,43 @@ class TestDecompression(_SLSCaseBase):
 
 class TestBasisFlagAndChecks(_SLSCaseBase):
 
-    def test_basis_violation_flags_and_keeps_values(self):
+    def test_no_basis_qualifier_survives(self):
+        r"""
+        Phase 27 removed the uncracked-basis flag and every field that
+        depended on it.
+
+        The flag existed because a linear view with no tensile ceiling
+        could report a concrete carrying more tension than any concrete
+        carries; it was the only thing that said so.  With the service
+        law in the view that state is unreachable, so the warning has
+        outlived its cause.  A check now passes or it does not: there is
+        no third state in which a value is reported and simultaneously
+        disowned, and no field whose only possible value would be a lie
+        about what was checked.
+        """
         s0 = self._state([1, 1, 1], [1, 1, 1], EPS_PE, 0)
-        lim = ec2_stress_limits("characteristic", fck=35.0,
-                                fyk=450.0, fpk=1860.0, fct_eff=3.2)
+        # Phase 30: fct_eff is refused here by name.  It used to be
+        # passed to show that declaring it changed nothing, which was
+        # the defect wearing the costume of its own demonstration.
+        lim = ec2_stress_limits("characteristic",
+                                fyk=450.0, fpk=1860.0)
         res = self._run([{"name": "big", "state": s0,
                           "increment": (0.0, 600.0e6, 0.0),
                           "limits": lim}])
         st = res["stages"][0]
-        self.assertTrue(st["uncracked_basis_violated"])
-        self.assertFalse(st["verified"])
-        dep = [c for c in st["checks"] if not c.get("skipped")
-               and c["basis_dependent"]]
-        self.assertTrue(dep)
-        for c in dep:
-            self.assertIs(c.get("basis_valid"), False)
-            self.assertTrue("value_MPa" in c
-                            or "sigma_probe_MPa" in c)
+        for gone in ("uncracked_basis_violated", "basis_checked"):
+            self.assertNotIn(gone, st)
+        live = [c for c in st["checks"] if not c.get("skipped")]
+        self.assertTrue(live)
+        for c in live:
+            self.assertNotIn("basis_dependent", c)
+            self.assertNotIn("basis_valid", c)
+            self.assertIn("passed", c)
+            self.assertTrue("value_MPa" in c or "value" in c)
 
     def test_unbonded_member_level_check(self):
         s0 = self._state([1, 1, 1], [1, 1, 1], EPS_PE, 0)
-        lim = ec2_stress_limits("characteristic", fck=35.0,
+        lim = ec2_stress_limits("characteristic",
                                 fpk=1860.0)
         res = self._run([{"name": "u", "state": s0,
                           "limits": lim,
@@ -447,12 +465,14 @@ class TestBasisFlagAndChecks(_SLSCaseBase):
         ub = [c for c in res["stages"][0]["checks"]
               if c["name"] == "tendon_stress[T_ext]"][0]
         self.assertEqual(ub["provenance"], "member_level")
-        self.assertFalse(ub["basis_dependent"])
+        self.assertNotIn("basis_dependent", ub)
         self.assertTrue(ub["passed"])
 
     def test_missing_limits_reported_as_skipped(self):
         s0 = self._state([1, 1, 1], [1, 1, 1], EPS_PE, 0)
-        lim = ec2_stress_limits("transfer", fck=25.0)
+        lim = ec2_stress_limits(
+            "transfer",
+            custom_zone_strengths={"base": {"f_ck": 25.0}})
         res = self._run([{"name": "t", "state": s0,
                           "limits": lim}])
         names = {c["name"]: c for c in res["stages"][0]["checks"]}
@@ -505,15 +525,17 @@ class TestGuards(_SLSCaseBase):
 
     def test_stress_limits_validation(self):
         with self.assertRaises(ValueError):
-            StressLimits(sigma_c_comp=-3.0)
+            StressLimits(k_c=-3.0)
         with self.assertRaises(ValueError):
             StressLimits(c_dec=-1.0)
         with self.assertRaises(ValueError):
             ec2_stress_limits("transfer")
         with self.assertRaises(ValueError):
-            ec2_stress_limits("transfer", fck=30.0, k9=1.0)
+            ec2_stress_limits(
+                "transfer", k9=1.0,
+                custom_zone_strengths={"base": {"f_ck": 30.0}})
         with self.assertRaises(ValueError):
-            ec2_stress_limits("nope", fck=30.0)
+            ec2_stress_limits("nope")
 
 
 # ==================================================================
@@ -523,16 +545,26 @@ class TestGuards(_SLSCaseBase):
 class TestViewAndProperties(_SLSCaseBase):
 
     def test_sls_view_does_not_mutate_base(self):
+        r"""
+        The view carries the materials the map resolved, and the base
+        section is left alone.
+
+        Since Phase 27 the bulk zone gets ``LinearElastic`` here only
+        because ``self.moduli`` declares a **number**, and a number
+        declares a straight line.  The element materials are no longer
+        replaced at all: reinforcement and strand are handed through
+        unchanged, so the view holds the very objects the section
+        declared rather than substituted copies of them.
+        """
         s0 = self._state([1, 1, 1], [1, 1, 1], EPS_PE, 0)
         modmap = resolve_sls_moduli(self.sec, self.moduli)
         vw = sls_view(materialize_view(self.sec, s0), modmap)
         self.assertIsInstance(self.sec.bulk_material, Concrete)
         self.assertIsInstance(vw.bulk_material, LinearElastic)
-        self.assertIsNot(self.sec.rebars[0].material,
-                         vw.rebars[0].material)
-        self.assertIsInstance(vw.tendons[0].material, LinearElastic)
-        # Identity grouping preserved: both rebar layers share one
-        # substituted instance.
+        self.assertIs(self.sec.rebars[0].material,
+                      vw.rebars[0].material)
+        self.assertIs(self.sec.tendons[0].material,
+                      vw.tendons[0].material)
         self.assertIs(vw.rebars[0].material, vw.rebars[1].material)
 
     def test_transformed_properties_include_tendon(self):
@@ -553,10 +585,15 @@ class TestViewAndProperties(_SLSCaseBase):
 
     def test_intrinsic_steel_moduli_autoresolve(self):
         modmap = resolve_sls_moduli(self.sec, self.moduli)
-        st_mat = self.sec.rebars[0].material
-        ps_mat = self.sec.tendons[0].material
-        self.assertEqual(modmap[id(st_mat)][1], ES)
-        self.assertEqual(modmap[id(ps_mat)][1], EP)
+        # 12_0d S1: the accessor moved to the slot index; the asserted
+        # values did not move.  Union order is rebars + tendons.
+        n_reb = len(self.sec.rebars)
+        # The map now carries materials; the modulus a homogenisation
+        # is written on is derived from them, and Es / Ep are still the
+        # numbers that come out.
+        self.assertEqual(float(modmap.E_elem[0]), ES)
+        self.assertEqual(float(modmap.E_elem[n_reb]), EP)
+        self.assertIs(modmap.elem[0], self.sec.rebars[0].material)
 
 
 # ==================================================================
@@ -575,18 +612,18 @@ class TestHygieneEdits(unittest.TestCase):
         # hasattr()/getattr(mat, "E", default) probing idioms (used
         # e.g. in posttension.py) degrade gracefully instead of
         # exploding — ValueError would propagate through them.
-        c = Concrete(fck=35.0)
+        c = Concrete(fck=35.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         with self.assertRaises(AttributeError):
             _ = c.E
         self.assertFalse(hasattr(c, "E"))
         self.assertIsNone(getattr(c, "E", None))
-        c2 = Concrete(fck=35.0, fct=3.2, Ec=34000.0)
+        c2 = Concrete(fck=35.0, fct=3.2, Ec=34000.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         self.assertEqual(c2.E, 34000.0)
 
     def test_compute_ideal_properties_repaired(self):
         # Finding F0: this call used to die with AttributeError for
         # Steel + Concrete sections.
-        c = Concrete(fck=35.0, fct=3.2, Ec=34000.0)
+        c = Concrete(fck=35.0, fct=3.2, Ec=34000.0, gamma_c=1.5, long_term_reduction_factor=0.85)
         s = Steel(fyk=450.0)
         sec = RectSection(
             300.0, 500.0, c,
@@ -599,3 +636,4 @@ class TestHygieneEdits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+# GENSEC-COMPLETE phase=32 utc=2026-09-05T13:56:13Z sha256=3776255a35be8130fad4931e36649df8fee54b13ebab138435845df504868022 body_lines=638
