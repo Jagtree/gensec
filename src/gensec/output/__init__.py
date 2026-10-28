@@ -52,6 +52,8 @@ from .geometry_plot import (
     write_geometry_report,
 )
 
+from .state_plots import export_demand_state_plots
+
 from .summary import (
     governing_eta,
     rank_results,
@@ -93,6 +95,7 @@ __all__ = [
     "print_envelope_summary",
     "build_verification_summary",
     "select_demands_for_fiber_details",
+    "export_demand_state_plots",
     "plot_section_properties",
     "print_section_properties",
     "write_section_report",

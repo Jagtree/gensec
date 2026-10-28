@@ -33,6 +33,15 @@ any constitutive law.
   ultimate) using a span-bound curvature window valid for both
   compression- and tension-controlled failures.
 - **Polar ductility** diagram at fixed N.
+- **Prestressed and composite sections** — pre- and post-tensioning
+  read from the construction history, staged casting and grouting,
+  elastic-shortening losses per jack, time-dependent losses (creep,
+  shrinkage, relaxation) by a sectional age-adjusted method, SLS stresses
+  with cracking and decompression, retrofit of an existing member.
+  Shear, torsion, fatigue, fire, second-order effects, anchorage zones
+  and crack width are **not** covered; member-level quantities
+  (friction, unbonded tendon strain, hyperstatic effects) are declared
+  inputs.  See the *Prestressed sections* page of the documentation.
 - **Section properties** — homogenized area, centroid, principal axes,
   elastic moduli (W), plastic moduli (Z via PNA bisection), kern.
 - **REST API** — FastAPI server with `/api/run`, `/api/analyze`,

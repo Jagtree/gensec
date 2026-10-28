@@ -390,6 +390,85 @@ class DomainChecker:
 
         return 1.0 / t_bnd
 
+    def boundary_point_along_ray(self, N, Mx, My=0.0):
+        r"""
+        Point where the ray from the origin through a demand leaves the hull.
+
+        The ray is cast from the origin :math:`\mathbf{B} = \mathbf{0}`
+        through the demand :math:`\mathbf{T}`.  With :math:`\mathbf{R}`
+        the exit point of that ray from the hull,
+
+        .. math::
+
+            \eta = \frac{|\mathbf{T}|}{|\mathbf{R}|}
+            \qquad\Longrightarrow\qquad
+            \mathbf{R} = \frac{\mathbf{T}}{\eta}.
+
+        The normalisation applied by :meth:`_to_norm` is a diagonal
+        linear map that fixes the origin, so it rescales
+        :math:`\mathbf{T}` and :math:`\mathbf{R}` by the same factors
+        and the ratio :math:`\eta` -- hence the relation above -- holds
+        unchanged in the raw :math:`(N, M_x, M_y)` coordinates.
+
+        Parameters
+        ----------
+        N : float
+            Axial force [N].
+        Mx : float
+            Bending moment about *x* [N·mm].
+        My : float, optional
+            Bending moment about *y* [N·mm].  Ignored by a 2-D hull
+            (uniaxial domain); it is then returned **unchanged**, not
+            rescaled, because the hull carries no information about it.
+
+        Returns
+        -------
+        dict
+            ``{"N", "Mx", "My", "eta"}``: the boundary point in raw
+            units [N, N·mm] and the ray utilisation :math:`\eta` of
+            the demand.  Valid for a demand inside the hull as well
+            (:math:`\eta \le 1`, so :math:`\mathbf{R}` lies beyond it).
+
+        Raises
+        ------
+        ValueError
+            If the origin is not inside the hull: the ray then has an
+            entry and an exit, :meth:`_ray_eta` returns the nearest
+            positive crossing, and that is not necessarily the exit.
+            Also if the demand coincides with the origin (direction
+            undefined) or if the ray meets no face (:math:`\eta`
+            non-finite).  Nothing is substituted in any of these cases.
+
+        Notes
+        -----
+        The hull is the convex envelope of the sampled domain.  A point
+        on its boundary is therefore **not guaranteed** to be an
+        attainable strain state of the section: where the true domain
+        is not convex, or is coarsely sampled, the hull lies outside
+        it.  Callers that need a strain state at :math:`\mathbf{R}`
+        must check that the solver converges there and must report it
+        when it does not.
+        """
+        if not self.is_inside(0.0, 0.0, 0.0):
+            raise ValueError(
+                "boundary_point_along_ray: the origin is not inside the "
+                "resistance hull, so the exit point of a ray cast from "
+                "it is not defined by the nearest-crossing rule.")
+        p = self._to_norm(self._make_point(N, Mx, My))
+        eta = self._ray_eta(np.zeros_like(p), p)
+        if eta == 0.0:
+            raise ValueError(
+                "boundary_point_along_ray: the demand coincides with the "
+                "origin; the ray direction is undefined.")
+        if not np.isfinite(eta):
+            raise ValueError(
+                "boundary_point_along_ray: the ray through the demand "
+                "meets no face of the hull (eta is not finite).")
+        R_N, R_Mx = N / eta, Mx / eta
+        R_My = My / eta if self.ndim == 3 else float(My)
+        return {"N": float(R_N), "Mx": float(R_Mx),
+                "My": float(R_My), "eta": float(eta)}
+
     # ------------------------------------------------------------------
     #  Public η methods
     #

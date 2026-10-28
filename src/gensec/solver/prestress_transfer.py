@@ -88,11 +88,19 @@ pure-axial fast path (see the note in
 
 Scope
 -----
-This phase models the *immediate elastic* loss only.  Anchorage set,
-friction, relaxation and time-dependent (creep/shrinkage) losses are
-deferred; the constitutive law and prestrain offset are the only inputs,
-so a later phase can fold an additional prestrain decrement into
-``eps_pe`` without touching this driver.
+This driver models the *immediate elastic* loss at release, and nothing
+else.  The other losses are handled elsewhere or are not GenSec's:
+
+- **Anchorage set and friction** are member-level quantities (draw-in
+  length, cable profile, wobble).  GenSec does not compute them; the
+  jacking strain in ``eps_pe`` must already be net of them.
+- **Creep, shrinkage and relaxation** are computed by the age-adjusted
+  container :mod:`gensec.solver.losses` on the ``interval`` events of a
+  construction timeline (:mod:`gensec.solver.timeline`), from the state
+  this driver produces.  They are not computed here.
+
+See :doc:`/theory/prestress_scope` for the full boundary of the
+prestress model.
 
 References
 ----------

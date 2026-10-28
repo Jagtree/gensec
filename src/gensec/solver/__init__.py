@@ -21,7 +21,9 @@ Solver subpackage.
 
 Provides the fiber integrator (:class:`FiberSolver`), the N-M
 interaction diagram generator (:class:`NMDiagram`), and the demand
-verification module (:class:`DemandChecker`).
+verification module (:class:`VerificationEngine`, with the resistance
+domain :class:`DomainChecker` and the fixed-N contour
+:class:`MxMyContour`).
 """
 
 from .integrator import FiberSolver

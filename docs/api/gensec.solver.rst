@@ -15,8 +15,19 @@ This is the computational core of GenSec.  The solver chain is:
 2. :class:`~gensec.solver.capacity.NMDiagram` — generates the
    :math:`N\text{-}M` diagram (uniaxial) or :math:`N\text{-}M_x\text{-}M_y`
    surface (biaxial) by scanning ultimate strain configurations.
-3. :class:`~gensec.solver.check.DemandChecker` — verifies load demands
-   against the resistance domain via convex-hull ray-casting.
+3. :class:`~gensec.solver.check.VerificationEngine` — verifies load
+   demands against the resistance domain
+   (:class:`~gensec.solver.check.DomainChecker`, convex-hull
+   ray-casting).
+
+The prestress chain sits on top of it: the section state and the
+staged domains (:mod:`~gensec.solver.section_state`), the transfer and
+stressing drivers (:mod:`~gensec.solver.prestress_transfer`,
+:mod:`~gensec.solver.posttension`), the construction timeline
+(:mod:`~gensec.solver.timeline`), the time-dependent losses
+(:mod:`~gensec.solver.losses`) and the serviceability stresses
+(:mod:`~gensec.solver.sls`).  What that chain models and where it stops
+is stated in :doc:`/theory/prestress_scope`.
 
 
 Fiber integrator and equilibrium solver
@@ -69,6 +80,41 @@ Post-Tension sequence solver
 -----------------------------
 
 .. automodule:: gensec.solver.posttension
+   :members:
+   :show-inheritance:
+
+Construction timeline
+---------------------
+
+.. automodule:: gensec.solver.timeline
+   :members:
+   :show-inheritance:
+
+Timeline and SLS drivers
+------------------------
+
+.. automodule:: gensec.solver.timeline_run
+   :members:
+   :show-inheritance:
+
+Time-dependent losses (AAEM)
+----------------------------
+
+.. automodule:: gensec.solver.losses
+   :members:
+   :show-inheritance:
+
+Prestress ledger
+----------------
+
+.. automodule:: gensec.solver.prestress_ledger
+   :members:
+   :show-inheritance:
+
+SLS stress verification
+-----------------------
+
+.. automodule:: gensec.solver.sls
    :members:
    :show-inheritance:
 

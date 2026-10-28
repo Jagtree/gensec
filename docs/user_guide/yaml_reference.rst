@@ -24,6 +24,152 @@ block controls which post-processing artefacts are generated.
    right command — you don't need to touch the ``output`` block.
 
 
+``code`` — the normative declaration
+------------------------------------
+
+A GenSec model declares **which structural code it is verified to**, and
+everything code-dependent is derived from that one key.  The alternative
+is to declare that a material is ``custom``, in which case GenSec
+derives nothing for it and the input supplies everything.  There is no
+third option, and in particular no implicit one.
+
+.. code-block:: yaml
+
+   code: aci318-19          # ec2 | ntc18 | aci318-19 | custom
+
+   materials:
+     conc: {type: concrete_ec2_gen1_custom, fck: 28.0}
+
+Why this is a declaration and not a preference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The same characteristic strength gives different derived quantities
+under different codes.  For the conventional secant modulus of
+concrete:
+
+.. math::
+
+   E_{cm} = 22\,000\left(\frac{f_{ck} + 8}{10}\right)^{0.3}
+   \qquad \text{EN 1992-1-1:2004 §3.1.3, Table 3.1}
+
+.. math::
+
+   E_{c} = 4700\sqrt{f'_{c}}
+   \qquad \text{ACI 318-19 §19.2.2.1, normalweight, SI}
+
++---------------------+--------------------+--------------------+-----------+
+| :math:`f_{ck}` [MPa]| EN 1992-1-1 [MPa]  | ACI 318-19 [MPa]   | gap       |
++=====================+====================+====================+===========+
+| 25                  | 31 475.8           | 23 500.0           | +33.9 %   |
++---------------------+--------------------+--------------------+-----------+
+| 40                  | 35 220.5           | 29 725.4           | +18.5 %   |
++---------------------+--------------------+--------------------+-----------+
+| 60                  | 39 099.9           | 36 406.0           | +7.4 %    |
++---------------------+--------------------+--------------------+-----------+
+
+:math:`f_{ck}` is an **input**; the code is what turns it into a
+modulus.  GenSec will not choose one on your behalf.
+
+How the code is resolved
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+There are exactly **two** sources, and no default beneath them:
+
+1. ``code:`` **on the material**.  One material under another code is a
+   legitimate model — a precast beam under EN 1992-1-1 carrying an
+   ACI 318-19 topping — and each element then answers under its own.
+2. ``code:`` **at the top level** of the input file.  The ordinary
+   case: declared once for the whole model.
+
+A material with neither is **undeclared**, and
+:func:`~gensec.io_yaml.load_yaml` **refuses to build the model**,
+naming the material.  The refusal is at the door rather than at the
+first quantity that needs a modulus: a deferred refusal would surface
+halfway through an analysis, attached to whatever happened to ask
+first.
+
+.. important::
+
+   The **material type is not a declaration.**  ``type:
+   concrete_ec2_gen1`` names a *constitutive shape* — a curve — and
+   not a verification code.  Which partial factors, which conventional
+   modulus and which creep law accompany that curve are separate
+   facts, and a model may legitimately pair it with a code that did
+   not invent it.  Reading the code out of a concrete type name would
+   also be a rule that only works for the sections somebody happened
+   to think of first: nothing says a GenSec section is concrete at
+   all.
+
+   Inference from the type was tried, and removed for those two
+   reasons.  If you want the Eurocode, write ``code: ec2``.
+
+Accepted values
+~~~~~~~~~~~~~~~~
+
++----------------+----------------------------------------------------+
+| Value          | Meaning                                            |
++================+====================================================+
+| ``ec2``        | EN 1992-1-1:2004.  Aliases: ``en1992``,            |
+|                | ``en1992-1-1``, ``eurocode2``, ``eurocode``.       |
++----------------+----------------------------------------------------+
+| ``ntc18``      | NTC 2018 (D.M. 17/01/2018).  For the conventional  |
+|                | modulus and for creep and shrinkage §11.2.10.3     |
+|                | adopts the Eurocode formulation, so the **value**  |
+|                | is identical and only the **citation** differs.    |
+|                | Aliases: ``ntc``, ``ntc2018``, ``ntc-18``.         |
++----------------+----------------------------------------------------+
+| ``aci318-19``  | ACI 318-19.  Aliases: ``aci``, ``aci318``,         |
+|                | ``aci-318``, ``aci318-19m``.                       |
++----------------+----------------------------------------------------+
+| ``custom``     | The explicit opt-out: GenSec derives nothing and   |
+|                | the input supplies every code-dependent value.     |
+|                | Aliases: ``none``, ``user``.                       |
++----------------+----------------------------------------------------+
+
+An unrecognised value is an **error**, never a fallback.  A mistyped
+code name that silently became the Eurocode is precisely the failure
+this declaration exists to prevent.
+
+There is **no default anywhere**: not for a missing ``code:``, not for
+a material type that happens to name one, and not beneath a timeline.
+Every input file must declare.
+
+.. note::
+
+   ``custom`` and *undeclared* both decline to derive, and they are
+   deliberately distinct.  ``custom`` means *you said you would supply
+   this and you did not*; undeclared means *you never said which code
+   to read it under*.  The remedy differs, so the messages differ.
+
+What a code governs
+~~~~~~~~~~~~~~~~~~~~
+
+* the conventional secant modulus of every concrete, with the citation
+  that appears in reports;
+* the creep, shrinkage and relaxation provider, when the model declares
+  a time axis.
+
+.. warning::
+
+   The ACI 209R-92 rheological provider is a **declared empty slot** in
+   this build.  Asking for creep or shrinkage under ``code: aci318-19``
+   raises and names the omission rather than falling back to the
+   Eurocode's.  Supply one explicitly with
+   ``ConstructionTimeline(rheology=...)``, or keep the model
+   time-independent.
+
+Adding a code
+~~~~~~~~~~~~~~
+
+Subclass :class:`~gensec.materials.codes.NormativeCode` and call
+:func:`~gensec.materials.codes.register_code`.  Nothing in the
+resolver, the solver or the loader changes — which is the property that
+makes normative agnosticism checkable rather than aspirational.
+
+See ``examples/example_aci318.yaml`` for a complete model under a
+non-Eurocode declaration.
+
+
 ``materials`` block
 -------------------
 
@@ -89,15 +235,15 @@ chosen tensile strength (:math:`f_{ctd}`, :math:`f_{ctm}`, or
 to the :class:`~gensec.materials.Concrete` constructor.  The ``tension_fct``
 field controls which value is used:
 
-+---------------+-----------------------------------------------------------+
-| ``tension_fct``| Tensile strength used                                    |
-+===============+===========================================================+
-| ``fctd``      | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c` |
-+---------------+-----------------------------------------------------------+
-| ``fctm``      | :math:`f_{ctm}` (mean tensile strength)                   |
-+---------------+-----------------------------------------------------------+
-| ``fctk``      | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)       |
-+---------------+-----------------------------------------------------------+
++-----------------+-----------------------------------------------------------+
+| ``tension_fct`` | Tensile strength used                                     |
++=================+===========================================================+
+| ``fctd``        | :math:`f_{ctd,0.05} = \alpha_{ct}\,f_{ctk,0.05}/\gamma_c` |
++-----------------+-----------------------------------------------------------+
+| ``fctm``        | :math:`f_{ctm}` (mean tensile strength)                   |
++-----------------+-----------------------------------------------------------+
+| ``fctk``        | :math:`f_{ctk,0.05}` (characteristic, 5 % fractile)       |
++-----------------+-----------------------------------------------------------+
 
 .. note::
 
@@ -229,9 +375,9 @@ Available shapes and their parameters:
 +=================+======================================================+
 | ``rect``        | ``B``, ``H``                                         |
 +-----------------+------------------------------------------------------+
-| ``circle``      | ``D`` (diameter), ``resolution`` (polygon vertices)  |
+| ``circle``      | ``D``, ``segments_per_quadrant`` (4n vertices)       |
 +-----------------+------------------------------------------------------+
-| ``annulus``     | ``D_ext``, ``D_int``, ``resolution``                 |
+| ``annulus``     | ``D_ext``, ``D_int``, ``segments_per_quadrant``      |
 +-----------------+------------------------------------------------------+
 | ``tee``         | ``bf``, ``hf``, ``bw``, ``hw``                       |
 +-----------------+------------------------------------------------------+
@@ -400,6 +546,16 @@ default to the values shown below.
      n_levels_mode: demands     # "demands", "auto", or "explicit" (default: "demands")
      # n_levels_count: 10       # for "auto" mode
      # n_levels_values: [-3000, -1500, 0]  # for "explicit" mode [kN]
+
+     # ── Section/state figure rendering ──
+     show_rebar_labels: true    # per-rebar name/value annotations (default: true)
+
+``show_rebar_labels`` controls the per-rebar text annotation (index,
+plus strain/stress value where applicable) drawn on
+``section_geometry.png``, ``section_<demand>.png`` and
+``state_<demand>.png``.  The rebar markers themselves are always
+drawn; set to ``false`` for heavily reinforced sections where the
+labels overlap and make the figure unreadable.
 
 Utilization metrics
 ~~~~~~~~~~~~~~~~~~~

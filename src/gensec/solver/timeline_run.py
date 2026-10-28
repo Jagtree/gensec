@@ -309,9 +309,9 @@ def run_sls(data, *, n_points=40, biaxial=None, gamma_P_provider=None):
         ``{"name", "skipped": True, "reason": str}``
             the combination declared no ``sls`` block, or
 
-        ``{"name", "points": {point: <verify_sls_staged result>},
-        "verified": bool}``
-            one result per anchor point (``'-'`` when unanchored).
+        ``{"name", "points": {point: result}, "verified": bool}``
+            one :func:`~gensec.solver.sls.verify_sls_staged` result per
+            anchor point (``'-'`` when unanchored).
 
         ``verified`` at the top level is the conjunction over the
         combinations that **were** requested; a document in which none

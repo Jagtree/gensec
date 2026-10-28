@@ -1,0 +1,16 @@
+{
+  "demands": {
+    "n_total": 1,
+    "n_verified": 1,
+    "n_fail": 0,
+    "eta_max": 0.9958,
+    "eta_mean": 0.9958,
+    "eta_p95": 0.9958,
+    "eta_p99": 0.9958,
+    "eta_median": 0.9958,
+    "governing_name": 1,
+    "governing_rank": 1,
+    "all_verified": true
+  },
+  "all_verified": true
+}

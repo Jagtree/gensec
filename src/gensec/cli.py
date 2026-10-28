@@ -56,6 +56,7 @@ from .output import (
     export_moment_curvature_json, export_moment_curvature_csv,
     export_mx_my_json, export_mx_my_csv,
 )
+from .output.state_plots import export_demand_state_plots
 from .output.summary import (
     print_demand_summary,
     print_combination_summary,
@@ -257,6 +258,9 @@ def _run(args):
     verification_top_k = int(output_opts.get("verification_top_k", 10))
     fiber_details_top_k = int(output_opts.get("fiber_details_top_k", 5))
 
+    # Per-rebar annotation density on section/state figures.
+    show_rebar_labels = output_opts.get("show_rebar_labels", True)
+
     print_section_info(section)
 
     # --- Solver ---
@@ -439,6 +443,7 @@ def _run(args):
     # "not available" are different lines in the report.
     from .solver.timeline_run import run_sls
     from .output.report import print_sls_results
+    from .output.sls_state_plots import export_sls_state_plots
     sls_out = run_sls(data, n_points=args.n_points,
                       biaxial=(nm_3d is not None))
     if sls_out["combinations"]:
@@ -454,6 +459,11 @@ def _run(args):
                 _at = "" if _pt == "-" else f" @ {_pt}"
                 print(f"\n  Combination '{_rec['name']}'{_at}")
                 print_sls_results(_res)
+
+        # Section/state maps for every checked stage, mirroring the
+        # ULS demand plots below -- see gensec.output.sls_state_plots.
+        export_sls_state_plots(sls_out, outdir,
+                               show_rebar_labels=show_rebar_labels)
 
     # --- Unified verification export (with statistics) ---
     if demand_results or combination_results or envelope_results:
@@ -475,7 +485,8 @@ def _run(args):
     demand_plot = []
     if demands:
         # Geometry-only section drawing.
-        fig_geom = plot_section(section, title="Section geometry")
+        fig_geom = plot_section(section, title="Section geometry",
+                                show_rebar_labels=show_rebar_labels)
         p = os.path.join(outdir, "section_geometry.png")
         fig_geom.savefig(p, dpi=150)
         plt.close(fig_geom)
@@ -497,45 +508,14 @@ def _run(args):
         else:
             print("\n  Per-demand details:")
 
-        for d in demands:
-            label = d["name"]
-            if label not in fiber_names:
-                continue
-
-            N_d, Mx_d, My_d = d["N"], d["Mx"], d["My"]
-            sol = solver.solve_equilibrium(N_d, Mx_d, My_d)
-
-            if sol["converged"]:
-                fr = solver.get_fiber_results(
-                    sol["eps0"], sol["chi_x"], sol["chi_y"])
-                print(f"\n  --- {label} ---")
-                print_fiber_results(fr, section)
-
-                p = os.path.join(outdir, f"fibers_{label}.csv")
-                export_fiber_results_csv(fr, p)
-                print(f"    Exported: {p}")
-
-                fig = plot_section(
-                    section, fr,
-                    title=(f"{label}: N={N_d/1e3:.0f},"
-                           f" Mx={Mx_d/1e6:.0f},"
-                           f" My={My_d/1e6:.0f} kNm"))
-                p = os.path.join(outdir, f"section_{label}.png")
-                fig.savefig(p, dpi=150)
-                plt.close(fig)
-                print(f"  Exported: {p}")
-
-                fig = plot_stress_profile(
-                    fr, section,
-                    title=(f"{label}: N={N_d/1e3:.0f},"
-                           f" Mx={Mx_d/1e6:.0f},"
-                           f" My={My_d/1e6:.0f} kN*m"))
-                p = os.path.join(outdir, f"state_{label}.png")
-                fig.savefig(p, dpi=150)
-                plt.close(fig)
-                print(f"    Exported: {p}")
-            else:
-                print(f"\n  --- {label} --- SOLVER DID NOT CONVERGE")
+        # One explicit outcome per selected demand: state at the
+        # demand, state at the hull boundary along its ray (when
+        # no equilibrium state exists at the demand), or a
+        # reported failure.  See gensec.output.state_plots.
+        export_demand_state_plots(
+            section, solver, engine.domain, demands,
+            fiber_names, outdir,
+            show_rebar_labels=show_rebar_labels)
 
     # --- Demand utilization heatmap ---
     if demand_results:

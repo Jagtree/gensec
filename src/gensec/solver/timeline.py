@@ -2802,9 +2802,11 @@ class ConstructionTimeline:
           ``base_*`` is debit-free by contract and would swallow that
           silently.  The driver's ``applied_at={step: (N, Mx, My)}``
           is the parameter for it, gated on the same bond-state
-          condition as clause 3.  Unreachable from here: the timeline
-          carries no declaration surface for an existing member (D1b-3),
-          so a retrofit cannot enter this walk at all;
+          condition as clause 3.  Since Phase 34 a ``retrofit`` event
+          (D1b-3) does reach this walk, and the stressing compiler
+          routes the cumulative pre-jack demand of a retrofitted member
+          through ``applied_at={0: ...}`` with ``base_*`` left at zero,
+          so the debit is charged and not swallowed;
         * a load **after the last jack** is not interposed in a sequence;
           there is no subsequent jacking event whose debit it would
           contaminate;

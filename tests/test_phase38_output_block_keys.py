@@ -91,6 +91,8 @@ CONSUMED = {
     "generate_3d_moment_curvature",
     # read by cli.py from the resolved flags (gensec/cli.py:251-252)
     "n_levels_mode", "n_levels_count",
+    # rebar annotation density on section/state figures
+    "show_rebar_labels",
 }
 
 

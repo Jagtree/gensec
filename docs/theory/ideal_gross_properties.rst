@@ -235,18 +235,23 @@ API reference
 
 .. autoclass:: gensec.geometry.properties.HomogenizedRebar
    :members:
+   :no-index:
 
 .. autoclass:: gensec.geometry.properties.SectionProperties
    :members:
+   :no-index:
 
 .. autofunction::
    gensec.geometry.properties.compute_section_properties
+   :no-index:
 
 .. autofunction::
    gensec.geometry.properties.compute_inertia_ellipse
+   :no-index:
 
 .. autofunction::
    gensec.geometry.properties.compute_kern_polygon
+   :no-index:
 
 
 Area, centroid and second-moments

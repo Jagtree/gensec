@@ -9,7 +9,9 @@
       "Bash(python -m pytest tests/ -x -q --tb=short)",
       "PowerShell($f = \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\a0db15b4-a3c1-49c9-9066-121bca8c753a\\\\tasks\\\\boh2r8ca9.output\"; \\(Get-Item $f\\).LastWriteTime; \\(Get-Content $f | Measure-Object -Line\\).Lines)",
       "PowerShell(.venv\\\\Scripts\\\\python.exe -m pytest tests\\\\test_solver_uniaxial.py::TestMomentCurvature -v 2>&1)",
-      "PowerShell(.venv\\\\Scripts\\\\python.exe -m pytest tests\\\\ -q 2>&1)"
+      "PowerShell(.venv\\\\Scripts\\\\python.exe -m pytest tests\\\\ -q 2>&1)",
+      "Bash(git status *)",
+      "Bash(python -m pytest tests/test_phase38_output_block_keys.py -q)"
     ]
   }
 }

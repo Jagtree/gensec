@@ -1,0 +1,873 @@
+--- a/docs/changelog.rst	2026-09-11 07:54:05.000000000 +0000
++++ b/docs/changelog.rst	2026-09-19 04:32:58.410401504 +0000
+@@ -40,6 +40,21 @@
+   one-shot-with-datum ≡ incremental-staged equivalence proof, the
+   characteristic-datum convention, and the pre-/post-tensioning rule.
+ 
++**Bug fixes**
++
++- **Missing state plots.**  ``gensec run`` selects
++  the ``fiber_details_top_k`` demands of highest :math:`\eta` and solves
++  for the strain plane at each.  A demand outside the resistance domain
++  has no such plane and ranks first, so with ``k`` or more of them the
++  run wrote no ``state_*.png`` (and no ``section_*.png``) while verified
++  demands were never reached, reporting only ``SOLVER DID NOT CONVERGE``
++  per demand.  Every selected demand now ends in one reported outcome:
++  the state at the demand; the state at the hull boundary along its own
++  ray (files suffixed ``_boundary``, titles carry :math:`\eta_{\text{ray}}`,
++  see :meth:`~gensec.solver.check.DomainChecker.boundary_point_along_ray`);
++  or a named failure with the solver's own ``reason`` / ``refusal``.
++  See :mod:`gensec.output.state_plots`.
++
+ **Invariants**
+ 
+ - ``verify_sls_staged`` states and enforces the single-compatibility-plane
+--- a/docs/gensec_output.rst	2026-09-11 07:54:05.000000000 +0000
++++ b/docs/gensec_output.rst	2026-09-19 04:32:48.072213013 +0000
+@@ -23,6 +23,24 @@
+    :show-inheritance:
+ 
+ 
++.. _api_state_plots:
++
++Per-demand section states
++--------------------------
++
++Fibre tables and section-state plots for the demands selected for
++fibre-level post-processing.  Each selected demand ends in exactly one
++reported outcome: the state at the demand, the state at the boundary of
++the resistance hull along the demand's own ray (when the demand lies
++outside the domain and no equilibrium state exists at it), or an
++explicit failure carrying the reason.  A boundary state is written with
++the ``_boundary`` suffix and is *not* the state under the demand.
++
++.. automodule:: gensec.output.state_plots
++   :members:
++   :show-inheritance:
++
++
+ ideal_gross-section plot and geometric report
+ ----------------------------------------------
+ 
+--- a/src/gensec/cli.py	2026-09-11 07:54:05.000000000 +0000
++++ b/src/gensec/cli.py	2026-09-19 04:28:24.487042203 +0000
+@@ -56,6 +56,7 @@
+     export_moment_curvature_json, export_moment_curvature_csv,
+     export_mx_my_json, export_mx_my_csv,
+ )
++from .output.state_plots import export_demand_state_plots
+ from .output.summary import (
+     print_demand_summary,
+     print_combination_summary,
+@@ -497,45 +498,13 @@
+         else:
+             print("\n  Per-demand details:")
+ 
+-        for d in demands:
+-            label = d["name"]
+-            if label not in fiber_names:
+-                continue
+-
+-            N_d, Mx_d, My_d = d["N"], d["Mx"], d["My"]
+-            sol = solver.solve_equilibrium(N_d, Mx_d, My_d)
+-
+-            if sol["converged"]:
+-                fr = solver.get_fiber_results(
+-                    sol["eps0"], sol["chi_x"], sol["chi_y"])
+-                print(f"\n  --- {label} ---")
+-                print_fiber_results(fr, section)
+-
+-                p = os.path.join(outdir, f"fibers_{label}.csv")
+-                export_fiber_results_csv(fr, p)
+-                print(f"    Exported: {p}")
+-
+-                fig = plot_section(
+-                    section, fr,
+-                    title=(f"{label}: N={N_d/1e3:.0f},"
+-                           f" Mx={Mx_d/1e6:.0f},"
+-                           f" My={My_d/1e6:.0f} kNm"))
+-                p = os.path.join(outdir, f"section_{label}.png")
+-                fig.savefig(p, dpi=150)
+-                plt.close(fig)
+-                print(f"  Exported: {p}")
+-
+-                fig = plot_stress_profile(
+-                    fr, section,
+-                    title=(f"{label}: N={N_d/1e3:.0f},"
+-                           f" Mx={Mx_d/1e6:.0f},"
+-                           f" My={My_d/1e6:.0f} kN*m"))
+-                p = os.path.join(outdir, f"state_{label}.png")
+-                fig.savefig(p, dpi=150)
+-                plt.close(fig)
+-                print(f"    Exported: {p}")
+-            else:
+-                print(f"\n  --- {label} --- SOLVER DID NOT CONVERGE")
++        # One explicit outcome per selected demand: state at the
++        # demand, state at the hull boundary along its ray (when
++        # no equilibrium state exists at the demand), or a
++        # reported failure.  See gensec.output.state_plots.
++        export_demand_state_plots(
++            section, solver, engine.domain, demands,
++            fiber_names, outdir)
+ 
+     # --- Demand utilization heatmap ---
+     if demand_results:
+--- a/src/gensec/output/__init__.py	2026-09-11 07:54:05.000000000 +0000
++++ b/src/gensec/output/__init__.py	2026-09-19 04:28:24.487212384 +0000
+@@ -52,6 +52,8 @@
+     write_geometry_report,
+ )
+ 
++from .state_plots import export_demand_state_plots
++
+ from .summary import (
+     governing_eta,
+     rank_results,
+@@ -93,6 +95,7 @@
+     "print_envelope_summary",
+     "build_verification_summary",
+     "select_demands_for_fiber_details",
++    "export_demand_state_plots",
+     "plot_section_properties",
+     "print_section_properties",
+     "write_section_report",
+--- a/src/gensec/output/state_plots.py	1970-01-01 00:00:00.000000000 +0000
++++ b/src/gensec/output/state_plots.py	2026-09-19 04:28:15.616830013 +0000
+@@ -0,0 +1,303 @@
++# ---------------------------------------------------------------------------
++# GenSec — Copyright (c) 2026 Andrea Albero
++#
++# This file is part of GenSec.
++#
++# GenSec is free software: you can redistribute it and/or modify it under
++# the terms of the GNU Affero General Public License as published by the
++# Free Software Foundation, either version 3 of the License, or (at your
++# option) any later version.
++#
++# GenSec is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
++# License for more details.
++#
++# You should have received a copy of the GNU Affero General Public License
++# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
++# ---------------------------------------------------------------------------
++r"""
++Per-demand section-state plots, with an explicit outcome for every demand.
++
++Why this module exists
++----------------------
++``gensec run`` writes, for each demand selected for fibre-level
++post-processing, a fibre table (``fibers_<name>.csv``), a section map
++(``section_<name>.png``) and a strain/stress map (``state_<name>.png``).
++All three need a strain plane that satisfies equilibrium with the
++demand.
++
++Such a plane does **not exist** when the demand lies outside the
++resistance domain: the constitutive laws are bounded by their ultimate
++strains and no admissible strain plane can carry the action.  Before
++this module the CLI printed one line for such a demand and wrote
++nothing.  Selection is by descending governing :math:`\eta`, so the
++demands that have no equilibrium state are exactly the ones ranked
++first: with at least ``top_k`` of them, the selection contained no
++demand that could be plotted and the run produced no ``state_*.png``
++at all, while demands that were verified were never reached.
++
++Contract
++--------
++For every selected demand exactly one of three outcomes is produced and
++reported; none is silent.
++
++``"demand"``
++    Equilibrium found at the demand.  Files are named
++    ``fibers_<name>.csv``, ``section_<name>.png``, ``state_<name>.png``
++    -- unchanged from the previous behaviour.
++
++``"boundary"``
++    No equilibrium at the demand.  The state plotted is the one at the
++    point :math:`\mathbf{R} = \mathbf{T}/\eta_{\mathrm{ray}}` where the
++    ray from the origin through the demand :math:`\mathbf{T}` leaves
++    the resistance hull (see
++    :meth:`~gensec.solver.check.DomainChecker.boundary_point_along_ray`),
++    i.e. the state at which *proportional* loading along the demand's
++    own direction reaches the domain boundary.  Files carry the suffix
++    ``_boundary`` and the titles say so, with the value of
++    :math:`\eta_{\mathrm{ray}}`.  This is **not** the state under the
++    demand and must not be read as such.
++
++``"none"``
++    No image could be produced: the boundary point is not defined, or
++    the solver finds no equilibrium there either.  The record carries
++    the reason; the solver's own ``reason`` / ``refusal`` are passed
++    through when it supplies them.
++
++Notes
++-----
++The boundary point belongs to the convex hull of the sampled domain,
++which is an envelope.  Where the true domain is not convex the hull
++boundary can lie outside it, and then no strain state exists at
++:math:`\mathbf{R}`: the outcome is ``"none"`` with the solver's
++message, never a substitute point.
++"""
++
++import os
++
++import matplotlib.pyplot as plt
++
++from .export import export_fiber_results_csv
++from .plots import plot_section, plot_stress_profile
++from .report import print_fiber_results
++
++
++def _why_not(sol):
++    r"""
++    Describe, for a human, why a solve did not converge.
++
++    Parameters
++    ----------
++    sol : dict
++        Non-converged return of
++        :meth:`~gensec.solver.integrator.FiberSolver.solve_equilibrium`.
++
++    Returns
++    -------
++    str
++        The solver's ``reason`` and ``refusal`` when it supplied them
++        (pure-axial requests), otherwise the iteration count.
++    """
++    reason = sol.get("reason")
++    refusal = sol.get("refusal")
++    if reason is not None:
++        return f"{reason}: {refusal}"
++    return f"no convergence after {sol['iterations']} iterations"
++
++
++def _write_state(section, solver, sol, label, suffix, heading,
++                 N, Mx, My, outdir):
++    r"""
++    Write the fibre table and the two figures for a converged state.
++
++    Parameters
++    ----------
++    section : GenericSection
++    solver : FiberSolver
++    sol : dict
++        Converged solve result (``eps0``, ``chi_x``, ``chi_y``).
++    label : str
++        Demand name; used in the file names.
++    suffix : str
++        ``""`` for the state at the demand, ``"_boundary"`` otherwise.
++    heading : str
++        Text placed before the force triple in the figure titles.
++    N, Mx, My : float
++        Actions the plotted state is in equilibrium with [N, N·mm].
++    outdir : str
++        Output directory.
++
++    Returns
++    -------
++    list of str
++        Paths written.
++    """
++    fr = solver.get_fiber_results(sol["eps0"], sol["chi_x"], sol["chi_y"])
++    print(f"\n  --- {label}{suffix} ---")
++    print_fiber_results(fr, section)
++
++    written = []
++    p = os.path.join(outdir, f"fibers_{label}{suffix}.csv")
++    export_fiber_results_csv(fr, p)
++    print(f"    Exported: {p}")
++    written.append(p)
++
++    fig = plot_section(
++        section, fr,
++        title=(f"{heading}: N={N/1e3:.0f},"
++               f" Mx={Mx/1e6:.0f},"
++               f" My={My/1e6:.0f} kNm"))
++    p = os.path.join(outdir, f"section_{label}{suffix}.png")
++    fig.savefig(p, dpi=150)
++    plt.close(fig)
++    print(f"  Exported: {p}")
++    written.append(p)
++
++    fig = plot_stress_profile(
++        fr, section,
++        title=(f"{heading}: N={N/1e3:.0f},"
++               f" Mx={Mx/1e6:.0f},"
++               f" My={My/1e6:.0f} kN*m"))
++    p = os.path.join(outdir, f"state_{label}{suffix}.png")
++    fig.savefig(p, dpi=150)
++    plt.close(fig)
++    print(f"    Exported: {p}")
++    written.append(p)
++    return written
++
++
++def export_demand_state_plots(section, solver, domain, demands,
++                              selected_names, outdir):
++    r"""
++    Write fibre tables and state plots for the selected demands.
++
++    Every selected demand ends in exactly one of the three outcomes
++    described in the module docstring, and every outcome is printed and
++    returned.
++
++    Parameters
++    ----------
++    section : GenericSection
++        Section being analysed.
++    solver : FiberSolver
++        Solver for *section*.
++    domain : DomainChecker
++        Resistance hull used by the verification, needed for the
++        boundary point of a demand that has no equilibrium state.
++    demands : list of dict
++        Parsed demands, ``{"name", "N", "Mx", "My"}`` in N and N·mm.
++    selected_names : collection of str
++        Names of the demands to post-process, typically the output of
++        :func:`~gensec.output.summary.select_demands_for_fiber_details`.
++    outdir : str
++        Output directory; must exist.
++
++    Returns
++    -------
++    list of dict
++        One record per processed demand, in the order of *demands*:
++
++        ``name`` : str
++        ``kind`` : {``"demand"``, ``"boundary"``, ``"none"``}
++        ``eta_ray`` : float or None
++            :math:`\eta_{\mathrm{ray}}` of the demand, set only for
++            ``"boundary"`` and for a ``"none"`` that got as far as
++            computing it.
++        ``files`` : list of str
++            Paths written (empty for ``"none"``).
++        ``message`` : str or None
++            Why the state at the demand does not exist (``"boundary"``)
++            or why nothing was produced (``"none"``).
++
++    Notes
++    -----
++    Only the demand's own ``N``, ``Mx``, ``My`` enter the solve; no
++    initial guess, tolerance or iteration limit is changed from the
++    solver's own.  A demand that is *inside* the hull yet has no
++    equilibrium is not treated differently from one outside: the
++    outcome is decided by the solver, and the message states which
++    case it was.
++    """
++    records = []
++    for d in demands:
++        label = d["name"]
++        if label not in selected_names:
++            continue
++        N, Mx, My = d["N"], d["Mx"], d["My"]
++        rec = {"name": label, "kind": "none", "eta_ray": None,
++               "files": [], "message": None}
++
++        sol = solver.solve_equilibrium(N, Mx, My)
++        if sol["converged"]:
++            rec["kind"] = "demand"
++            rec["files"] = _write_state(
++                section, solver, sol, label, "", label,
++                N, Mx, My, outdir)
++            records.append(rec)
++            continue
++
++        where = ("inside" if domain.is_inside(N, Mx, My) else "outside")
++        no_state = (f"no equilibrium state at the demand "
++                    f"({where} the hull): {_why_not(sol)}")
++        try:
++            bp = domain.boundary_point_along_ray(N, Mx, My)
++        except ValueError as exc:
++            rec["message"] = f"{no_state}; boundary point undefined: {exc}"
++            records.append(rec)
++            print(f"\n  --- {label} --- NO STATE PRODUCED: "
++                  f"{rec['message']}")
++            continue
++
++        rec["eta_ray"] = bp["eta"]
++        sol_b = solver.solve_equilibrium(bp["N"], bp["Mx"], bp["My"])
++        if not sol_b["converged"]:
++            rec["message"] = (
++                f"{no_state}; and none at the hull boundary along the "
++                f"demand ray (eta_ray={bp['eta']:.4f}) either: "
++                f"{_why_not(sol_b)}")
++            records.append(rec)
++            print(f"\n  --- {label} --- NO STATE PRODUCED: "
++                  f"{rec['message']}")
++            continue
++
++        rec["kind"] = "boundary"
++        rec["message"] = no_state
++        heading = (f"{label} @ HULL BOUNDARY along demand ray "
++                   f"(eta_ray={bp['eta']:.3f}; demand has no "
++                   f"equilibrium state)")
++        print(f"\n  --- {label} --- no equilibrium state at the demand; "
++              f"plotting the hull boundary along its ray "
++              f"(eta_ray={bp['eta']:.4f})")
++        rec["files"] = _write_state(
++            section, solver, sol_b, label, "_boundary", heading,
++            bp["N"], bp["Mx"], bp["My"], outdir)
++        records.append(rec)
++
++    _print_summary(records)
++    return records
++
++
++def _print_summary(records):
++    r"""
++    Print the outcome counts and every non-trivial outcome.
++
++    Parameters
++    ----------
++    records : list of dict
++        Output of :func:`export_demand_state_plots`.
++    """
++    if not records:
++        return
++    n_dem = sum(r["kind"] == "demand" for r in records)
++    n_bnd = sum(r["kind"] == "boundary" for r in records)
++    n_none = sum(r["kind"] == "none" for r in records)
++    print(f"\n  State plots: {n_dem} at the demand, {n_bnd} at the hull "
++          f"boundary along the demand ray (no state at the demand), "
++          f"{n_none} not produced.")
++    for r in records:
++        if r["kind"] == "boundary":
++            print(f"    BOUNDARY  {r['name']}: eta_ray="
++                  f"{r['eta_ray']:.4f} -> *_boundary files")
++        elif r["kind"] == "none":
++            print(f"    NOT PRODUCED  {r['name']}: {r['message']}")
+--- a/src/gensec/solver/check.py	2026-09-11 07:54:05.000000000 +0000
++++ b/src/gensec/solver/check.py	2026-09-19 04:27:39.266129011 +0000
+@@ -390,6 +390,85 @@
+ 
+         return 1.0 / t_bnd
+ 
++    def boundary_point_along_ray(self, N, Mx, My=0.0):
++        r"""
++        Point where the ray from the origin through a demand leaves the hull.
++
++        The ray is cast from the origin :math:`\mathbf{B} = \mathbf{0}`
++        through the demand :math:`\mathbf{T}`.  With :math:`\mathbf{R}`
++        the exit point of that ray from the hull,
++
++        .. math::
++
++            \eta = \frac{|\mathbf{T}|}{|\mathbf{R}|}
++            \qquad\Longrightarrow\qquad
++            \mathbf{R} = \frac{\mathbf{T}}{\eta}.
++
++        The normalisation applied by :meth:`_to_norm` is a diagonal
++        linear map that fixes the origin, so it rescales
++        :math:`\mathbf{T}` and :math:`\mathbf{R}` by the same factors
++        and the ratio :math:`\eta` -- hence the relation above -- holds
++        unchanged in the raw :math:`(N, M_x, M_y)` coordinates.
++
++        Parameters
++        ----------
++        N : float
++            Axial force [N].
++        Mx : float
++            Bending moment about *x* [N·mm].
++        My : float, optional
++            Bending moment about *y* [N·mm].  Ignored by a 2-D hull
++            (uniaxial domain); it is then returned **unchanged**, not
++            rescaled, because the hull carries no information about it.
++
++        Returns
++        -------
++        dict
++            ``{"N", "Mx", "My", "eta"}``: the boundary point in raw
++            units [N, N·mm] and the ray utilisation :math:`\eta` of
++            the demand.  Valid for a demand inside the hull as well
++            (:math:`\eta \le 1`, so :math:`\mathbf{R}` lies beyond it).
++
++        Raises
++        ------
++        ValueError
++            If the origin is not inside the hull: the ray then has an
++            entry and an exit, :meth:`_ray_eta` returns the nearest
++            positive crossing, and that is not necessarily the exit.
++            Also if the demand coincides with the origin (direction
++            undefined) or if the ray meets no face (:math:`\eta`
++            non-finite).  Nothing is substituted in any of these cases.
++
++        Notes
++        -----
++        The hull is the convex envelope of the sampled domain.  A point
++        on its boundary is therefore **not guaranteed** to be an
++        attainable strain state of the section: where the true domain
++        is not convex, or is coarsely sampled, the hull lies outside
++        it.  Callers that need a strain state at :math:`\mathbf{R}`
++        must check that the solver converges there and must report it
++        when it does not.
++        """
++        if not self.is_inside(0.0, 0.0, 0.0):
++            raise ValueError(
++                "boundary_point_along_ray: the origin is not inside the "
++                "resistance hull, so the exit point of a ray cast from "
++                "it is not defined by the nearest-crossing rule.")
++        p = self._to_norm(self._make_point(N, Mx, My))
++        eta = self._ray_eta(np.zeros_like(p), p)
++        if eta == 0.0:
++            raise ValueError(
++                "boundary_point_along_ray: the demand coincides with the "
++                "origin; the ray direction is undefined.")
++        if not np.isfinite(eta):
++            raise ValueError(
++                "boundary_point_along_ray: the ray through the demand "
++                "meets no face of the hull (eta is not finite).")
++        R_N, R_Mx = N / eta, Mx / eta
++        R_My = My / eta if self.ndim == 3 else float(My)
++        return {"N": float(R_N), "Mx": float(R_Mx),
++                "My": float(R_My), "eta": float(eta)}
++
+     # ------------------------------------------------------------------
+     #  Public η methods
+     #
+--- a/tests/test_state_plots_boundary.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_state_plots_boundary.py	2026-09-19 04:29:49.340835585 +0000
+@@ -0,0 +1,343 @@
++#!/usr/bin/env python3
++# ---------------------------------------------------------------------------
++# GenSec — Copyright (c) 2026 Andrea Albero
++#
++# This file is part of GenSec.
++#
++# GenSec is free software: you can redistribute it and/or modify it under
++# the terms of the GNU Affero General Public License as published by the
++# Free Software Foundation, either version 3 of the License, or (at your
++# option) any later version.
++#
++# GenSec is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
++# License for more details.
++#
++# You should have received a copy of the GNU Affero General Public License
++# along with GenSec.  If not, see <https://www.gnu.org/licenses/>.
++# ---------------------------------------------------------------------------
++r"""
++``gensec run`` no longer ends without a ``state_*.png``, and never silently.
++
++The defect, as measured
++-----------------------
++``gensec run`` selects the ``fiber_details_top_k`` demands with the
++highest governing :math:`\eta` and then solves for the strain plane at
++each.  A demand outside the resistance domain has no such plane, and it
++ranks first.  With :math:`k` or more of them the selection held no
++demand that could be plotted: measured on a section with one verified
++demand and five outside it, ``state_*.png`` count **0**, and one line
++``SOLVER DID NOT CONVERGE`` per demand.
++
++What is asserted
++----------------
++1. The geometric primitive (:math:`\mathbf{R} = \mathbf{T}/\eta`) on a
++   hull whose exit points are known in closed form.
++2. Its refusals: an origin outside the hull, a demand at the origin.
++3. The three outcomes of ``export_demand_state_plots`` -- state at the
++   demand, state at the boundary, nothing -- each with its files and
++   its message, and the ``"none"`` path driven by stubs so that it is
++   exercised deliberately and not by luck of a section.
++4. End to end through ``gensec.cli``: the original failing configuration
++   now writes one ``state_*`` per selected demand.
++"""
++import os
++
++import numpy as np
++import pytest
++import yaml
++
++from gensec.io_yaml import load_yaml
++from gensec.output.state_plots import export_demand_state_plots
++from gensec.output.summary import select_demands_for_fiber_details
++from gensec.solver import FiberSolver, NMDiagram
++from gensec.solver.check import DomainChecker, VerificationEngine
++
++
++# ----------------------------------------------------------------------
++#  Closed-form hulls
++# ----------------------------------------------------------------------
++
++def _box(n_lo, n_hi, mx, my):
++    """Corners of the box ``[n_lo, n_hi] x [-mx, mx] x [-my, my]``."""
++    pts = [(n, sx * mx, sy * my)
++           for n in (n_lo, n_hi) for sx in (-1, 1) for sy in (-1, 1)]
++    a = np.array(pts, dtype=float)
++    return {"N": a[:, 0], "Mx": a[:, 1], "My": a[:, 2]}
++
++
++def test_boundary_point_is_the_exit_of_the_ray_3d():
++    """
++    On a box the exit point of a ray is known: the first bound reached.
++
++    Demand ``(-2000, 50, 25)`` reaches ``N = -1000`` at half its length,
++    long before ``Mx`` (25 of 100) or ``My`` (12.5 of 50), so
++    ``R = (-1000, 25, 12.5)`` and ``eta = 2``.  The normalisation is a
++    diagonal map fixing the origin; if the raw-coordinate relation
++    ``R = T / eta`` were wrong for it, this is where it would show.
++    """
++    dom = DomainChecker(_box(-1000.0, 300.0, 100.0, 50.0))
++    bp = dom.boundary_point_along_ray(-2000.0, 50.0, 25.0)
++    assert bp["eta"] == pytest.approx(2.0, rel=1e-9)
++    assert bp["N"] == pytest.approx(-1000.0, rel=1e-9)
++    assert bp["Mx"] == pytest.approx(25.0, rel=1e-9)
++    assert bp["My"] == pytest.approx(12.5, rel=1e-9)
++    # ... and it is a boundary point: just inside it is inside, just
++    # beyond it is outside.
++    R = np.array([bp["N"], bp["Mx"], bp["My"]])
++    assert dom.is_inside(*(R * (1.0 - 1e-6)))
++    assert not dom.is_inside(*(R * (1.0 + 1e-6)))
++
++
++def test_boundary_point_of_an_inside_demand_lies_beyond_it():
++    """A demand inside the hull has ``eta < 1`` and ``R`` beyond it."""
++    dom = DomainChecker(_box(-1000.0, 300.0, 100.0, 50.0))
++    bp = dom.boundary_point_along_ray(-500.0, 0.0, 0.0)
++    assert bp["eta"] == pytest.approx(0.5, rel=1e-9)
++    assert bp["N"] == pytest.approx(-1000.0, rel=1e-9)
++
++
++def test_boundary_point_2d_hull_passes_my_through_unchanged():
++    """
++    A 2-D hull knows nothing about ``My``; it is returned as given.
++
++    Rescaling it would invent a boundary in a coordinate the domain
++    does not describe.
++    """
++    n = np.array([-1000.0, -1000.0, 300.0, 300.0])
++    m = np.array([-100.0, 100.0, -100.0, 100.0])
++    dom = DomainChecker({"N": n, "M": m})
++    bp = dom.boundary_point_along_ray(-2000.0, 50.0, 7.0)
++    assert bp["eta"] == pytest.approx(2.0, rel=1e-9)
++    assert bp["My"] == 7.0
++
++
++def test_origin_outside_the_hull_is_refused():
++    """
++    With the origin outside, the nearest crossing is not the exit.
++
++    ``_ray_eta`` returns the nearest positive crossing; from outside
++    that is the *entry*.  The method must say so, not return it.
++    """
++    dom = DomainChecker(_box(100.0, 300.0, 100.0, 50.0))
++    with pytest.raises(ValueError, match="origin is not inside"):
++        dom.boundary_point_along_ray(200.0, 10.0, 5.0)
++
++
++def test_demand_at_the_origin_is_refused():
++    """The direction of the ray is undefined; no point is invented."""
++    dom = DomainChecker(_box(-1000.0, 300.0, 100.0, 50.0))
++    with pytest.raises(ValueError, match="coincides with the origin"):
++        dom.boundary_point_along_ray(0.0, 0.0, 0.0)
++
++
++# ----------------------------------------------------------------------
++#  A small real section (uniaxial mesh: fast)
++# ----------------------------------------------------------------------
++
++_DOC = {
++    "code": "ec2",
++    "materials": {
++        "C25": {"type": "concrete_ec2_gen1", "class": "C25/30",
++                "ls": "F", "loadtype": "slow", "TypeConc": "R",
++                "NA": "French", "time": 28},
++        "B450C": {"type": "steel", "fyk": 450.0, "gamma_s": 1.15,
++                  "works_in_compression": True},
++    },
++    "section": {
++        "B": 300, "H": 500, "bulk_material": "C25",
++        "n_fibers_y": 20, "n_fibers_x": 1,
++        "rebars": [
++            {"x": 30, "y": 30, "As": 201.06, "material": "B450C",
++             "n_bars": 1, "diameter": 8},
++            {"x": 270, "y": 30, "As": 201.06, "material": "B450C",
++             "n_bars": 1, "diameter": 8},
++            {"x": 30, "y": 470, "As": 201.06, "material": "B450C",
++             "n_bars": 1, "diameter": 8},
++            {"x": 270, "y": 470, "As": 201.06, "material": "B450C",
++             "n_bars": 1, "diameter": 8},
++        ],
++    },
++    "output": {
++        "generate_moment_curvature": False,
++        "generate_polar_ductility": False,
++        "generate_3d_moment_curvature": False,
++    },
++}
++
++
++def _demands(n_bad):
++    """One demand well inside, then ``n_bad`` far outside the domain."""
++    out = [{"name": "OK", "N_kN": -500, "Mx_kNm": 20, "My_kNm": 0}]
++    out += [{"name": f"BAD{i}", "N_kN": 50,
++             "Mx_kNm": 400 + 20 * i, "My_kNm": 0} for i in range(n_bad)]
++    return out
++
++
++def _write_doc(tmp_path, n_bad):
++    doc = dict(_DOC)
++    doc["demands"] = _demands(n_bad)
++    p = tmp_path / "in.yaml"
++    p.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
++    return str(p)
++
++
++@pytest.fixture(scope="module")
++def rig(tmp_path_factory):
++    """Section, solver, hull and parsed demands for ``OK`` + 5 ``BAD``."""
++    d = tmp_path_factory.mktemp("rig")
++    data = load_yaml(_write_doc(d, 5))
++    section = data["section"]
++    solver = FiberSolver(section)
++    gen = NMDiagram(solver)
++    nm = gen.generate(n_points=30)
++    eng = VerificationEngine(nm, gen, data.get("output_options", {}),
++                             n_points=30)
++    results = eng.check_demands(data["demands"])
++    return section, solver, eng.domain, data["demands"], results
++
++
++def _files(outdir, prefix):
++    return sorted(f for f in os.listdir(outdir) if f.startswith(prefix))
++
++
++def test_premise_the_bad_demands_have_no_equilibrium_state(rig):
++    """
++    The premise the whole patch stands on, measured and not assumed.
++
++    ``BAD*`` are outside the hull *and* the solver does not converge on
++    them; ``OK`` is inside and converges.  If this ever fails, the
++    outcome tests below prove nothing about the defect.
++    """
++    _, solver, dom, demands, _ = rig
++    for d in demands:
++        sol = solver.solve_equilibrium(d["N"], d["Mx"], d["My"])
++        if d["name"] == "OK":
++            assert sol["converged"] and dom.is_inside(d["N"], d["Mx"],
++                                                      d["My"])
++        else:
++            assert (not sol["converged"]
++                    and not dom.is_inside(d["N"], d["Mx"], d["My"]))
++
++
++def test_every_selected_demand_gets_an_outcome_and_an_image(rig, tmp_path):
++    """
++    The original failing configuration: ``top_k = 5`` is all ``BAD``.
++
++    Selected are the five worst, all without a state at the demand.
++    Before: zero ``state_*.png``.  Now: five ``state_*_boundary.png``,
++    five records of kind ``"boundary"`` carrying ``eta_ray > 1``.
++    """
++    section, solver, dom, demands, results = rig
++    names = set(select_demands_for_fiber_details(results, top_k=5))
++    assert names == {f"BAD{i}" for i in range(5)}, (
++        "the fixture no longer reproduces the selection that starved "
++        "the plots")
++    recs = export_demand_state_plots(section, solver, dom, demands,
++                                     names, str(tmp_path))
++    assert [r["kind"] for r in recs] == ["boundary"] * 5
++    assert all(r["eta_ray"] > 1.0 for r in recs)
++    assert len(_files(tmp_path, "state_")) == 5
++    assert all(f.endswith("_boundary.png")
++               for f in _files(tmp_path, "state_"))
++    # the message says why the demand itself was not plotted
++    assert all("no equilibrium state at the demand" in r["message"]
++               for r in recs)
++
++
++def test_a_demand_with_a_state_keeps_the_old_names(rig, tmp_path):
++    """The verified demand is written exactly as before: no suffix."""
++    section, solver, dom, demands, _ = rig
++    recs = export_demand_state_plots(section, solver, dom, demands,
++                                     {"OK"}, str(tmp_path))
++    assert [(r["name"], r["kind"]) for r in recs] == [("OK", "demand")]
++    assert _files(tmp_path, "state_") == ["state_OK.png"]
++    assert _files(tmp_path, "section_") == ["section_OK.png"]
++    assert _files(tmp_path, "fibers_") == ["fibers_OK.csv"]
++
++
++def test_mixed_selection_yields_both_kinds(rig, tmp_path):
++    """One demand at, one beyond: distinct files, distinct kinds."""
++    section, solver, dom, demands, _ = rig
++    recs = export_demand_state_plots(section, solver, dom, demands,
++                                     {"OK", "BAD0"}, str(tmp_path))
++    assert {r["name"]: r["kind"] for r in recs} == {
++        "OK": "demand", "BAD0": "boundary"}
++    assert _files(tmp_path, "state_") == ["state_BAD0_boundary.png",
++                                          "state_OK.png"]
++
++
++class _StubSolver:
++    """Solver that never converges, optionally with the pure-axial fields."""
++
++    def __init__(self, **extra):
++        self._extra = extra
++
++    def solve_equilibrium(self, N, Mx, My):
++        sol = {"converged": False, "iterations": 50}
++        sol.update(self._extra)
++        return sol
++
++
++def test_no_state_anywhere_is_reported_not_swallowed(rig, tmp_path):
++    """
++    Nothing at the demand and nothing at the boundary: kind ``"none"``.
++
++    No file, a message that names both failures, and the solver's own
++    ``reason`` / ``refusal`` passed through verbatim.
++    """
++    section, _, dom, demands, _ = rig
++    stub = _StubSolver(reason="axial_state_not_attainable",
++                       refusal="N is outside the reach [a, b]")
++    recs = export_demand_state_plots(section, stub, dom, demands,
++                                     {"BAD0"}, str(tmp_path))
++    r, = recs
++    assert r["kind"] == "none" and r["files"] == []
++    assert r["eta_ray"] is not None and r["eta_ray"] > 1.0
++    assert "either" in r["message"]
++    assert "axial_state_not_attainable: N is outside the reach" \
++        in r["message"]
++    assert os.listdir(tmp_path) == []
++
++
++def test_undefined_boundary_point_is_reported_not_swallowed(rig, tmp_path):
++    """The hull refuses (origin outside): the refusal is the message."""
++    section, _, _, demands, _ = rig
++
++    class _Refusing:
++        def is_inside(self, *a):
++            return False
++
++        def boundary_point_along_ray(self, *a):
++            raise ValueError("origin is not inside the resistance hull")
++
++    recs = export_demand_state_plots(section, _StubSolver(), _Refusing(),
++                                     demands, {"BAD0"}, str(tmp_path))
++    r, = recs
++    assert r["kind"] == "none" and r["eta_ray"] is None
++    assert "boundary point undefined" in r["message"]
++    assert "origin is not inside" in r["message"]
++    assert os.listdir(tmp_path) == []
++
++
++# ----------------------------------------------------------------------
++#  End to end
++# ----------------------------------------------------------------------
++
++def test_cli_writes_a_state_image_for_the_configuration_that_wrote_none(
++        tmp_path):
++    """
++    ``gensec run`` on one verified demand and five outside the domain.
++
++    The configuration measured to produce zero ``state_*.png``.  With
++    the default ``fiber_details_top_k = 5`` the selection is the five
++    outside demands; each now yields a ``_boundary`` state.
++    """
++    from gensec import cli
++    out = tmp_path / "out"
++    cli.main(["run", _write_doc(tmp_path, 5),
++              "--output-dir", str(out), "--n-points", "30"])
++    states = _files(out, "state_")
++    assert len(states) == 5, states
++    assert all(s.endswith("_boundary.png") for s in states)

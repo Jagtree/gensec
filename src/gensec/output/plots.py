@@ -23,7 +23,11 @@ analysis.
 
 All section state plots (strain, stress) are drawn as coloured maps
 on the actual section geometry. Rebar values are annotated directly
-on the section, replacing numbered labels.
+on the section, replacing numbered labels. The per-rebar annotation
+text can be switched off with ``show_rebar_labels=False`` (wired to
+the ``output.show_rebar_labels`` YAML flag) when a densely reinforced
+section makes the labels overlap; the rebar markers themselves are
+always drawn.
 
 Supports both rectangular and arbitrary polygon sections via the
 ``polygon`` attribute from :class:`GenericSection`.
@@ -427,7 +431,8 @@ def _draw_reference_axes(ax, sec):
 #  Section state map — strain or stress on the section
 # ==================================================================
 
-def plot_section_state(sec, fiber_results, field='eps', title=""):
+def plot_section_state(sec, fiber_results, field='eps', title="",
+                       show_rebar_labels=True):
     r"""
     Draw the section with a colour-mapped field (strain or stress).
 
@@ -444,6 +449,11 @@ def plot_section_state(sec, fiber_results, field='eps', title=""):
     field : ``'eps'`` or ``'sigma'``
         Which field to plot. Default ``'eps'``.
     title : str, optional
+    show_rebar_labels : bool, optional
+        Annotate each rebar with its index and field value. Rebar
+        markers are always drawn; set to ``False`` to keep only the
+        markers when a dense reinforcement layout makes the text
+        illegible. Default ``True``.
 
     Returns
     -------
@@ -484,15 +494,16 @@ def plot_section_state(sec, fiber_results, field='eps', title=""):
                    s=100, marker='o', edgecolors='black',
                    linewidths=1.5, zorder=5)
 
-        for i in range(len(rb["y"])):
-            txt = f"{i+1}: {rval[i]:.1f}"
-            ax.annotate(txt, (rb["x"][i], rb["y"][i]),
-                        xytext=(12, -4), textcoords="offset points",
-                        fontsize=7, fontweight='bold',
-                        color='black', zorder=6,
-                        bbox=dict(boxstyle='round,pad=0.2',
-                                  facecolor='white', alpha=0.8,
-                                  edgecolor='none'))
+        if show_rebar_labels:
+            for i in range(len(rb["y"])):
+                txt = f"{i+1}: {rval[i]:.1f}"
+                ax.annotate(txt, (rb["x"][i], rb["y"][i]),
+                            xytext=(12, -4), textcoords="offset points",
+                            fontsize=7, fontweight='bold',
+                            color='black', zorder=6,
+                            bbox=dict(boxstyle='round,pad=0.2',
+                                      facecolor='white', alpha=0.8,
+                                      edgecolor='none'))
 
     # Neutral axis
     _draw_neutral_axis(ax, sec, fiber_results)
@@ -512,7 +523,8 @@ def plot_section_state(sec, fiber_results, field='eps', title=""):
 #  Section geometry (no results — just outline + numbered rebars)
 # ==================================================================
 
-def plot_section(sec, fiber_results=None, title="", cast_steps=None):
+def plot_section(sec, fiber_results=None, title="", cast_steps=None,
+                 show_rebar_labels=True):
     r"""
     Draw the cross-section geometry with rebars.
 
@@ -536,6 +548,11 @@ def plot_section(sec, fiber_results=None, title="", cast_steps=None):
 
         The colour is a timeline code, not a scale — see
         :func:`_draw_cast_zones`.
+    show_rebar_labels : bool, optional
+        Annotate each rebar with its index (and field value, on the
+        stress panel). Rebar markers are always drawn; set to
+        ``False`` to keep only the markers when a dense reinforcement
+        layout makes the text illegible. Default ``True``.
 
     Returns
     -------
@@ -544,19 +561,23 @@ def plot_section(sec, fiber_results=None, title="", cast_steps=None):
     if fiber_results is not None:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 8))
         _draw_geometry_panel(ax1, sec, fiber_results,
-                             cast_steps=cast_steps)
-        _draw_field_panel(ax2, sec, fiber_results, field='sigma')
+                             cast_steps=cast_steps,
+                             show_rebar_labels=show_rebar_labels)
+        _draw_field_panel(ax2, sec, fiber_results, field='sigma',
+                          show_rebar_labels=show_rebar_labels)
     else:
         fig, ax1 = plt.subplots(1, 1, figsize=(7, 8))
         _draw_geometry_panel(ax1, sec, fiber_results=None,
-                             cast_steps=cast_steps)
+                             cast_steps=cast_steps,
+                             show_rebar_labels=show_rebar_labels)
 
     fig.suptitle(title or "Cross-Section", fontsize=14)
     fig.tight_layout()
     return fig
 
 
-def _draw_geometry_panel(ax, sec, fiber_results=None, cast_steps=None):
+def _draw_geometry_panel(ax, sec, fiber_results=None, cast_steps=None,
+                         show_rebar_labels=True):
     """
     Draw section outline with numbered rebars and optional
     neutral axis.
@@ -578,13 +599,14 @@ def _draw_geometry_panel(ax, sec, fiber_results=None, cast_steps=None):
                     facecolor=color, edgecolor='black', lw=0.8,
                     zorder=4)
         ax.add_patch(c)
-        ax.annotate(f"{i+1}", (rb.x, rb.y),
-                    xytext=(12, -4), textcoords="offset points",
-                    fontsize=7, fontweight='bold',
-                    color='black', zorder=5,
-                    bbox=dict(boxstyle='round,pad=0.2',
-                              facecolor='white', alpha=0.8,
-                              edgecolor='none'))
+        if show_rebar_labels:
+            ax.annotate(f"{i+1}", (rb.x, rb.y),
+                        xytext=(12, -4), textcoords="offset points",
+                        fontsize=7, fontweight='bold',
+                        color='black', zorder=5,
+                        bbox=dict(boxstyle='round,pad=0.2',
+                                  facecolor='white', alpha=0.8,
+                                  edgecolor='none'))
 
     if fiber_results is not None:
         _draw_neutral_axis(ax, sec, fiber_results)
@@ -602,7 +624,8 @@ def _draw_geometry_panel(ax, sec, fiber_results=None, cast_steps=None):
     ax.grid(True, alpha=0.2)
 
 
-def _draw_field_panel(ax, sec, fiber_results, field='sigma'):
+def _draw_field_panel(ax, sec, fiber_results, field='sigma',
+                      show_rebar_labels=True):
     """
     Draw a coloured field (stress or strain) on the section.
     """
@@ -635,14 +658,15 @@ def _draw_field_panel(ax, sec, fiber_results, field='sigma'):
         ax.scatter(rb["x"], rb["y"], c=rval, cmap=cmap, norm=norm,
                    s=80, marker='o', edgecolors='black',
                    linewidths=1.2, zorder=5)
-        for i in range(len(rb["x"])):
-            ax.annotate(f"{i+1}", (rb["x"][i], rb["y"][i]),
-                        xytext=(12, -4), textcoords="offset points",
-                        fontsize=7, fontweight='bold',
-                        color='black', zorder=6,
-                        bbox=dict(boxstyle='round,pad=0.2',
-                                  facecolor='white', alpha=0.8,
-                                  edgecolor='none'))
+        if show_rebar_labels:
+            for i in range(len(rb["x"])):
+                ax.annotate(f"{i+1}", (rb["x"][i], rb["y"][i]),
+                            xytext=(12, -4), textcoords="offset points",
+                            fontsize=7, fontweight='bold',
+                            color='black', zorder=6,
+                            bbox=dict(boxstyle='round,pad=0.2',
+                                      facecolor='white', alpha=0.8,
+                                      edgecolor='none'))
 
     _draw_neutral_axis(ax, sec, fiber_results)
     _draw_reference_axes(ax, sec)
@@ -1728,7 +1752,7 @@ def plot_moment_curvature_surface(mc_list, direction='x', title=""):
 #  Legacy alias (backward compatibility with cli.py)
 # ==================================================================
 
-def plot_stress_profile(results, sec, title=""):
+def plot_stress_profile(results, sec, title="", show_rebar_labels=True):
     r"""
     Legacy wrapper — now generates two section-state maps (strain
     and stress) side by side.
@@ -1738,6 +1762,11 @@ def plot_stress_profile(results, sec, title=""):
     results : dict
     sec : GenericSection or RectSection
     title : str, optional
+    show_rebar_labels : bool, optional
+        Annotate each rebar with its index and strain/stress value.
+        Rebar markers are always drawn; set to ``False`` to keep only
+        the markers when a dense reinforcement layout makes the text
+        illegible. Default ``True``.
 
     Returns
     -------
@@ -1764,14 +1793,15 @@ def plot_stress_profile(results, sec, title=""):
                     cmap=cmap_e, norm=norm_e,
                     s=100, marker='o', edgecolors='black',
                     linewidths=1.5, zorder=5)
-        for i in range(len(rb["y"])):
-            ax1.annotate(f"{i+1}: {rval_eps[i]:.2f}‰",
-                         (rb["x"][i], rb["y"][i]),
-                         xytext=(10, -4), textcoords="offset points",
-                         fontsize=7, fontweight='bold',
-                         bbox=dict(boxstyle='round,pad=0.2',
-                                   facecolor='white', alpha=0.85,
-                                   edgecolor='none'), zorder=6)
+        if show_rebar_labels:
+            for i in range(len(rb["y"])):
+                ax1.annotate(f"{i+1}: {rval_eps[i]:.2f}‰",
+                             (rb["x"][i], rb["y"][i]),
+                             xytext=(10, -4), textcoords="offset points",
+                             fontsize=7, fontweight='bold',
+                             bbox=dict(boxstyle='round,pad=0.2',
+                                       facecolor='white', alpha=0.85,
+                                       edgecolor='none'), zorder=6)
 
     _draw_neutral_axis(ax1, sec, results)
     _draw_reference_axes(ax1, sec)
@@ -1797,14 +1827,15 @@ def plot_stress_profile(results, sec, title=""):
                     cmap=cmap_s, norm=norm_s,
                     s=100, marker='o', edgecolors='black',
                     linewidths=1.5, zorder=5)
-        for i in range(len(rb["y"])):
-            ax2.annotate(f"{i+1}: {rval_sig[i]:.1f}",
-                         (rb["x"][i], rb["y"][i]),
-                         xytext=(10, -4), textcoords="offset points",
-                         fontsize=7, fontweight='bold',
-                         bbox=dict(boxstyle='round,pad=0.2',
-                                   facecolor='white', alpha=0.85,
-                                   edgecolor='none'), zorder=6)
+        if show_rebar_labels:
+            for i in range(len(rb["y"])):
+                ax2.annotate(f"{i+1}: {rval_sig[i]:.1f}",
+                             (rb["x"][i], rb["y"][i]),
+                             xytext=(10, -4), textcoords="offset points",
+                             fontsize=7, fontweight='bold',
+                             bbox=dict(boxstyle='round,pad=0.2',
+                                       facecolor='white', alpha=0.85,
+                                       edgecolor='none'), zorder=6)
 
     _draw_neutral_axis(ax2, sec, results)
     _draw_reference_axes(ax2, sec)

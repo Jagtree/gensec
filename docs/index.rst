@@ -75,6 +75,7 @@ Key capabilities
    theory/nm_diagram
    theory/demand_verification
    theory/construction_timeline
+   theory/prestress_scope
 
 
 .. toctree::

@@ -37,10 +37,17 @@ This class mirrors the conventions of :class:`fben2`:
   change, not a code change.
 - An unimplemented National Annex raises explicitly, so the current
   coverage is visible exactly where it matters.
-- Properties are stored as plain attributes.  Time-dependent
-  relaxation (EN 1992-1-1 §3.3.2) is **not** computed in this phase;
-  the relaxation hooks are left as documented placeholders so that a
-  later phase can populate them without restructuring.
+- Properties are stored as plain attributes.  This class computes no
+  time-dependent quantity.  Relaxation (EN 1992-1-1 §3.3.2,
+  expressions (3.28)-(3.30)) is evaluated by the rheological provider,
+  :meth:`~gensec.materials.rheology.EC2RheologicalModel.relaxation`,
+  and applied to bonded tendons by the age-adjusted loss container
+  :mod:`gensec.solver.losses` on every ``interval`` event of a
+  construction timeline.  The two relaxation attributes stored here
+  (:attr:`fbpren.relaxation_class`, :attr:`fbpren.rho_1000`) are read
+  by that container as **per-tendon overrides** of the provider's
+  values; see their entries below for the route by which they are, and
+  are not, set.
 
 This class does **not** build a GenSec material.  The bridge
 :func:`~gensec.materials.ec2_bridge.prestress_from_ec2` consumes a
@@ -251,10 +258,24 @@ class fbpren:
         :math:`(\varepsilon_{uk}, f_{pd})` evaluated at
         :math:`\varepsilon_{ud}`.
     relaxation_class : int or None
-        EN 1992-1-1 §3.3.2 relaxation class (1, 2 or 3).  Stored for a
-        later time-dependent-loss phase; **not used** here.
+        EN 1992-1-1 §3.3.2 relaxation class (1, 2 or 3).  Not used by
+        this class.  Read by :mod:`gensec.solver.losses`
+        (``_tendon_steel``) and passed to
+        :meth:`~gensec.materials.rheology.EC2RheologicalModel.with_steel`:
+        when not ``None`` it overrides, for this tendon, the class of the
+        zone's rheological provider.  When ``None`` the provider's own
+        class applies -- the ``relaxation_class`` of the zone's
+        ``losses_models`` entry, or, if that entry declares none, the
+        provider's constructor default (class 2).
+        :func:`~gensec.materials.ec2_bridge.prestress_from_ec2` and the
+        YAML ``prestressing_steel_ec2`` material do **not** set it, so
+        through those routes the class is always the zone's, never the
+        tendon's.
     rho_1000 : float or None
-        Relaxation loss at 1000 h.  Placeholder for the loss phase.
+        Relaxation loss at 1000 h and 20 °C [%].  Same route and same
+        precedence as ``relaxation_class``: a per-tendon override of the
+        provider's :math:`\rho_{1000}`, read by
+        :mod:`gensec.solver.losses`, never set by the bridge.
 
     References
     ----------
@@ -307,10 +328,11 @@ class fbpren:
         else:
             self.sigma_ud_inclined = self.f_p01d
 
-        # ---- Time-dependent relaxation (Phase 5 placeholders) ----
-        # EN 1992-1-1 §3.3.2.  Not computed in this phase; stored so a
-        # later loss module can populate the diagram/effective
-        # prestrain without an interface change.
+        # ---- Relaxation parameters (EN 1992-1-1 §3.3.2) ----
+        # Stored, not evaluated: the law lives in the rheological
+        # provider (rheology.EC2RheologicalModel.relaxation) and is
+        # applied by solver.losses, which reads these two attributes as
+        # per-tendon overrides of the provider's class and rho_1000.
         self.relaxation_class = relaxation_class
         self.rho_1000 = rho_1000
 

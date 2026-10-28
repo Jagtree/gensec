@@ -161,15 +161,17 @@ html_theme = "furo"
 
 # _docs_assets may not be present in git-archive checkouts used by
 # sphinx-multiversion. Guard the import so conf.py always loads cleanly.
+_local_static = (["static"] if os.path.isdir(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
+    else [])
 try:
     from importlib.resources import files as _ires_files
     import gensec._docs_assets as _docs_assets_pkg
-    html_static_path = [
-        "static",
+    html_static_path = _local_static + [
         str(_ires_files(_docs_assets_pkg) / "static"),
     ]
 except (ImportError, ModuleNotFoundError):
-    html_static_path = ["static"]
+    html_static_path = _local_static
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

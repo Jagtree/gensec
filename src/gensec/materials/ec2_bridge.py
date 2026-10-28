@@ -328,8 +328,7 @@ def prestress_from_class(ps_class, ls, NA, eps_ud_factor, diagram,
         Designation key from
         :data:`~gensec.materials.prestress_properties.PrestressClassData`
         (e.g. ``'Y1860S7'``).
-    ls, NA, eps_ud_factor, gamma_s_override, diagram,
-    works_in_compression
+    ls, NA, eps_ud_factor, gamma_s_override, diagram, works_in_compression
         Passed through to :func:`prestress_from_ec2`.
 
     Returns

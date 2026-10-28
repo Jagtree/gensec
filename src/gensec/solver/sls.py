@@ -26,8 +26,9 @@ stress limits at transfer and in service — on a section that evolves
 through construction stages (:class:`~gensec.solver.section_state.SectionState`),
 per the Phase-7 decision sheet:
 
-- **D1** the stress engine is the *fiber solver on a linear-elastic
-  substituted view* (the *SLS view*), not a closed-form
+- **D1** the stress engine is the *fiber solver on a substituted
+  view* (the *SLS view*: every material replaced by its service
+  material, see :func:`sls_view` and D4), not a closed-form
   transformed-section path.  Every subtlety already encoded and
   validated in :class:`~gensec.solver.integrator.FiberSolver` —
   per-tendon prestrain offsets, embedded-area subtraction, bulk
@@ -51,11 +52,17 @@ per the Phase-7 decision sheet:
   :math:`f_{ct,\mathrm{eff}}`, and the solve returns the cracked
   equilibrium directly.  There is no basis left to violate, so there
   is no flag.
-- **D5** the surface is API-only; YAML wiring follows the
-  ``prestress_sequence`` compiler (§4.3).
+- **D5** was the API-only surface.  Since Phase 33 a combination
+  reaches this engine from YAML through its ``sls`` block
+  (:func:`gensec.io_yaml._parse_sls_block`, driven by
+  :func:`gensec.solver.timeline_run.run_sls`); a combination without
+  the block is reported as skipped, not silently omitted.
 - **D6** limits and decompression geometry are normative-agnostic
   primitives (:class:`~gensec.materials.verification_limits.StressLimits`,
-  cover distance ``c_dec``); EC2 values are a provider default.
+  cover distance ``c_dec``).  The coefficients come from the provider
+  of the **declared** code
+  (:func:`~gensec.materials.verification_limits.ec2_stress_limits`
+  for EN 1992-1-1); no code is assumed when none is declared.
 
 Incremental algebra (D2)
 ------------------------
@@ -172,9 +179,13 @@ Out of scope (deferred, explicit)
 ---------------------------------
 Concrete stress redistribution by creep beyond what the losses model
 routes through ``eps_init`` / ``bulk_eps`` (full AAEM on the stress
-field); stages with leaving elements; YAML wiring (D5); per-zone
-transformed properties for multi-zone bulk (mirrors the existing
-``compute_ideal_properties`` restriction).
+field); stages with leaving elements; per-zone transformed properties
+for multi-zone bulk (mirrors the existing ``compute_ideal_properties``
+restriction).  Crack width and tension stiffening are not computed:
+the service law releases a fibre at :math:`f_{ct,\mathrm{eff}}` and
+returns the state *at* the crack, which is a sectional quantity; the
+member average between cracks is not (see
+:mod:`gensec.materials.service_concrete`).
 """
 
 import copy
@@ -746,24 +757,37 @@ class MaterialMap:
 
     Parameters
     ----------
-    bulk : numpy.ndarray
-        Shape ``(n_zones,)``, ``float``.  ``bulk[0]`` is the base bulk
-        (``section.bulk_material``); ``bulk[z]`` for ``z >= 1`` is
-        ``section.bulk_materials[z - 1]``.  [MPa]
-    elem : numpy.ndarray
-        Shape ``(n_union,)``, ``float``, in the canonical
-        ``rebars + tendons`` order.  [MPa]
+    bulk : sequence of Material
+        One service material per bulk zone, stored as a tuple.
+        ``bulk[0]`` is the base bulk (``section.bulk_material``);
+        ``bulk[z]`` for ``z >= 1`` is ``section.bulk_materials[z - 1]``.
+        Since Phase 27 an entry is a material, not a number: a bare
+        modulus is accepted upstream and means
+        :class:`~gensec.materials.elastic.LinearElastic` at that value.
+    elem : sequence of Material
+        One material per point element, in the canonical
+        ``rebars + tendons`` order.
     labels_bulk : tuple of str
         Zone names, index-aligned with *bulk*.
     labels_elem : tuple of str
         Element names, index-aligned with *elem*.
 
+    Attributes
+    ----------
+    E_bulk, E_elem : numpy.ndarray
+        Read-only, derived from each material's
+        ``reference_modulus()`` [MPa]: the number a homogenisation
+        ratio is written on (the secant :math:`E_{cm}` for
+        :class:`~gensec.materials.service_concrete.ServiceConcrete`,
+        not its initial tangent).
+
     Raises
     ------
     ValueError
-        If the arrays are not one-dimensional, if a label tuple does
-        not match its array, or if any entry is not finite and
-        strictly positive.  These run **always** (rule 1), not under
+        If an entry is not a material, if a label tuple does not match
+        its sequence, if the bulk axis is empty, or if any reference
+        modulus is not finite and strictly positive.  These run
+        **always** (rule 1), not under
         ``assert``: a shape check that ``python -O`` removes is not a
         check.  The shape check is what makes 12_0d's D-1 (zone /
         material axis collapse) *unrepresentable* rather than merely
@@ -1308,20 +1332,20 @@ def resolve_moduli(section, policy, *, explicit=None):
     Override keys
     -------------
 
-    ==================================  ==============================
-    key                                 meaning
-    ==================================  ==============================
-    ``("zone", "topping")``             bulk-zone slot, by name
-    ``("zone", 1)``                     bulk-zone slot, by index
-    ``("rebar", "A1")``                 rebar slot, by declared name
-    ``("tendon", "P1")``                tendon slot, by declared name
-    ``("rebar", 2)`` / ``("tendon", 0)`` element slot, by index
-                                        within its own population
-    ``("elem", 3)``                     element slot, by union index
-    ``"C35"``                           material **name**: sugar,
-                                        broadcast to every slot whose
-                                        material carries that name
-    ==================================  ==============================
+    ======================================  ==============================
+    key                                     meaning
+    ======================================  ==============================
+    ``("zone", "topping")``                 bulk-zone slot, by name
+    ``("zone", 1)``                         bulk-zone slot, by index
+    ``("rebar", "A1")``                     rebar slot, by declared name
+    ``("tendon", "P1")``                    tendon slot, by declared name
+    ``("rebar", 2)`` / ``("tendon", 0)``    element slot, by index
+                                            within its own population
+    ``("elem", 3)``                         element slot, by union index
+    ``"C35"``                               material **name**: sugar,
+                                            broadcast to every slot whose
+                                            material carries that name
+    ======================================  ==============================
 
     A slot key wins over the name sugar on the slots they share, so
     ``{"C35": 33000.0, ("zone", 1): 22000.0}`` reads "C35 everywhere,
@@ -1489,8 +1513,18 @@ def resolve_sls_moduli(section, moduli=None):
 def sls_view(view, modmap):
     r"""
     Build the SLS view: the section view with every material replaced
-    by its :class:`~gensec.materials.elastic.LinearElastic`
-    counterpart.
+    by the **service material** the map resolved for its slot.
+
+    Since Phase 27 the map carries materials, not moduli.  A slot
+    resolved from an explicit number holds
+    :class:`~gensec.materials.elastic.LinearElastic` at that modulus; a
+    concrete zone resolved from its rheological provider holds the
+    provider's ``service_law(t)`` -- written by the provider's own
+    code, e.g.
+    :class:`~gensec.materials.service_concrete.ServiceConcrete`
+    (non-linear in compression, released in tension at
+    :math:`f_{ct,\mathrm{eff}}`) -- so the view is **not** linear in
+    general and a cracked equilibrium is solved directly.
 
     The substitution is a **shallow re-wrap**: geometry arrays,
     initial-strain arrays and zone indices are shared by reference
@@ -2619,7 +2653,13 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
         "governing": {...} or None}``.  Each stage record carries the
         cumulative demand, the solved plane of the stage, concrete
         stress extremes with locations, the per-element stress table
-        (union-indexed) and the check records.
+        (union-indexed), the check records, and ``"fiber_field"`` --
+        the same accumulated bulk/rebar strain-stress arrays
+        repackaged in the shape
+        :meth:`~gensec.solver.integrator.FiberSolver.get_fiber_results`
+        returns, together with the stage's materialised (active-only)
+        geometry under ``"section_view"``, for
+        :func:`gensec.output.sls_state_plots.export_sls_state_plots`.
 
     Raises
     ------
@@ -3005,6 +3045,39 @@ def verify_sls_staged(base_section, stages, *, moduli=None,
                 "by_zone": _by_zone,
             },
             "elements": elements,
+            # Plot-ready repackaging of the arrays already computed
+            # above (S_bulk/eps_fib over idx_present, elements over
+            # rebar union indices) in the shape
+            # ``FiberSolver.get_fiber_results`` returns, plus the
+            # stage's own materialised (active-only) geometry.  No
+            # physics happens here: one home for one fact — the strain
+            # field is the accumulator above, not a fresh solve — see
+            # gensec.output.sls_state_plots.
+            "fiber_field": {
+                "bulk": {
+                    "x": base_section.x_fibers[idx_present].copy(),
+                    "y": base_section.y_fibers[idx_present].copy(),
+                    "eps": eps_fib[idx_present].copy(),
+                    "sigma": S_bulk[idx_present].copy(),
+                    "dA": base_section.A_fibers[idx_present].copy(),
+                },
+                "rebars": {
+                    "x": np.array([e["x"] for e in elements
+                                  if e["kind"] == "rebar"], dtype=float),
+                    "y": np.array([e["y"] for e in elements
+                                  if e["kind"] == "rebar"], dtype=float),
+                    "eps": np.array([e["eps"] for e in elements
+                                     if e["kind"] == "rebar"],
+                                    dtype=float),
+                    "sigma": np.array([e["sigma_MPa"] for e in elements
+                                       if e["kind"] == "rebar"],
+                                      dtype=float),
+                    "A": base_section.A_rebars[
+                        [e["union_index"] for e in elements
+                         if e["kind"] == "rebar"]].copy(),
+                },
+                "section_view": view_k,
+            },
             "active_zones": _active_zone_labels(base_section,
                                                 zone_active, n_zones),
         }

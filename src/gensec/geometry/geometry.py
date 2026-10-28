@@ -904,11 +904,14 @@ class GenericSection:
         Notes
         -----
         Tendons are **excluded** from the homogenized (ideal) section
-        in this phase.  The existing-prestress domain and SLS stresses
+        by design.  The existing-prestress domain and SLS stresses
         are obtained by ULS/SLS fiber integration with the locked-in
         prestrain (see the solver), not from the elastic ideal
         section; folding the tendon transformed area in here would
         double-count once the prestrain is applied at the fiber level.
+        The per-stage transformed properties that do include bonded
+        tendons are
+        :func:`~gensec.solver.sls.sls_transformed_properties`.
         """
         from .properties import (
             compute_section_properties, HomogenizedRebar,

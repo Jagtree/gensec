@@ -37,20 +37,15 @@ falsification belongs with the tests that run it.
 
 The two that do ship:
 
-=============================  ==============================================
-:class:`EC2RheologicalModel`   EN 1992-1-1 Annex B + §3.1.4 + §3.3.2 (also
-                               NTC 2018, which adopts the same formulae).
-                               The **default**.
-                               — hyperbolic time functions, volume/surface
-                               ratio in inches, :math:`E_c=4700\sqrt{f'_c}`,
-                               a compliance referenced to the modulus at
-                               loading rather than at 28 days.  It exists to
-                               **falsify** the claim of normative agnosticism.
+:class:`EC2RheologicalModel`
+    EN 1992-1-1 Annex B + §3.1.4 + §3.3.2 (also NTC 2018, which adopts
+    the same formulae).  Selected in YAML by ``provider: ec2`` or
+    ``provider: ntc``; it is not a default, a ``losses_models`` entry
+    names its provider.
 :class:`TabulatedRheologicalModel`
-                               User compliance / shrinkage / relaxation
-                               tables.  A code that is *only data* passes
-                               through the same door.
-=============================  ==============================================
+    User compliance / shrinkage / relaxation tables
+    (``provider: tabulated``).  A code that is *only data* passes
+    through the same door.
 
 Geometry binding
 ----------------

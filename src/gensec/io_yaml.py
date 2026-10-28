@@ -2945,6 +2945,8 @@ _OUTPUT_VALID = (
     "generate_3d_moment_curvature",
     # consumed by the CLI, not by this function
     "n_levels_mode", "n_levels_count",
+    # rebar annotation density on section/state figures
+    "show_rebar_labels",
 )
 
 
@@ -3009,6 +3011,12 @@ def _parse_output_flags(output_spec):
     flags.setdefault("generate_moment_curvature", True)
     flags.setdefault("generate_polar_ductility", True)
     flags.setdefault("generate_3d_moment_curvature", True)
+
+    # Per-bar annotations (name/number + strain or stress value) on
+    # section_*.png and state_*.png.  A densely reinforced section
+    # turns these labels into an unreadable smear; set to False to
+    # keep the rebar markers but drop the text.
+    flags.setdefault("show_rebar_labels", True)
 
     return flags
 # GENSEC-COMPLETE phase=38 utc=2026-09-11T16:04:37Z sha256=bb062bbec502a8cbebcbd2c2ebdaf506ba5d7be0da9752f95039d7f8cb5e2792 body_lines=3013

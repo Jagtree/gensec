@@ -125,7 +125,7 @@ The ``fct`` value should be chosen to match the verification context:
 When using the ``concrete_ec2`` YAML type, setting
 ``enable_tension: true`` automatically populates ``fct`` and ``Ec``
 from the EC2 property object.  The ``tension_fct`` field controls
-which tensile strength is used (see :doc:`yaml_reference`).
+which tensile strength is used (see :doc:`/user_guide/yaml_reference`).
 
 With the tension branch active, the admissible strain range becomes
 :math:`[\varepsilon_{cu2},\, \varepsilon_{ct}]`; when disabled it

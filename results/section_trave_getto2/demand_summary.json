@@ -407,6 +407,54 @@
       "eta_norm_beta": 0.794,
       "eta_norm_ray": 0.5703,
       "eta_2D": 0.6606
+    },
+    {
+      "name": "SLV_100",
+      "N_kN": -25515.0,
+      "Mx_kNm": -60955.64,
+      "My_kNm": -187113.88,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.9591,
+      "eta_norm_beta": 0.7316,
+      "eta_norm_ray": 0.4012,
+      "eta_2D": 0.58
+    },
+    {
+      "name": "SLV_101",
+      "N_kN": -25515.0,
+      "Mx_kNm": -60955.64,
+      "My_kNm": 187113.88,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.9591,
+      "eta_norm_beta": 0.7316,
+      "eta_norm_ray": 0.4012,
+      "eta_2D": 0.58
+    },
+    {
+      "name": "SLV_102",
+      "N_kN": -25515.0,
+      "Mx_kNm": 60955.64,
+      "My_kNm": -187113.88,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.9596,
+      "eta_norm_beta": 0.7344,
+      "eta_norm_ray": 0.3999,
+      "eta_2D": 0.581
+    },
+    {
+      "name": "SLV_103",
+      "N_kN": -25515.0,
+      "Mx_kNm": 60955.64,
+      "My_kNm": 187113.88,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.9596,
+      "eta_norm_beta": 0.7344,
+      "eta_norm_ray": 0.3999,
+      "eta_2D": 0.581
     }
   ]
 }

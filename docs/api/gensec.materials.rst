@@ -7,10 +7,20 @@
 Constitutive material laws and property tables.
 
 The abstract base class :class:`~gensec.materials.base.Material` defines
-the interface that all materials must implement.  Three concrete
+the interface that all materials must implement.  Four concrete
 implementations are provided — :class:`Concrete`,
-:class:`Steel`, and :class:`TabulatedMaterial` —
-plus bridge modules for automatic property lookup from European standards.
+:class:`ServiceConcrete`, :class:`Steel`, and
+:class:`TabulatedMaterial` — plus bridge modules for automatic
+property lookup from European standards.
+
+:class:`Concrete` and :class:`ServiceConcrete` are not two flavours of
+the same thing.  The first is a **design envelope**, calibrated so that
+its integral gives the right resultant and lever arm at collapse; its
+slope at the origin carries :math:`\gamma_c` and :math:`\alpha_{cc}`
+and has no physical meaning.  The second is what a concrete **does**:
+expression (3.14) in compression, a linear branch to a cut at
+:math:`f_{ct,\mathrm{eff}}` in tension, no partial factors anywhere.
+A model declares which one it means; neither is a default.
 
 
 Abstract base
@@ -25,6 +35,14 @@ Concrete — parabola-rectangle
 -------------------------------
 
 .. automodule:: gensec.materials.concrete
+   :members:
+   :show-inheritance:
+
+
+Concrete — service law, EN 1992-1-1 (3.14)
+-------------------------------------------
+
+.. automodule:: gensec.materials.service_concrete
    :members:
    :show-inheritance:
 
@@ -76,6 +94,46 @@ objects from the EC2 and EN 10025 property classes, extracting all
 constitutive parameters automatically.
 
 .. automodule:: gensec.materials.ec2_bridge
+   :members:
+   :show-inheritance:
+
+
+Prestressing-steel properties, EN 1992-1-1 §3.3
+-----------------------------------------------
+
+.. automodule:: gensec.materials.prestress_properties
+   :members:
+   :show-inheritance:
+
+
+Rheological models (creep, shrinkage, relaxation)
+-------------------------------------------------
+
+.. automodule:: gensec.materials.rheology
+   :members:
+   :show-inheritance:
+
+
+Linear-elastic law
+------------------
+
+.. automodule:: gensec.materials.elastic
+   :members:
+   :show-inheritance:
+
+
+SLS stress limits
+-----------------
+
+.. automodule:: gensec.materials.verification_limits
+   :members:
+   :show-inheritance:
+
+
+Normative-code registry
+-----------------------
+
+.. automodule:: gensec.materials.codes
    :members:
    :show-inheritance:
 

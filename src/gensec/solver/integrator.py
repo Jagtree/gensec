@@ -1449,6 +1449,7 @@ class FiberSolver:
             ``resolution`` : tuple of int
                 The grid actually used.
             ``M_tol`` : float
+                The moment tolerance the reach was measured under [N.mm].
 
         Notes
         -----

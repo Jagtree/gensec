@@ -653,6 +653,10 @@ demands:
   - {name: SLV_22, N_kN: -14862, Mx_kNm: 135262, My_kNm: 146879}
   - {name: SLV_23, N_kN: -44271, Mx_kNm: -135262, My_kNm: 146879}
   - {name: SLV_24, N_kN: -14862, Mx_kNm: -135262, My_kNm: 146879}
+  - {name: SLV_100, N_kN: -25515, Mx_kNm: -60955.64, My_kNm: -187113.88}
+  - {name: SLV_101, N_kN: -25515, Mx_kNm: -60955.64, My_kNm: +187113.88}
+  - {name: SLV_102, N_kN: -25515, Mx_kNm: +60955.64, My_kNm: -187113.88}
+  - {name: SLV_103, N_kN: -25515, Mx_kNm: +60955.64, My_kNm: +187113.88}
 
 combinations:
   # --- SLE: stress verification ---------------------------------
@@ -767,3 +771,5 @@ output:
   n_levels_mode: demands
   # n_levels_count: 10
   # n_levels_values: [-3000, -1500, 0]
+
+  show_rebar_labels: false

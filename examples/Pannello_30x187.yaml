@@ -72,6 +72,8 @@ output:
   eta_path_2D: false           # default: false — staged Mx-My ray
   delta_N_tol: 0.001           # tightened tolerance: demand at N = 0 (pure flexure)
 
+  show_rebar_labels: false
+
   # ── Domain generation ──
   generate_mx_my: true         # Mx-My contour plots
   generate_3d_surface: true    # 3D surface CSV/JSON/plot

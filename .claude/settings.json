@@ -13,7 +13,32 @@
       "Bash(python -c \"from gensec.solver.capacity import SectionCapacity; print\\('import OK'\\)\")",
       "Bash(python -c \"import gensec.solver.capacity; print\\('import OK'\\)\")",
       "Bash(python -m pytest tests/ -x -q)",
-      "Bash(python -m pytest tests/test_capacity_v2.py::TestMomentCurvatureUltimateRegression tests/test_capacity_v2.py::TestMomentCurvatureDiagnostics -v)"
+      "Bash(python -m pytest tests/test_capacity_v2.py::TestMomentCurvatureUltimateRegression tests/test_capacity_v2.py::TestMomentCurvatureDiagnostics -v)",
+      "Bash(python -m pytest tests/test_state_plots_boundary.py -q --no-cov)",
+      "Bash(mkdir -p /tmp/gensec_test_out)",
+      "Bash(mkdir -p .scratch_test)",
+      "Bash(python -m gensec.cli run .scratch_test/input_false.yaml --output-dir .scratch_test/out_false)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(python -m pytest tests/test_infrastructure.py tests/test_phase13_dump.py -q --no-cov)",
+      "Bash(python3 -c \"print\\('ok'\\)\")",
+      "Bash(where python *)",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\compare.py\")",
+      "Bash(/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe -c ' *)",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\compare2.py\")",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\verify_polygons.py\")",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\gen_bars.py\")",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\splice.py\")",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\geom_check.py\")",
+      "Bash(\"/d/SOFTWARE_HOMEPROJECTS/gensec/.venv/Scripts/python.exe\" \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\\\\geom_check2.py\")",
+      "Bash(rm -f \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\"/*.py \"C:\\\\Users\\\\alber\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--SOFTWARE-HOMEPROJECTS-gensec\\\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\\\scratchpad\"/new_bars_block.txt)",
+      "Bash(python -m gensec.cli run --help)",
+      "Bash(mkdir -p /tmp_scratch_sls_test)",
+      "Bash(python -m gensec.cli run examples/section_trave_getto2.yaml --n-points 10 --output-dir \"$\\(pwd\\)/scratch_sls_test\")",
+      "Bash(python -m pytest tests/test_sls_state_plots.py -q)",
+      "Bash(python -m pytest tests/test_phase27_service_path.py tests/test_phase28_strain_accumulation.py tests/test_phase29_extreme_fibre_check.py tests/test_phase30_check_block.py tests/test_phase32_zone_limits.py tests/test_phase33_sls_yaml_surface.py tests/test_phase7_sls.py -q --no-cov)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\alber\\AppData\\Local\\Temp\\claude\\d--SOFTWARE-HOMEPROJECTS-gensec\\f32ca8bc-5dc0-4f8f-8c45-219d2da809a7\\scratchpad"
     ]
   }
 }

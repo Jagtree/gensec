@@ -40,12 +40,73 @@ Task 3, fork C4).
   one-shot-with-datum ≡ incremental-staged equivalence proof, the
   characteristic-datum convention, and the pre-/post-tensioning rule.
 
+- **Toggle for per-rebar plot annotations.**  A section with many
+  bars turns the per-rebar name/value labels on ``section_geometry.png``,
+  ``section_<demand>.png`` and ``state_<demand>.png`` into an
+  unreadable smear.  The new ``output.show_rebar_labels`` YAML flag
+  (default ``true``) drops the annotation text while keeping the
+  rebar markers; wired through :func:`~gensec.output.plots.plot_section`,
+  :func:`~gensec.output.plots.plot_section_state`,
+  :func:`~gensec.output.plots.plot_stress_profile` and
+  :func:`~gensec.output.state_plots.export_demand_state_plots`.
+
+- **Section-state plots at SLS.**  ``gensec run`` drew
+  ``section_*.png`` / ``state_*.png`` only for the ULS demands; the SLS
+  stress verification printed its report and drew nothing.  Every SLS
+  stage that produces a verdict now writes
+  ``fibers_sls_<combination>[_<point>]_<stage>.csv``,
+  ``section_sls_…png`` and ``state_sls_…png``.  The field drawn is the
+  accumulated strain field the verification checked, carried on each
+  stage record as ``"fiber_field"``, not a fresh solve.  See
+  :mod:`gensec.output.sls_state_plots`.
+
+**Bug fixes**
+
+- **Missing state plots.**  ``gensec run`` selects
+  the ``fiber_details_top_k`` demands of highest :math:`\eta` and solves
+  for the strain plane at each.  A demand outside the resistance domain
+  has no such plane and ranks first, so with ``k`` or more of them the
+  run wrote no ``state_*.png`` (and no ``section_*.png``) while verified
+  demands were never reached, reporting only ``SOLVER DID NOT CONVERGE``
+  per demand.  Every selected demand now ends in one reported outcome:
+  the state at the demand; the state at the hull boundary along its own
+  ray (files suffixed ``_boundary``, titles carry :math:`\eta_{\text{ray}}`,
+  see :meth:`~gensec.solver.check.DomainChecker.boundary_point_along_ray`);
+  or a named failure with the solver's own ``reason`` / ``refusal``.
+  See :mod:`gensec.output.state_plots`.
+
 **Invariants**
 
 - ``verify_sls_staged`` states and enforces the single-compatibility-plane
   invariant: a persisting bulk zone whose locked-in datum changes
   mid-history raises :class:`NotImplementedError` (re-datuming of cured
   concrete, or a multi-body merge, are out of scope).
+
+**Documentation**
+
+- **New theory page** :doc:`theory/prestress_scope` — the boundary of the
+  prestress model: what is computed, what is a declared member-level
+  input, what is refused, what is approximated and what is absent
+  (shear, torsion, fatigue, fire, second order, anchorage zones, crack
+  width).  It also lists the rheology parameters that still take a value
+  when the input is silent, and the measured retrofit-clock defect.
+- Stale docstrings corrected: relaxation is computed (EN 1992-1-1
+  §3.3.2, through :mod:`gensec.solver.losses`), not a placeholder
+  (:mod:`gensec.materials.prestress_properties`); the scope of
+  :mod:`gensec.solver.prestress_transfer`; the SLS view carries service
+  materials, not linear ones, and is reachable from YAML
+  (:mod:`gensec.solver.sls`, D1/D5/D6, :func:`~gensec.solver.sls.sls_view`,
+  :class:`~gensec.solver.sls.MaterialMap`); a retrofit does reach the
+  stressing walk (:mod:`gensec.solver.timeline`).
+- The losses-on-timeline item listed as deferred below has since been
+  implemented (``interval`` events carrying ``losses``).
+- One source file per page.  Every user-guide, architecture, theory and
+  API page existed twice, in ``docs/`` and in its subdirectory; the
+  toctree built the subdirectory copy while recent edits had gone to the
+  other one, so the published pages were stale (``DemandChecker``, the
+  rejected ``resolution`` key).  The up-to-date text now lives in the
+  subdirectory and the duplicates are removed.  The build is free of
+  warnings.
 
 **Deferred**
 
