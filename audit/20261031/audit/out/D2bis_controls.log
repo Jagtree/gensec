@@ -1,0 +1,4 @@
+C2_rect_h12.5.yaml                         planes= 358801 adm= 233264 tendons=0 conv_excess=+0.00% at (N,side)=None  gensec_excess=+4.96% at (np.float64(-2764.8), 1)
+D1_hardening_rho4.yaml                     planes= 358801 adm= 183666 tendons=0 conv_excess=+10.71% at (N,side)=(np.float64(2329.3), -1)  gensec_excess=+9.12% at (np.float64(2329.3), -1)
+D2_brittle_tension.yaml                    planes= 358801 adm= 233052 tendons=0 conv_excess=+99.99% at (N,side)=(np.float64(24.8), 1)  gensec_excess=+14.28% at (np.float64(-2355.0), 1)
+F1_pretensioned_uls.yaml                   planes= 358801 adm= 164025 tendons=1 conv_excess=+13.79% at (N,side)=(np.float64(-2762.8), 1)  gensec_excess=+215.40% at (np.float64(-2836.1), 1)

@@ -1,0 +1,20 @@
+==========================================================================
+NUMERIC FINGERPRINT — COMPARISON
+  before : C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/base/numeric_pre.txt   (6797 values)
+  after  : C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/base/numeric_post.txt   (6797 values)
+  rtol   : 1e-12
+==========================================================================
+shared keys      : 6797
+only in before   : 0
+only in after    : 0
+values moved     : 0
+
+--------------------------------------------------------------------------
+INERT — every recorded number is unchanged within 1e-12 and the key sets are identical.
+        This is a claim WITHIN 1e-12, at 12 significant digits.  It is not a claim of identity:
+        a value that moved by less than that is recorded here as unmoved,
+        and a code path that was never taken is recorded here the same way.
+        Where a phase touches the axial path, read the axial.* keys: the
+        entry count and the two verdicts are integers and booleans, and
+        carry no precision to hide behind (19_0 §2).
+--------------------------------------------------------------------------

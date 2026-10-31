@@ -1,0 +1,16 @@
+{
+  "demands": {
+    "n_total": 3,
+    "n_verified": 2,
+    "n_fail": 1,
+    "eta_max": 53.4183,
+    "eta_mean": 18.369766666666667,
+    "eta_p95": 48.17507,
+    "eta_p99": 52.369654000000004,
+    "eta_median": 0.986,
+    "governing_name": "My_pos",
+    "governing_rank": 1,
+    "all_verified": false
+  },
+  "all_verified": false
+}

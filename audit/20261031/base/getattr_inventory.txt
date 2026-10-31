@@ -1,0 +1,43 @@
+getattr inventory — 229 site(s) under D:\SOFTWARE_HOMEPROJECTS\gensec\src\gensec
+  raising           1
+  probe            75
+  dynamic          21
+  substituting    132
+
+on the declared dump path: 11 site(s)
+  output/timeline_dump.py:266 [dynamic] _material_entry: <computed>
+  output/timeline_dump.py:305 [probe] _declared_block: '_domain' -> None
+  output/timeline_dump.py:389 [probe] _zone_entries: 'zone_names' -> None
+  output/timeline_dump.py:400 [probe] _zone_entries: 'bulk_materials' -> None
+  output/timeline_dump.py:513 [probe] _tendon_entries: 'tendons' -> None
+  output/timeline_dump.py:619 [probe] _rebar_entries: 'rebars' -> None
+  output/timeline_dump.py:1087 [probe] build_timeline_dump: 'zone_names' -> None
+  output/timeline_dump.py:1089 [probe] build_timeline_dump: 'tendons' -> None
+  output/timeline_dump.py:1090 [probe] build_timeline_dump: 'rebars' -> None
+  solver/prestress_ledger.py:651 [dynamic] PrestressLedger.items: <computed>
+  solver/timeline.py:2161 [probe] ConstructionTimeline._reconcile_grout: 'tendons' -> []
+
+no substituting getattr on the dump path.
+
+substituting sites: 132
+  read (a reason per site)       35
+  declared unread (on record)    97
+  owed (neither)                  0
+
+still to read, by module, in the order the register gives:
+    19  solver/section_state.py
+    19  solver/sls.py
+     8  solver/losses.py
+     7  solver/posttension.py
+     6  solver/timeline.py
+     8  io_yaml.py
+     9  materials/base.py
+     7  output/report.py
+     7  output/geometry_plot.py
+     3  output/plots.py
+     2  api.py
+     1  geometry/geometry.py
+     1  output/_polydraw.py
+
+gate: no substituting getattr on the dump path; 35 site(s) read, 97 on the unread register, 0 unaccounted for.
+      4 archived reason(s) for sites removed in earlier phases (getattr_reasons.REMOVED).

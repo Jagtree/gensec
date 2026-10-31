@@ -1,0 +1,4 @@
+name,N_kN,Mx_kNm,My_kNm,eta_norm,eta_norm_beta,eta_2D,inside,verified
+My_pos,0.00,0.0000,150.0000,1.0003,1.0002,53.4183,False,False
+My_neg,0.00,0.0000,-150.0000,0.5213,0.7050,0.6378,True,True
+My_only_key,0.00,0.0000,0.0000,0.9860,0.0000,0.0000,True,True

@@ -1,0 +1,37 @@
+{
+  "demands": [
+    {
+      "name": "My_pos",
+      "N_kN": 0.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 150.0,
+      "inside": false,
+      "verified": false,
+      "eta_norm": 1.0003,
+      "eta_norm_beta": 1.0002,
+      "eta_2D": 53.4183
+    },
+    {
+      "name": "My_neg",
+      "N_kN": 0.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": -150.0,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.5213,
+      "eta_norm_beta": 0.705,
+      "eta_2D": 0.6378
+    },
+    {
+      "name": "My_only_key",
+      "N_kN": 0.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.986,
+      "eta_norm_beta": 0.0,
+      "eta_2D": 0.0
+    }
+  ]
+}

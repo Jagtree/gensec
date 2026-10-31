@@ -1,0 +1,105 @@
+======================================================================
+MATERIAL-ASSUMPTION INVENTORY
+======================================================================
+
+symbol: 276 site(s)
+    84  src/gensec/materials/ec2_properties.py
+        alpha_cc, alpha_ct, eps_c1, eps_c2, eps_c3, eps_cu1
+    50  src/gensec/materials/concrete.py
+        eps_c2, eps_cu2, fcd, fck, gamma_c
+    26  src/gensec/materials/steel.py
+        f_p01d, fyd, fyk
+    25  src/gensec/materials/rheology.py
+        eps_c1, eps_ca, eps_cd, eps_cu1, fck, fcm
+    22  src/gensec/materials/service_concrete.py
+        eps_c1, eps_cu1, fcm
+    16  src/gensec/materials/ec2_bridge.py
+        alpha_cc, eps_c1, eps_c2, eps_cu1, eps_cu2, f_p01d
+    13  src/gensec/materials/codes.py
+        fck, gamma_c, phi
+     8  src/gensec/api.py
+        eps_cu2, fcd, fck, fyd
+     7  src/gensec/solver/losses.py
+        fpk, phi
+     6  src/gensec/materials/prestress_properties.py
+        f_p01d
+     4  src/gensec/materials/base.py
+        phi
+     4  src/gensec/materials/verification_limits.py
+        fpk, fyk
+     4  src/gensec/solver/sls.py
+        f_ck
+     3  src/gensec/io_yaml.py
+        fck
+     3  src/gensec/solver/capacity.py
+        fctm
+     1  src/gensec/output/report.py
+        fcd
+
+clause: 140 site(s)
+    32  src/gensec/materials/codes.py
+        aci, ec2, ntc
+    24  src/gensec/materials/rheology.py
+        ec2
+    14  src/gensec/materials/base.py
+        aci, ec2
+    10  src/gensec/io_yaml.py
+        ec2
+    10  src/gensec/materials/verification_limits.py
+        ec2
+     9  src/gensec/materials/prestress_properties.py
+        ec2
+     9  src/gensec/solver/losses.py
+        ec2
+     6  src/gensec/solver/sls.py
+        ec2
+     5  src/gensec/materials/service_concrete.py
+        ec2
+     4  src/gensec/solver/posttension.py
+        ec2
+     3  src/gensec/materials/concrete.py
+        ec2
+     2  src/gensec/materials/ec2_bridge.py
+        en10025
+     2  src/gensec/materials/steel.py
+        ec2
+     2  src/gensec/solver/capacity.py
+        ec2
+     2  src/gensec/solver/prestress_transfer.py
+        ec2
+     2  src/gensec/solver/timeline.py
+        ec2
+     1  src/gensec/geometry/properties.py
+        ec2
+     1  src/gensec/materials/__init__.py
+        ec2
+     1  src/gensec/solver/section_state.py
+        ec2
+     1  src/gensec/solver/timeline_run.py
+        ec2
+
+concrete_type: 4 site(s)
+     2  src/gensec/materials/ec2_bridge.py
+        Concrete, ServiceConcrete
+     1  src/gensec/io_yaml.py
+        Concrete
+     1  src/gensec/materials/rheology.py
+        ServiceConcrete
+
+branch: 16 site(s)
+     6  src/gensec/materials/ec2_bridge.py
+        fct_eff
+     4  src/gensec/materials/service_concrete.py
+        fct_eff
+     3  src/gensec/io_yaml.py
+        curing
+     3  src/gensec/solver/timeline.py
+        curing
+
+----------------------------------------------------------------------
+total sites            : 436
+  in materials/        : 365
+  in the engine        : 71
+modules naming a document in prose only: 14
+
+gate: no unexplained drift.  436 site(s) over 89 keys, 71 of them outside materials/, 1 beyond baseline (all with a written reason), 0 below it.

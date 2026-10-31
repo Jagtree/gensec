@@ -1,0 +1,30 @@
+== H1_box.yaml: max rel dev 6.91e-16
+   A    closed=1.504000e+05  GenSec=1.504000e+05
+   xg   closed=2.000000e+02  GenSec=2.000000e+02
+   yg   closed=3.500000e+02  GenSec=3.500000e+02
+   Ix   closed=8.284053e+09  GenSec=8.284053e+09
+   Iy   closed=3.111253e+09  GenSec=3.111253e+09
+   Ixy  closed=0.000000e+00  GenSec=0.000000e+00
+== H2_tee.yaml: max rel dev 0.00e+00
+   A    closed=2.850000e+05  GenSec=2.850000e+05
+   xg   closed=4.000000e+02  GenSec=4.000000e+02
+   yg   closed=4.223684e+02  GenSec=4.223684e+02
+   Ix   closed=1.289490e+10  GenSec=1.289490e+10
+   Iy   closed=7.637500e+09  GenSec=7.637500e+09
+   Ixy  closed=0.000000e+00  GenSec=0.000000e+00
+== H4_L.yaml: max rel dev 2.85e-16
+   A    closed=8.000000e+04  GenSec=8.000000e+04
+   xg   closed=1.062500e+02  GenSec=1.062500e+02
+   yg   closed=1.843750e+02  GenSec=1.843750e+02
+   Ix   closed=1.672135e+09  GenSec=1.672135e+09
+   Iy   closed=5.635417e+08  GenSec=5.635417e+08
+   Ixy  closed=-4.921875e+08  GenSec=-4.921875e+08
+   principal closed: I_xi=1.859117e+09 I_eta=3.765602e+08 alpha(=0.5 atan2(-2Ixy,Ix-Iy))=20.8017 deg
+   principal GenSec: I_xi=1.859117e+09 I_eta=3.765602e+08 alpha=20.8017 deg (n_bulk=1.0, E_ref=33000.0)
+== H3_rc_homog.yaml: max rel dev 6.73e-16
+   A    closed=1.606273e+05  GenSec=1.606273e+05
+   xg   closed=1.500000e+02  GenSec=1.500000e+02
+   yg   closed=2.443291e+02  GenSec=2.443291e+02
+   Ix   closed=3.544925e+09  GenSec=3.544925e+09
+   Iy   closed=1.125000e+09  GenSec=1.125000e+09
+   Ixy  closed=0.000000e+00  GenSec=0.000000e+00

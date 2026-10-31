@@ -1,0 +1,14 @@
+{
+  "demands": [
+    {
+      "name": "d1",
+      "N_kN": -2000.0,
+      "Mx_kNm": 200.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.3067,
+      "eta_norm_beta": 0.5559,
+      "inside": true,
+      "verified": true
+    }
+  ]
+}

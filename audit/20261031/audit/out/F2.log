@@ -1,0 +1,5 @@
+PostTensionResult fields: ['Ap', 'Ep', 'converged', 'coupled_iterations', 'declared_state_demand', 'effective_actions', 'eps_pe_eff', 'eps_ref_grout', 'increment_form', 'loss', 'order', 'preexisting', 'scheme', 'sigma_p0', 'sigma_p_after', 'stages', 'total_effective_action', 'x_ref', 'y_ref']
+eps_pe_eff=7.179487179e-03 (sigma=1400.0000 MPa)
+demand 0 N          : iters=2 eps_init=7.179487179e-03  post-grout plane eps0=1.8930e-04 chi=3.7467e-06  tendon read-back=1232.3417 MPa (jack 1400.0000)
+demand 1 N (compr.) : iters=5 eps_init=8.212950758e-03  post-grout plane eps0=2.5792e-04 chi=4.6121e-06  tendon read-back=1400.0000 MPa (jack 1400.0000)
+eps_init jump between demand 0 N and 1 N: -1.0335e-03 (-12.583%); stress equivalent -201.53 MPa

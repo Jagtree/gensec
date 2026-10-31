@@ -1,0 +1,29 @@
+{
+  "demands": {
+    "n_total": 1,
+    "n_verified": 1,
+    "n_fail": 0,
+    "eta_max": 0.6137,
+    "eta_mean": 0.6137,
+    "eta_p95": 0.6137,
+    "eta_p99": 0.6137,
+    "eta_median": 0.6137,
+    "governing_name": "G",
+    "governing_rank": 1,
+    "all_verified": true
+  },
+  "combinations": {
+    "n_total": 1,
+    "n_verified": 1,
+    "n_fail": 0,
+    "eta_max": 0.5022,
+    "eta_mean": 0.5022,
+    "eta_p95": 0.5022,
+    "eta_p99": 0.5022,
+    "eta_median": 0.5022,
+    "governing_name": "double_count_probe",
+    "governing_rank": 1,
+    "all_verified": true
+  },
+  "all_verified": true
+}

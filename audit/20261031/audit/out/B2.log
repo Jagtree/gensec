@@ -1,0 +1,8 @@
+B2_ls_F.yaml c Concrete {'fck': 30, 'gamma_c': 1.5, 'fcd': 17.0, 'n_parabola': 2, 'eps_c2': -0.002, 'eps_cu2': -0.0035, 'fct': 0.0, 'eps_ct': 0.0}
+B2_ls_F.yaml s Steel {'fyk': 450.0, 'gamma_s': 1.15, 'Es': 200000.0, 'k_hardening': 1.0, 'eps_su': 0.01, 'fyd': 391.304347826087, 'ftd': 391.304347826087, 'eps_yd': 0.001956521739130435}
+B2_ls_ULS.yaml c Concrete {'fck': 30, 'gamma_c': 1, 'fcd': 25.5, 'n_parabola': 2, 'eps_c2': -0.002, 'eps_cu2': -0.0035, 'fct': 0.0, 'eps_ct': 0.0}
+B2_ls_ULS.yaml s Steel {'fyk': 450.0, 'gamma_s': 1.15, 'Es': 200000.0, 'k_hardening': 1.0, 'eps_su': 0.01, 'fyd': 391.304347826087, 'ftd': 391.304347826087, 'eps_yd': 0.001956521739130435}
+B3_steel_nodecl.yaml c Concrete {'fck': 70.0, 'gamma_c': 1.5, 'fcd': 39.666666666666664, 'n_parabola': 2.0, 'eps_c2': -0.002, 'eps_cu2': -0.0035, 'fct': 0.0, 'eps_ct': 0.0}
+B3_steel_nodecl.yaml s Steel {'fyk': 450.0, 'gamma_s': 1.15, 'Es': 200000.0, 'k_hardening': 1.0, 'eps_su': 0.01, 'fyd': 391.304347826087, 'ftd': 391.304347826087, 'eps_yd': 0.001956521739130435}
+B4_steel_impossible.yaml c Concrete {'fck': 30.0, 'gamma_c': 1.5, 'fcd': 17.0, 'n_parabola': 2.0, 'eps_c2': -0.002, 'eps_cu2': -0.0035, 'fct': 45.0, 'eps_ct': 0.0013636363636363637}
+B4_steel_impossible.yaml s Steel {'fyk': 450.0, 'gamma_s': 1.15, 'Es': 200000.0, 'k_hardening': 0.5, 'eps_su': 0.001, 'fyd': 391.304347826087, 'ftd': 195.6521739130435, 'eps_yd': 0.001956521739130435}

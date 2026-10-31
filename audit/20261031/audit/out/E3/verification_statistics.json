@@ -1,0 +1,29 @@
+{
+  "demands": {
+    "n_total": 6,
+    "n_verified": 3,
+    "n_fail": 3,
+    "eta_max": 2.4252,
+    "eta_mean": 1.1175166666666665,
+    "eta_p95": 2.2162249999999997,
+    "eta_p99": 2.3834049999999998,
+    "eta_median": 0.8706499999999999,
+    "governing_name": "G_out",
+    "governing_rank": 1,
+    "all_verified": false
+  },
+  "combinations": {
+    "n_total": 1,
+    "n_verified": 0,
+    "n_fail": 1,
+    "eta_max": 2.974,
+    "eta_mean": 2.974,
+    "eta_p95": 2.974,
+    "eta_p99": 2.974,
+    "eta_median": 2.974,
+    "governing_name": "stage_from_outside",
+    "governing_rank": 1,
+    "all_verified": false
+  },
+  "all_verified": false
+}

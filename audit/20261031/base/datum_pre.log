@@ -1,0 +1,9 @@
+datum fingerprint: 5 example(s) with a construction_history
+  ok    example_composite_losses.yaml
+  ok    example_composite_losses_fb_gap.yaml
+  ok    example_composite_timeline.yaml
+  ok    example_staged_cracking.yaml
+  ok    example_staged_injection.yaml
+  ok    <synthetic retrofit>
+
+wrote 418 values to C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/base/datum_pre.txt

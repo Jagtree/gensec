@@ -1,0 +1,8 @@
+== D3_sym_rect.yaml: default pts=11628 dense pts=374400
+   default: Mx [ -603.435,   604.939]  My [ -382.210,   382.210]  N [ -5283.76,  1258.43]  asym Mx +2.49e-03 My +0.00e+00
+   dense  : Mx [ -604.799,   605.686]  My [ -382.782,   382.782]  N [ -5283.76,  1258.43]  asym Mx +1.47e-03 My +0.00e+00
+   default eta_ray on dense-boundary points: max 1.0099 (chord loss, conservative), min 1.0000 (<1 => default domain LARGER = non-conservative)
+== C2_circ_h12.5.yaml: default pts=11628 dense pts=374400
+   default: Mx [ -280.125,   280.125]  My [ -280.125,   280.125]  N [ -4278.34,   983.46]  asym Mx +0.00e+00 My +8.88e-16
+   dense  : Mx [ -280.601,   280.601]  My [ -280.601,   280.601]  N [ -4278.34,   983.46]  asym Mx -1.78e-15 My +4.44e-16
+   default eta_ray on dense-boundary points: max 1.0094 (chord loss, conservative), min 1.0000 (<1 => default domain LARGER = non-conservative)

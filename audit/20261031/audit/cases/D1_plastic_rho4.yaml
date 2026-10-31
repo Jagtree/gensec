@@ -1,0 +1,15 @@
+# AUD-D1: rect 300x500 C30, perfectly plastic steel (k=1, eps_su=0.01), As=3000 top + 3000 bottom (rho=4%)
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 30.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 2.0, eps_c2: -0.002, eps_cu2: -0.0035}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01}
+section:
+  shape: rect
+  params: {B: 300, H: 500}
+  bulk_material: c
+  mesh_size: 10
+  rebars:
+    - {x: 150, y: 50, As: 3000.0, material: s}
+    - {x: 150, y: 450, As: 3000.0, material: s}
+demands:
+  - {name: d1, N_kN: -1000, Mx_kNm: 100, My_kNm: 0}

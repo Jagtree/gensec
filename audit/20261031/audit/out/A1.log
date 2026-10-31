@@ -1,0 +1,166 @@
+
+Loading: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/cases/A1_sign_right_rebar.yaml
+======================================================================
+CROSS-SECTION SUMMARY
+======================================================================
+  Bounding box: 400 x 400 mm
+  ideal_gross area: 160000.0 mm²
+  Mesh: grid @ 5.0 mm  (6400 fibers)
+  Area coverage: 160000.0 mm²  (error: 0.00%)
+
+  Bulk: Concrete  eps=[-0.00350, 0.00000]
+    fcd = 17.00 MPa
+
+    #       x       y   dia       As        mat   emb
+  --------------------------------------------------
+    1   360.0   200.0     -   2000.0          s   yes
+
+  As,tot = 2000.0 mm²  (rho = 1.25%)
+======================================================================
+
+Generating N-Mx diagram...
+  320 points
+  N:  [-3468.6, 782.6] kN
+  Mx: [-136.0, 136.0] kN*m
+
+Generating N-My diagram...
+  320 points
+  My: [-257.2, 255.8] kN*m
+
+Generating 3D resistance surface (N-Mx-My)...
+  11628 points
+
+================================================================================
+  DEMAND VERIFICATION
+================================================================================
+  Items: 3    Verified: 2    Failed: 1
+  eta_max: 53.4183    eta_mean: 18.3698    eta_p95: 48.1751    eta_p99: 52.3697
+  Governing: My_pos  (eta = 53.4183)
+  --> *** 1 item(s) NOT VERIFIED ***
+--------------------------------------------------------------------------------
+     #                 Name    N[kN]   Mx[kNm]   My[kNm]     eta_norm eta_norm_beta       eta_2D   Status
+  -------------------------------------------------------------------------------------------------------
+     1               My_pos      0.0      0.00    150.00       1.0003       1.0002      53.4183     FAIL
+     2          My_only_key      0.0      0.00      0.00       0.9860       0.0000       0.0000       OK
+     3               My_neg      0.0      0.00   -150.00       0.5213       0.7050       0.6378       OK
+================================================================================
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\section_geometry.png
+
+  Per-demand details:
+
+  --- My_pos --- no equilibrium state at the demand; plotting the hull boundary along its ray (eta_ray=48.6497)
+
+  --- My_pos_boundary ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1   360.0   200.0       0.272      54.34    54.34     108.68
+
+  Bulk (sampled at 5 levels):
+    y=    2.5  eps=   6.289 permil  sig=   -0.68 MPa
+    y=  102.5  eps=   6.289 permil  sig=   -0.68 MPa
+    y=  202.5  eps=   6.289 permil  sig=   -0.68 MPa
+    y=  302.5  eps=   6.289 permil  sig=   -0.68 MPa
+    y=  397.5  eps=   6.289 permil  sig=   -0.68 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\fibers_My_pos_boundary.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\section_My_pos_boundary.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\state_My_pos_boundary.png
+
+  --- My_neg ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1   360.0   200.0       1.244     248.77   248.77     497.53
+
+  Bulk (sampled at 5 levels):
+    y=    2.5  eps=   0.216 permil  sig=   -3.11 MPa
+    y=  102.5  eps=   0.216 permil  sig=   -3.11 MPa
+    y=  202.5  eps=   0.216 permil  sig=   -3.11 MPa
+    y=  302.5  eps=   0.216 permil  sig=   -3.11 MPa
+    y=  397.5  eps=   0.216 permil  sig=   -3.11 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\fibers_My_neg.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\section_My_neg.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\state_My_neg.png
+
+  --- My_only_key ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1   360.0   200.0       0.000       0.00     0.00       0.00
+
+  Bulk (sampled at 5 levels):
+    y=    2.5  eps=   0.000 permil  sig=    0.00 MPa
+    y=  102.5  eps=   0.000 permil  sig=    0.00 MPa
+    y=  202.5  eps=   0.000 permil  sig=    0.00 MPa
+    y=  302.5  eps=   0.000 permil  sig=    0.00 MPa
+    y=  397.5  eps=   0.000 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\fibers_My_only_key.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\section_My_only_key.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\state_My_only_key.png
+
+  State plots: 2 at the demand, 1 at the hull boundary along the demand ray (no state at the demand), 0 not produced.
+    BOUNDARY  My_pos: eta_ray=48.6497 -> *_boundary files
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\demand_utilization.png
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\n_mx_diagram.png
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\n_my_diagram.png
+
+  N levels (from demands): [0.0] kN
+  Generating Mx-My at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\mx_my_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\mx_my_N0.png
+  Generating Mx-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\mx_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\mx_chi_N0.png
+  Generating My-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\my_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\my_chi_N0.png
+  Generating polar ductility at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/A1\polar_ductility_N0.png
+
+================================================================================
+  All outputs in: C:\Users\alber\AppData\Local\Temp\claude\d--SOFTWARE-HOMEPROJECTS-gensec\b611ec54-0e2b-4d19-8dec-d15f72bb1582\scratchpad\audit\out\A1/
+    demand_summary.csv                                  258 bytes
+    demand_summary.json                                 734 bytes
+    demand_utilization.png                           41,091 bytes
+    fibers_My_neg.csv                               252,428 bytes
+    fibers_My_only_key.csv                          252,662 bytes
+    fibers_My_pos_boundary.csv                      247,626 bytes
+    mx_chi_N0.csv                                     4,347 bytes
+    mx_chi_N0.json                                    6,785 bytes
+    mx_chi_N0.png                                    67,813 bytes
+    mx_my_N0.csv                                      3,305 bytes
+    mx_my_N0.json                                     4,987 bytes
+    mx_my_N0.png                                     59,371 bytes
+    my_chi_N0.csv                                     4,301 bytes
+    my_chi_N0.json                                    6,742 bytes
+    my_chi_N0.png                                    56,653 bytes
+    n_mx_diagram.png                                 72,461 bytes
+    n_mx_domain.csv                                   6,678 bytes
+    n_mx_domain.json                                  9,385 bytes
+    n_my_diagram.png                                 76,848 bytes
+    n_my_domain.csv                                   7,194 bytes
+    polar_ductility_N0.png                          184,092 bytes
+    section_My_neg.png                              109,981 bytes
+    section_My_only_key.png                          97,274 bytes
+    section_My_pos_boundary.png                      96,396 bytes
+    section_geometry.png                             28,266 bytes
+    state_My_neg.png                                173,570 bytes
+    state_My_only_key.png                            85,456 bytes
+    state_My_pos_boundary.png                       164,340 bytes
+    verification_statistics.json                        346 bytes
+    verification_summary.json                           734 bytes
+================================================================================
+
+Done.

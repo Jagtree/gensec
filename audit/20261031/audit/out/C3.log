@@ -1,0 +1,8 @@
+ORACLE true circle, pivot B (top -3.5 permil): eb=17.0360 permil, bottom bar strain=14.9824 permil (<10 ok=False), N=-0.00000 kN, |M|=58.3091 kNm
+GenSec circ h=    50: n_fibres=    88  hull |M(N=0)|=175.4151 kNm  rel=+2.008e+00
+GenSec circ h=    25: n_fibres=   344  hull |M(N=0)|=174.9243 kNm  rel=+2.000e+00
+GenSec circ h=  12.5: n_fibres=  1324  hull |M(N=0)|=175.1885 kNm  rel=+2.004e+00
+GenSec circ h=  6.25: n_fibres=  5172  hull |M(N=0)|=175.2549 kNm  rel=+2.006e+00
+GenSec circ h= 3.125: n_fibres= 20388  hull |M(N=0)|=175.2473 kNm  rel=+2.005e+00
+N at A/B corner (top -3.5, bar +10 permil): 27.6728 kN
+ORACLE pivot B: bottom-bar strain=9.63811 permil, N=0.000000 kN, |M_Rd(N=0)|=175.6179 kNm

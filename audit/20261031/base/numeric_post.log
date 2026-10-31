@@ -1,0 +1,29 @@
+examples: 26
+  ok    P60-60_1_update.yaml
+  ok    Pannello_187x30.yaml
+  ok    Pannello_30x187.yaml
+  ok    biaxial_column.yaml
+  ok    example_aci318.yaml
+  ok    example_annulus.yaml
+  ok    example_biaxial_column.yaml
+  ok    example_composite_losses.yaml
+  ok    example_composite_losses_fb_gap.yaml
+  ok    example_composite_timeline.yaml
+  ok    example_composite_topping.yaml
+  ok    example_custom.yaml
+  ok    example_external_tendon.yaml
+  ok    example_input.yaml
+  ok    example_prestress.yaml
+  ok    example_staged_construction.yaml
+  ok    example_staged_cracking.yaml
+  ok    example_staged_injection.yaml
+  ok    example_strand_only_slab.yaml
+  ok    example_tee.yaml
+  ok    example_v2_1.yaml
+  ok    section_trave_getto2.yaml
+  ok    section_trave_getto3.yaml
+  ok    test_exotic.yaml
+  ok    vcaslu_1.yaml
+  ok    yaml_reference_example.yaml
+
+6797 values -> C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/base/numeric_post.txt

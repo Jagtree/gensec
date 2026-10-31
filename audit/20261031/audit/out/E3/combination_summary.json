@@ -1,0 +1,60 @@
+{
+  "combinations": [
+    {
+      "name": "stage_from_outside",
+      "type": "staged",
+      "resultant": {
+        "N_kN": -500.0,
+        "Mx_kNm": 910.0,
+        "My_kNm": 0.0
+      },
+      "stages": [
+        {
+          "name": "s1",
+          "increment": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "cumulative": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "eta_norm": 1.0001,
+          "eta_norm_beta": 1.0,
+          "eta_norm_ray": 2.4252,
+          "eta_2D": 2.0451
+        },
+        {
+          "name": "s2",
+          "increment": {
+            "N_kN": 0.0,
+            "Mx_kNm": 10.0,
+            "My_kNm": 0.0
+          },
+          "cumulative": {
+            "N_kN": -500.0,
+            "Mx_kNm": 910.0,
+            "My_kNm": 0.0
+          },
+          "base": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "eta_norm": 1.0003,
+          "eta_norm_beta": 1.0001,
+          "eta_norm_ray": 2.4563,
+          "eta_2D": 2.0679,
+          "eta_path_norm_ray": 2.1043,
+          "eta_path_norm_beta": Infinity,
+          "eta_path_2D": 2.974
+        }
+      ],
+      "eta_governing": 2.974,
+      "inside": false,
+      "verified": false
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# AUD-J2: rect 400x600 C25 with a C60 core zone 200x300 (two bulk materials) + 4 bars
+code: ec2
+materials:
+  c25: {type: concrete_ec2_gen1_custom, fck: 25.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 2.0, eps_c2: -0.002, eps_cu2: -0.0035}
+  c60: {type: concrete_ec2_gen1_custom, fck: 60.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 1.75, eps_c2: -0.0023, eps_cu2: -0.0029}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01}
+section:
+  shape: rect
+  params: {B: 400, H: 600}
+  bulk_material: c25
+  mesh_size: 10
+  material_zones:
+    - {name: core, shape: custom, material: c60, params: {exterior: [[100,150],[300,150],[300,450],[100,450]]}}
+  rebars:
+    - {x: 50, y: 50, As: 804.0, material: s}
+    - {x: 350, y: 50, As: 804.0, material: s}
+    - {x: 50, y: 550, As: 804.0, material: s}
+    - {x: 350, y: 550, As: 804.0, material: s}
+demands:
+  - {name: d1, N_kN: -2000, Mx_kNm: 200, My_kNm: 0}
+output:
+  eta_norm: true

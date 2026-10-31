@@ -1,0 +1,22 @@
+# AUD-C convergence: circle D=500, 64 seg/quadrant, 8 bars As=314.16 at r=200, mesh grid 12.5 mm
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 30.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 2.0, eps_c2: -0.002, eps_cu2: -0.0035}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01}
+section:
+  shape: circle
+  params: {D: 500, segments_per_quadrant: 64}
+  bulk_material: c
+  mesh_size: 12.5
+  mesh_method: grid
+  rebars:
+    - {x: 450.000000, y: 250.000000, As: 314.159265, material: s}
+    - {x: 391.421356, y: 391.421356, As: 314.159265, material: s}
+    - {x: 250.000000, y: 450.000000, As: 314.159265, material: s}
+    - {x: 108.578644, y: 391.421356, As: 314.159265, material: s}
+    - {x: 50.000000, y: 250.000000, As: 314.159265, material: s}
+    - {x: 108.578644, y: 108.578644, As: 314.159265, material: s}
+    - {x: 250.000000, y: 50.000000, As: 314.159265, material: s}
+    - {x: 391.421356, y: 108.578644, As: 314.159265, material: s}
+demands:
+  - {name: d1, N_kN: 0, Mx_kNm: -100, My_kNm: 0}

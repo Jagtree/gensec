@@ -1,0 +1,15 @@
+# AUD-B: loader validation of 'ls' (declared value 'F')
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1, class: C30/37, ls: F, loadtype: slow, TypeConc: N, NA: French, time: 28}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01}
+section:
+  shape: rect
+  params: {B: 300, H: 500}
+  bulk_material: c
+  mesh_size: 10
+  rebars:
+    - {x: 150, y: 40, As: 1500.0, material: s}
+    - {x: 150, y: 460, As: 1500.0, material: s}
+demands:
+  - {name: d1, N_kN: -1000, Mx_kNm: 100, My_kNm: 0}

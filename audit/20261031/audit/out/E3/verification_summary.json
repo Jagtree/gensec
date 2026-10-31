@@ -1,0 +1,134 @@
+{
+  "demands": [
+    {
+      "name": "origin",
+      "N_kN": 0.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.5951,
+      "eta_norm_beta": 0.0,
+      "eta_norm_ray": 0.0,
+      "eta_2D": 0.0,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "tension_beyond_Nmax",
+      "N_kN": 2000.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "eta_norm": 1.0003,
+      "eta_norm_beta": 1.0004,
+      "eta_norm_ray": 1.5893,
+      "eta_2D": null,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "compr_beyond_Nmin",
+      "N_kN": -6000.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "eta_norm": 1.0016,
+      "eta_norm_beta": 1.0007,
+      "eta_norm_ray": 1.1356,
+      "eta_2D": null,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "typo_key",
+      "N_kN": -1000.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.2733,
+      "eta_norm_beta": 0.3542,
+      "eta_norm_ray": 0.1893,
+      "eta_2D": 0.0,
+      "inside": true,
+      "verified": true
+    },
+    {
+      "name": "G_out",
+      "N_kN": -500.0,
+      "Mx_kNm": 900.0,
+      "My_kNm": 0.0,
+      "eta_norm": 1.0001,
+      "eta_norm_beta": 1.0,
+      "eta_norm_ray": 2.4252,
+      "eta_2D": 2.0451,
+      "inside": false,
+      "verified": false
+    },
+    {
+      "name": "dE",
+      "N_kN": 0.0,
+      "Mx_kNm": 10.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.6057,
+      "eta_norm_beta": 0.0519,
+      "eta_norm_ray": 0.0312,
+      "eta_2D": 0.0311,
+      "inside": true,
+      "verified": true
+    }
+  ],
+  "combinations": [
+    {
+      "name": "stage_from_outside",
+      "type": "staged",
+      "resultant": {
+        "N_kN": -500.0,
+        "Mx_kNm": 910.0,
+        "My_kNm": 0.0
+      },
+      "stages": [
+        {
+          "name": "s1",
+          "increment": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "cumulative": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "eta_norm": 1.0001,
+          "eta_norm_beta": 1.0,
+          "eta_norm_ray": 2.4252,
+          "eta_2D": 2.0451
+        },
+        {
+          "name": "s2",
+          "increment": {
+            "N_kN": 0.0,
+            "Mx_kNm": 10.0,
+            "My_kNm": 0.0
+          },
+          "cumulative": {
+            "N_kN": -500.0,
+            "Mx_kNm": 910.0,
+            "My_kNm": 0.0
+          },
+          "base": {
+            "N_kN": -500.0,
+            "Mx_kNm": 900.0,
+            "My_kNm": 0.0
+          },
+          "eta_norm": 1.0003,
+          "eta_norm_beta": 1.0001,
+          "eta_norm_ray": 2.4563,
+          "eta_2D": 2.0679,
+          "eta_path_norm_ray": 2.1043,
+          "eta_path_norm_beta": Infinity,
+          "eta_path_2D": 2.974
+        }
+      ],
+      "eta_governing": 2.974,
+      "inside": false,
+      "verified": false
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+tendon law: f_p01d 1391.304347826087 eps_ud 0.03150000000000001 Ep 195000.0 sigma_ud 1391.304347826087
+stage keys: ['_prestress_actions', 'components', 'name']
+resolved prestress actions: [PrestressAction(N=-1170000.0, Mx=234000000.0, My=0.0, label='', origin='prestress')]
+zero-strain-plane resultant (prestrain only): N=1170.000 kN Mx=-234.000 kNm  (expected +Ap*Ep*eps_pe = 1170.0 kN at y=100)
+GenSec M_Rd(N=0), bottom-tension side: -549.376 kNm

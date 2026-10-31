@@ -1,0 +1,11 @@
+# AUD-H4 L-section: 300x500 minus 200x350 top-right
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 30.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 2.0, eps_c2: -0.002, eps_cu2: -0.0035, Ec: 33000.0}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01}
+section:
+  shape: custom
+  params:
+    exterior: [[0,0],[300,0],[300,150],[100,150],[100,500],[0,500]]
+  bulk_material: c
+  mesh_size: 10

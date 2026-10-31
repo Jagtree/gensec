@@ -1,0 +1,18 @@
+# AUD-A sign probe: 400x400 C30 (k_lt=0.85, gc=1.5), rebars ONLY at right edge (x=360).
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 30.0, gamma_c: 1.5, long_term_reduction_factor: 0.85}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 1.0, eps_su: 0.01, works_in_compression: true}
+section:
+  shape: rect
+  params: {B: 400, H: 400}
+  bulk_material: c
+  mesh_size: 10
+  rebars:
+    - {x: 360, y: 200, As: 2000.0, material: s}
+demands:
+  - {name: My_pos, N_kN: 0, Mx_kNm: 0, My_kNm: 150}
+  - {name: My_neg, N_kN: 0, Mx_kNm: 0, My_kNm: -150}
+output:
+  eta_norm: true
+  eta_2D: false

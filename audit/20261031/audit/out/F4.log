@@ -1,0 +1,5 @@
+global strain envelope used by the sweep: emg=-0.03750 exg=0.02550 emb=-0.00350
+ N[kN]     M[kNm]   eps_bottom  eps_top   eps_tendon  sigma_tendon[MPa]
+ -2556.1     104.6    -3.096‰   -3.621‰     2.816‰      549.2
+ -2423.6     125.7    -3.114‰   -3.639‰     2.799‰      545.8
+ -1391.3     278.3   -15.079‰   -3.500‰    -7.149‰    -1391.3

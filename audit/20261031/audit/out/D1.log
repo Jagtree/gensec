@@ -1,0 +1,24 @@
+== D1_plastic_rho4.yaml: configs=2600 inadmissible(own-limit)=350 pivotC-violating=1324 hull vertices=526 of which inadmissible=25
+   N_min all=-4795.83  admissible=-4795.82 kN  (+0.000%)
+   N_max all=2347.83  admissible=2347.83 kN
+   |M|max all=614.14  admissible=614.14 kNm
+   hull area all=4817514.8 admissible=4806193.8  (+0.236%)
+   worst radial excess of reported hull over admissible hull = +0.739% at (N,M)=[-4540.82608696    57.375     ]
+   excluding own-limit only : worst radial excess +1.065%; N_min filtered -4795.83
+   excluding pivot-C only   : worst radial excess +0.739%; N_min filtered -4795.82
+== D1_hardening_rho4.yaml: configs=2600 inadmissible(own-limit)=470 pivotC-violating=1324 hull vertices=88 of which inadmissible=9
+   N_min all=-4804.12  admissible=-4796.04 kN  (+0.168%)
+   N_max all=2700.00  admissible=2700.00 kN
+   |M|max all=613.91  admissible=613.91 kNm
+   hull area all=5044104.8 admissible=5028932.5  (+0.302%)
+   worst radial excess of reported hull over admissible hull = +0.638% at (N,M)=[-4547.97964722    57.14932836]
+   excluding own-limit only : worst radial excess +0.767%; N_min filtered -4804.12
+   excluding pivot-C only   : worst radial excess +0.638%; N_min filtered -4796.04
+== C2_rect_h12.5.yaml: configs=2600 inadmissible(own-limit)=348 pivotC-violating=1324 hull vertices=600 of which inadmissible=27
+   N_min all=-3111.46  admissible=-3111.45 kN  (+0.000%)
+   N_max all=586.96  admissible=586.96 kN
+   |M|max all=272.15  admissible=272.15 kNm
+   hull area all=1076383.0 admissible=1060727.0  (+1.476%)
+   worst radial excess of reported hull over admissible hull = +2.276% at (N,M)=[-2818.20652174    47.66474185]
+   excluding own-limit only : worst radial excess +3.395%; N_min filtered -3111.46
+   excluding pivot-C only   : worst radial excess +2.276%; N_min filtered -3111.45

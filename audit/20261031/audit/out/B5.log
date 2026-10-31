@@ -1,0 +1,8 @@
+B3_steel_nodecl.yaml {'Nmin': -7004.91, 'Mmax': 595.68, 'M@-1000': 451.24, 'M@-2000': 566.05, 'M@-3000': 579.36, 'M@-4000': 490.25}
+B5_c70_explicit.yaml {'Nmin': -7004.91, 'Mmax': 539.73, 'M@-1000': 445.68, 'M@-2000': 535.59, 'M@-3000': 480.15, 'M@-4000': 396.19}
+Nmin defaults/explicit-1 = +0.000%
+Mmax defaults/explicit-1 = +10.367%
+M@-1000 defaults/explicit-1 = +1.248%
+M@-2000 defaults/explicit-1 = +5.687%
+M@-3000 defaults/explicit-1 = +20.663%
+M@-4000 defaults/explicit-1 = +23.740%

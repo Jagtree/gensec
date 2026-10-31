@@ -1,0 +1,147 @@
+
+Loading: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/cases/J2_two_zones.yaml
+======================================================================
+CROSS-SECTION SUMMARY
+======================================================================
+  Bounding box: 400 x 600 mm
+  ideal_gross area: 240000.0 mm²
+  Mesh: grid @ 10.0 mm  (2400 fibers)
+  Area coverage: 240000.0 mm²  (error: 0.00%)
+
+  Bulk: Concrete  eps=[-0.00350, 0.00000]
+    fcd = 14.17 MPa
+
+  Material zones: 1
+    Zone 1: c60  eps=[-0.00290, 0.00000]
+
+    #       x       y   dia       As        mat   emb
+  --------------------------------------------------
+    1    50.0    50.0     -    804.0          s   yes
+    2   350.0    50.0     -    804.0          s   yes
+    3    50.0   550.0     -    804.0          s   yes
+    4   350.0   550.0     -    804.0          s   yes
+
+  As,tot = 3216.0 mm²  (rho = 1.34%)
+======================================================================
+
+Generating N-Mx diagram...
+  320 points
+  N:  [-5802.9, 1258.4] kN
+  Mx: [-589.1, 589.1] kN*m
+
+Generating N-My diagram...
+  320 points
+  My: [-368.9, 368.9] kN*m
+
+Generating 3D resistance surface (N-Mx-My)...
+  11628 points
+
+================================================================================
+  DEMAND VERIFICATION
+================================================================================
+  Items: 1    Verified: 1    Failed: 0
+  eta_max: 0.5559    eta_mean: 0.5559    eta_p95: 0.5559    eta_p99: 0.5559
+  Governing: d1  (eta = 0.5559)
+  --> ALL VERIFIED
+--------------------------------------------------------------------------------
+     #                 Name    N[kN]   Mx[kNm]     eta_norm eta_norm_beta   Status
+  --------------------------------------------------------------------------------
+     1                   d1  -2000.0    200.00       0.3067       0.5559       OK
+================================================================================
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\section_geometry.png
+
+  Per-demand details:
+
+  --- d1 ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0      -0.901    -180.12  -170.23    -136.87
+    2   350.0    50.0      -0.901    -180.12  -170.23    -136.87
+    3    50.0   550.0      -0.068     -13.67   -12.72     -10.22
+    4   350.0   550.0      -0.068     -13.67   -12.72     -10.22
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=  -0.975 permil  sig=  -10.45 MPa
+    y=  155.0  eps=  -0.726 permil  sig=  -12.45 MPa
+    y=  305.0  eps=  -0.476 permil  sig=   -8.64 MPa
+    y=  455.0  eps=  -0.226 permil  sig=   -3.03 MPa
+    y=  595.0  eps=   0.007 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\fibers_d1.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\section_d1.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\state_d1.png
+
+  State plots: 1 at the demand, 0 at the hull boundary along the demand ray (no state at the demand), 0 not produced.
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\demand_utilization.png
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\n_mx_diagram.png
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\n_my_diagram.png
+
+  N levels (from demands): [-2000.0] kN
+  Added N=0 (pure bending)
+  Generating Mx-chi at N=-2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_Nm2000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_Nm2000.png
+  Generating My-chi at N=-2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_Nm2000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_Nm2000.png
+  Generating Mx-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_N0.png
+  Generating My-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_N0.png
+
+  Generating Mx-chi bundle...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_bundle.png
+  Generating My-chi bundle...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_bundle.png
+  Generating polar ductility at N=-2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\polar_ductility_Nm2000.png
+  Generating polar ductility at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\polar_ductility_N0.png
+
+  Generating 3D Mx-chi-N surface...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\mx_chi_N_surface.png
+  Generating 3D My-chi-N surface...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/J2\my_chi_N_surface.png
+
+================================================================================
+  All outputs in: C:\Users\alber\AppData\Local\Temp\claude\d--SOFTWARE-HOMEPROJECTS-gensec\b611ec54-0e2b-4d19-8dec-d15f72bb1582\scratchpad\audit\out\J2/
+    demand_summary.csv                                  117 bytes
+    demand_summary.json                                 236 bytes
+    demand_utilization.png                           25,719 bytes
+    fibers_d1.csv                                   100,539 bytes
+    mx_chi_N0.csv                                     4,467 bytes
+    mx_chi_N0.json                                    7,057 bytes
+    mx_chi_N0.png                                    74,940 bytes
+    mx_chi_N_surface.png                            434,104 bytes
+    mx_chi_Nm2000.csv                                 4,047 bytes
+    mx_chi_Nm2000.json                                6,631 bytes
+    mx_chi_Nm2000.png                                80,315 bytes
+    mx_chi_bundle.png                                81,300 bytes
+    my_chi_N0.csv                                     4,506 bytes
+    my_chi_N0.json                                    6,946 bytes
+    my_chi_N0.png                                    62,766 bytes
+    my_chi_N_surface.png                            421,474 bytes
+    my_chi_Nm2000.csv                                 4,144 bytes
+    my_chi_Nm2000.json                                6,742 bytes
+    my_chi_Nm2000.png                                83,575 bytes
+    my_chi_bundle.png                                79,909 bytes
+    n_mx_diagram.png                                 82,376 bytes
+    n_mx_domain.csv                                   6,998 bytes
+    n_mx_domain.json                                  9,897 bytes
+    n_my_diagram.png                                 80,329 bytes
+    n_my_domain.csv                                   7,054 bytes
+    polar_ductility_N0.png                          195,015 bytes
+    polar_ductility_Nm2000.png                      204,810 bytes
+    section_d1.png                                   77,085 bytes
+    section_geometry.png                             34,006 bytes
+    state_d1.png                                     89,883 bytes
+    verification_statistics.json                        314 bytes
+    verification_summary.json                           236 bytes
+================================================================================
+
+Done.

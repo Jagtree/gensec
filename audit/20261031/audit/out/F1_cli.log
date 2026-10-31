@@ -1,0 +1,132 @@
+
+Loading: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/cases/F1_pretensioned_uls.yaml
+======================================================================
+CROSS-SECTION SUMMARY
+======================================================================
+  Bounding box: 300 x 600 mm
+  ideal_gross area: 180000.0 mm²
+  Mesh: grid @ 5.0 mm  (7200 fibers)
+  Area coverage: 180000.0 mm²  (error: 0.00%)
+
+  Bulk: Concrete  eps=[-0.00350, 0.00000]
+    fcd = 22.67 MPa
+
+    #       x       y   dia       As        mat   emb
+  --------------------------------------------------
+
+  As,tot = 0.0 mm²  (rho = 0.00%)
+======================================================================
+
+Generating N-Mx diagram...
+  320 points
+  N:  [-3569.8, 1391.3] kN
+  Mx: [-576.0, 278.3] kN*m
+
+Generating N-My diagram...
+  320 points
+  My: [-153.0, 153.0] kN*m
+
+Generating 3D resistance surface (N-Mx-My)...
+  11628 points
+
+================================================================================
+  DEMAND VERIFICATION
+================================================================================
+  Items: 1    Verified: 1    Failed: 0
+  eta_max: 0.6137    eta_mean: 0.6137    eta_p95: 0.6137    eta_p99: 0.6137
+  Governing: G  (eta = 0.6137)
+  --> ALL VERIFIED
+--------------------------------------------------------------------------------
+     #                 Name    N[kN]   Mx[kNm]     eta_norm eta_norm_beta eta_norm_ray   Status
+  ---------------------------------------------------------------------------------------------
+     1                    G      0.0   -300.00       0.3300       0.6137       0.5462       OK
+================================================================================
+
+  Verifying combinations...
+
+================================================================================
+  COMBINATION VERIFICATION
+================================================================================
+  Items: 1    Verified: 1    Failed: 0
+  eta_max: 0.5022    eta_mean: 0.5022    eta_p95: 0.5022    eta_p99: 0.5022
+  Governing: double_count_probe  (eta = 0.5022)
+  --> ALL VERIFIED
+--------------------------------------------------------------------------------
+
+  #1 -- double_count_probe (staged) --
+     Resultant: N=-1170.0 kN, Mx=-66.00 kNm, My=0.00 kNm
+                    Stage    N[kN]        Mx        My     eta_norm eta_norm_beta eta_norm_ray
+     -----------------------------------------------------------------------------------------
+                       s1  -1170.0    -66.00      0.00       0.2507       0.5022       0.3588
+     eta_governing = 0.5022  ->  OK
+================================================================================
+
+  SLS stress verification...
+    no combination declares an 'sls' block; no stress verification was requested.
+    double_count_probe: SKIPPED - no 'sls' block declared on this combination, so no stress verification was requested.  Add sls: {moduli: {...}, limits: {kind: ...}} to have the concrete, reinforcement and tendon stresses checked at this combination.
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\section_geometry.png
+
+  Per-demand details:
+
+  --- G ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  ------------------------------------------------------
+
+  Bulk (sampled at 5 levels):
+    y=    2.5  eps=  -0.101 permil  sig=   -2.22 MPa
+    y=  152.5  eps=  -0.205 permil  sig=   -4.40 MPa
+    y=  302.5  eps=  -0.308 permil  sig=   -6.45 MPa
+    y=  452.5  eps=  -0.412 permil  sig=   -8.39 MPa
+    y=  597.5  eps=  -0.513 permil  sig=  -10.14 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\fibers_G.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\section_G.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\state_G.png
+
+  State plots: 1 at the demand, 0 at the hull boundary along the demand ray (no state at the demand), 0 not produced.
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\demand_utilization.png
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\n_mx_diagram.png
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\n_my_diagram.png
+
+  N levels (from demands): [0.0] kN
+  Generating Mx-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\mx_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\mx_chi_N0.png
+  Generating My-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\my_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\my_chi_N0.png
+  Generating polar ductility at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/F1\polar_ductility_N0.png
+
+================================================================================
+  All outputs in: C:\Users\alber\AppData\Local\Temp\claude\d--SOFTWARE-HOMEPROJECTS-gensec\b611ec54-0e2b-4d19-8dec-d15f72bb1582\scratchpad\audit\out\F1/
+    combination_summary.json                            724 bytes
+    demand_summary.csv                                  133 bytes
+    demand_summary.json                                 261 bytes
+    demand_utilization.png                           28,384 bytes
+    fibers_G.csv                                    291,545 bytes
+    mx_chi_N0.csv                                     4,329 bytes
+    mx_chi_N0.json                                    6,770 bytes
+    mx_chi_N0.png                                    64,811 bytes
+    my_chi_N0.csv                                     4,277 bytes
+    my_chi_N0.json                                    6,733 bytes
+    my_chi_N0.png                                    63,930 bytes
+    n_mx_diagram.png                                 74,237 bytes
+    n_mx_domain.csv                                   7,366 bytes
+    n_mx_domain.json                                 10,861 bytes
+    n_my_diagram.png                                 73,857 bytes
+    n_my_domain.csv                                   6,701 bytes
+    polar_ductility_N0.png                          177,775 bytes
+    section_G.png                                    83,632 bytes
+    section_geometry.png                             29,944 bytes
+    state_G.png                                      98,300 bytes
+    verification_statistics.json                        620 bytes
+    verification_summary.json                           982 bytes
+================================================================================
+
+Done.

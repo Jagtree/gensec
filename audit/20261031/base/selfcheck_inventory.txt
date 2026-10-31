@@ -1,0 +1,5 @@
+health list (1 patcher(s)): run_phase38_remove_block_and_annex.py
+  ok  run_phase38_remove_block_and_annex.py currency       highest-numbered patcher is on the list
+  ok  run_phase38_remove_block_and_annex.py bytes          22 byte comparison(s)
+
+gate: every patcher on the health list declares at least one byte comparison.  The run itself is NOT checked here; '--gate-archive' checks it.

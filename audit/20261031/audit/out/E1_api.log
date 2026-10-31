@@ -1,0 +1,4 @@
+verify_point(0,0,150): eta_3D None eta_2D None status ok
+verify_point(-10000,0,0) [beyond N_Rd,min=-3469]: eta_3D None eta_2D None status ok
+analyze row demand My_pos eta_3D None eta_2D None status ok
+analyze row demand My_neg eta_3D None eta_2D None status ok

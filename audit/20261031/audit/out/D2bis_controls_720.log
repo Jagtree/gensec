@@ -1,0 +1,4 @@
+C2_rect_h12.5.yaml                       NG=720 planes=1437601 adm= 935355 tendons=0 Mref=272.5 kNm | TRUE-domain concavity: +0.00% of Mref (0.0 kNm) at (N,side)=None | GenSec hull excess: +3.32% of Mref (9.0 kNm) at (-2674.5, 1)
+D1_hardening_rho4.yaml                   NG=720 planes=1437601 adm= 737334 tendons=0 Mref=614.7 kNm | TRUE-domain concavity: +0.61% of Mref (3.7 kNm) at (N,side)=(2231.4, 1) | GenSec hull excess: +0.41% of Mref (2.5 kNm) at (2231.4, 1)
+D2_brittle_tension.yaml                  NG=720 planes=1437601 adm= 934441 tendons=0 Mref=170.6 kNm | TRUE-domain concavity: +16.33% of Mref (27.9 kNm) at (N,side)=(-56.3, 1) | GenSec hull excess: +5.12% of Mref (8.7 kNm) at (-2203.0, 1)
+F1_pretensioned_uls.yaml                 NG=720 planes=1437601 adm= 657784 tendons=1 Mref=576.0 kNm | TRUE-domain concavity: +3.08% of Mref (17.7 kNm) at (N,side)=(-3487.7, 1) | GenSec hull excess: +20.66% of Mref (119.0 kNm) at (-1390.1, 1)

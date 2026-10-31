@@ -1,0 +1,7 @@
+name,N_kN,Mx_kNm,My_kNm,eta_norm,eta_norm_beta,eta_norm_ray,eta_2D,inside,verified
+origin,0.00,0.0000,0.0000,0.5951,0.0000,0.0000,0.0000,True,True
+tension_beyond_Nmax,2000.00,0.0000,0.0000,1.0003,1.0004,1.5893,,False,False
+compr_beyond_Nmin,-6000.00,0.0000,0.0000,1.0016,1.0007,1.1356,,False,False
+typo_key,-1000.00,0.0000,0.0000,0.2733,0.3542,0.1893,0.0000,True,True
+G_out,-500.00,900.0000,0.0000,1.0001,1.0000,2.4252,2.0451,False,False
+dE,0.00,10.0000,0.0000,0.6057,0.0519,0.0312,0.0311,True,True

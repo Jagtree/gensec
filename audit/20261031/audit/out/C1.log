@@ -1,0 +1,8 @@
+C1_example_input_lumped.yaml rebar x: [np.float64(150.0)] n bulk fibres 1250
+  N=-1500 kN: My_max 93.2  Mx_max 346.9 kNm
+  N=-1200 kN: My_max 91.4  Mx_max 373.6 kNm
+  N=-900 kN: My_max 88.1  Mx_max 362.5 kNm
+C1_example_input_distributed.yaml rebar x: [np.float64(40.0), np.float64(150.0), np.float64(260.0)] n bulk fibres 1250
+  N=-1500 kN: My_max 149.1  Mx_max 344.1 kNm
+  N=-1200 kN: My_max 160.3  Mx_max 373.3 kNm
+  N=-900 kN: My_max 157.8  Mx_max 362.9 kNm

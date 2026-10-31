@@ -1,0 +1,6 @@
+eta_norm at origin: 0.5951  eta_norm_beta at origin: 0.0
+eta_ray=0.10: eta_norm in [0.463,0.616]  eta_norm_beta in [0.216,0.263]  eta_2D in [0.040,0.139]
+eta_ray=0.50: eta_norm in [0.218,0.709]  eta_norm_beta in [0.532,0.692]  eta_2D in [0.155,0.427]
+eta_ray=0.90: eta_norm in [0.839,0.905]  eta_norm_beta in [0.903,0.925]  eta_2D in [0.659,0.872]
+eta_ray=0.98: eta_norm in [0.967,0.981]  eta_norm_beta in [0.981,0.985]  eta_2D in [0.905,0.982]
+N=0: eta_ray/eta_2D-1 in [+0.081%,+0.298%] ; eta_path(origin)/eta_ray-1 max |0.0e+00|

@@ -1,0 +1,6 @@
+section D2_brittle_tension.yaml: fct=2.9 eps_ct=8.832e-05 As_tot=200; planes enumerated=176024
+  hull N_max=261.12 kN ; enumerated N_max=426.91 kN
+  N=  50.0 kN: hull M_Rd=  39.931  attainable max M=  27.312 kNm  hull/attainable-1=+46.2%  demand 0.98*hull inside hull=True, exceeds attainable by +43.3%
+  N= 100.0 kN: hull M_Rd=  33.032  attainable max M=  24.084 kNm  hull/attainable-1=+37.2%  demand 0.98*hull inside hull=True, exceeds attainable by +34.4%
+  N= 150.0 kN: hull M_Rd=  26.133  attainable max M=  22.154 kNm  hull/attainable-1=+18.0%  demand 0.98*hull inside hull=True, exceeds attainable by +15.6%
+  N= 200.0 kN: hull M_Rd=  19.233  attainable max M=  22.160 kNm  hull/attainable-1=-13.2%  demand 0.98*hull inside hull=True, exceeds attainable by -14.9%

@@ -1,0 +1,25 @@
+# AUD-F1: rect 300x600 C40 (k_lt 0.85, gc 1.5), one bonded tendon Ap=1000 at y=100, Y1860S7 horizontal branch, eps_pe=0.006
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 40.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, n_parabola: 2.0, eps_c2: -0.002, eps_cu2: -0.0035}
+  ps: {type: prestressing_steel_ec2, class: Y1860S7, ls: F, NA: EC2, eps_ud_factor: 0.9, diagram: horizontal}
+section:
+  shape: rect
+  params: {B: 300, H: 600}
+  bulk_material: c
+  mesh_size: 5
+  tendons:
+    - {name: T1, x: 150, y: 100, material: ps, Ap: 1000.0, eps_pe: 0.006, bonded: true}
+demands:
+  - {name: G, N_kN: 0, Mx_kNm: -300, My_kNm: 0}
+combinations:
+  - name: double_count_probe
+    stages:
+      - name: s1
+        components: [{ref: G, factor: 1.0}]
+        prestress_actions:
+          - {ref: T1, sigma_p0: 1170.0, Ap: 1000.0}
+output:
+  eta_norm: true
+  eta_norm_ray: true
+  eta_path_norm_ray: true

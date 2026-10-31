@@ -1,0 +1,47 @@
+{
+  "demands": [
+    {
+      "name": "G",
+      "N_kN": 0.0,
+      "Mx_kNm": -300.0,
+      "My_kNm": 0.0,
+      "eta_norm": 0.33,
+      "eta_norm_beta": 0.6137,
+      "eta_norm_ray": 0.5462,
+      "inside": true,
+      "verified": true
+    }
+  ],
+  "combinations": [
+    {
+      "name": "double_count_probe",
+      "type": "staged",
+      "resultant": {
+        "N_kN": -1170.0,
+        "Mx_kNm": -66.0,
+        "My_kNm": 0.0
+      },
+      "stages": [
+        {
+          "name": "s1",
+          "increment": {
+            "N_kN": -1170.0,
+            "Mx_kNm": -66.0,
+            "My_kNm": 0.0
+          },
+          "cumulative": {
+            "N_kN": -1170.0,
+            "Mx_kNm": -66.0,
+            "My_kNm": 0.0
+          },
+          "eta_norm": 0.2507,
+          "eta_norm_beta": 0.5022,
+          "eta_norm_ray": 0.3588
+        }
+      ],
+      "eta_governing": 0.5022,
+      "inside": true,
+      "verified": true
+    }
+  ]
+}

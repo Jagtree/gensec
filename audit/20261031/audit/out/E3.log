@@ -1,0 +1,329 @@
+D:\SOFTWARE_HOMEPROJECTS\gensec\src\gensec\solver\check.py:1161: RuntimeWarning: generate_mx_my: only 0 converged points at N=2000.0 kN (need >= 3).
+  mx_my_data = self.nm_gen.generate_mx_my(
+D:\SOFTWARE_HOMEPROJECTS\gensec\src\gensec\solver\check.py:1161: RuntimeWarning: generate_mx_my: only 0 converged points at N=-6000.0 kN (need >= 3).
+  mx_my_data = self.nm_gen.generate_mx_my(
+
+Loading: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/cases/E3_degenerate.yaml
+======================================================================
+CROSS-SECTION SUMMARY
+======================================================================
+  Bounding box: 400 x 600 mm
+  ideal_gross area: 240000.0 mm²
+  Mesh: grid @ 10.0 mm  (2400 fibers)
+  Area coverage: 240000.0 mm²  (error: 0.00%)
+
+  Bulk: Concrete  eps=[-0.00350, 0.00000]
+    fcd = 17.00 MPa
+
+    #       x       y   dia       As        mat   emb
+  --------------------------------------------------
+    1    50.0    50.0     -    804.0          s   yes
+    2   350.0    50.0     -    804.0          s   yes
+    3    50.0   550.0     -    804.0          s   yes
+    4   350.0   550.0     -    804.0          s   yes
+
+  As,tot = 3216.0 mm²  (rho = 1.34%)
+======================================================================
+
+Generating N-Mx diagram...
+  320 points
+  N:  [-5283.8, 1258.4] kN
+  Mx: [-604.6, 604.6] kN*m
+
+Generating N-My diagram...
+  320 points
+  My: [-380.6, 380.6] kN*m
+
+Generating 3D resistance surface (N-Mx-My)...
+  11628 points
+
+================================================================================
+  DEMAND VERIFICATION
+================================================================================
+  Items: 6    Verified: 3    Failed: 3
+  eta_max: 2.4252    eta_mean: 1.1175    eta_p95: 2.2162    eta_p99: 2.3834
+  Governing: G_out  (eta = 2.4252)
+  --> *** 3 item(s) NOT VERIFIED ***
+--------------------------------------------------------------------------------
+     #                 Name    N[kN]   Mx[kNm]     eta_norm eta_norm_beta eta_norm_ray       eta_2D   Status
+  ----------------------------------------------------------------------------------------------------------
+     1                G_out   -500.0    900.00       1.0001       1.0000       2.4252       2.0451     FAIL
+     2  tension_beyond_Nmax   2000.0      0.00       1.0003       1.0004       1.5893          ---     FAIL
+     3    compr_beyond_Nmin  -6000.0      0.00       1.0016       1.0007       1.1356          ---     FAIL
+     4                   dE      0.0     10.00       0.6057       0.0519       0.0312       0.0311       OK
+     5               origin      0.0      0.00       0.5951       0.0000       0.0000       0.0000       OK
+     6             typo_key  -1000.0      0.00       0.2733       0.3542       0.1893       0.0000       OK
+================================================================================
+
+  Verifying combinations...
+
+================================================================================
+  COMBINATION VERIFICATION
+================================================================================
+  Items: 1    Verified: 0    Failed: 1
+  eta_max: 2.9740    eta_mean: 2.9740    eta_p95: 2.9740    eta_p99: 2.9740
+  Governing: stage_from_outside  (eta = 2.9740)
+  --> *** 1 item(s) NOT VERIFIED ***
+--------------------------------------------------------------------------------
+
+  #1 -- stage_from_outside (staged) --
+     Resultant: N=-500.0 kN, Mx=910.00 kNm, My=0.00 kNm
+                    Stage    N[kN]        Mx        My     eta_norm eta_norm_beta eta_norm_ray       eta_2D eta_path_norm_ray eta_path_norm_beta  eta_path_2D
+     --------------------------------------------------------------------------------------------------------------------------------------------------------
+                       s1   -500.0    900.00      0.00       1.0001       1.0000       2.4252       2.0451          ---          ---          ---
+                       s2   -500.0    910.00      0.00       1.0003       1.0001       2.4563       2.0679       2.1043          inf       2.9740
+     eta_governing = 2.974  ->  FAIL
+================================================================================
+
+  SLS stress verification...
+    no combination declares an 'sls' block; no stress verification was requested.
+    stage_from_outside: SKIPPED - no 'sls' block declared on this combination, so no stress verification was requested.  Add sls: {moduli: {...}, limits: {kind: ...}} to have the concrete, reinforcement and tendon stresses checked at this combination.
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_geometry.png
+
+  Fiber details for top 5 demands (by eta); 1 skipped.
+
+  --- origin ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0       0.000       0.00     0.00       0.00
+    2   350.0    50.0       0.000       0.00     0.00       0.00
+    3    50.0   550.0       0.000       0.00     0.00       0.00
+    4   350.0   550.0       0.000       0.00     0.00       0.00
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=   0.000 permil  sig=    0.00 MPa
+    y=  155.0  eps=   0.000 permil  sig=    0.00 MPa
+    y=  305.0  eps=   0.000 permil  sig=    0.00 MPa
+    y=  455.0  eps=   0.000 permil  sig=    0.00 MPa
+    y=  595.0  eps=   0.000 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\fibers_origin.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_origin.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\state_origin.png
+
+  --- tension_beyond_Nmax --- no equilibrium state at the demand; plotting the hull boundary along its ray (eta_ray=1.5893)
+
+  --- tension_beyond_Nmax_boundary ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0       2.037     391.30   391.30     314.61
+    2   350.0    50.0       2.037     391.30   391.30     314.61
+    3    50.0   550.0       2.037     391.30   391.30     314.61
+    4   350.0   550.0       2.037     391.30   391.30     314.61
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=   2.037 permil  sig=    0.00 MPa
+    y=  155.0  eps=   2.037 permil  sig=    0.00 MPa
+    y=  305.0  eps=   2.037 permil  sig=    0.00 MPa
+    y=  455.0  eps=   2.037 permil  sig=    0.00 MPa
+    y=  595.0  eps=   2.037 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\fibers_tension_beyond_Nmax_boundary.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_tension_beyond_Nmax_boundary.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\state_tension_beyond_Nmax_boundary.png
+
+  --- compr_beyond_Nmin --- no equilibrium state at the demand; plotting the hull boundary along its ray (eta_ray=1.1356)
+
+  --- compr_beyond_Nmin_boundary ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0      -2.037    -391.30  -374.30    -300.94
+    2   350.0    50.0      -2.037    -391.30  -374.30    -300.94
+    3    50.0   550.0      -2.037    -391.30  -374.30    -300.94
+    4   350.0   550.0      -2.037    -391.30  -374.30    -300.94
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=  -2.037 permil  sig=  -17.00 MPa
+    y=  155.0  eps=  -2.037 permil  sig=  -17.00 MPa
+    y=  305.0  eps=  -2.037 permil  sig=  -17.00 MPa
+    y=  455.0  eps=  -2.037 permil  sig=  -17.00 MPa
+    y=  595.0  eps=  -2.037 permil  sig=  -17.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\fibers_compr_beyond_Nmin_boundary.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_compr_beyond_Nmin_boundary.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\state_compr_beyond_Nmin_boundary.png
+
+  --- G_out --- no equilibrium state at the demand; plotting the hull boundary along its ray (eta_ray=2.4252)
+
+  --- G_out_boundary ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0      -1.131    -226.24  -212.44    -170.81
+    2   350.0    50.0      -1.131    -226.24  -212.44    -170.81
+    3    50.0   550.0       9.079     391.30   391.30     314.61
+    4   350.0   550.0       9.079     391.30   391.30     314.61
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=  -2.050 permil  sig=  -17.00 MPa
+    y=  155.0  eps=   1.013 permil  sig=    0.00 MPa
+    y=  305.0  eps=   4.076 permil  sig=    0.00 MPa
+    y=  455.0  eps=   7.139 permil  sig=    0.00 MPa
+    y=  595.0  eps=   9.998 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\fibers_G_out_boundary.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_G_out_boundary.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\state_G_out_boundary.png
+
+  --- dE ---
+
+======================================================================
+STRAIN AND STRESS STATE
+======================================================================
+
+    #       x       y eps[permil]   sig[MPa]  sig_net  F_net[kN]
+  --------------------------------------------------------------
+    1    50.0    50.0      -0.018      -3.69    -3.38      -2.71
+    2   350.0    50.0      -0.018      -3.69    -3.38      -2.71
+    3    50.0   550.0       0.063      12.52    12.52      10.07
+    4   350.0   550.0       0.063      12.52    12.52      10.07
+
+  Bulk (sampled at 5 levels):
+    y=    5.0  eps=  -0.026 permil  sig=   -0.43 MPa
+    y=  155.0  eps=  -0.001 permil  sig=   -0.02 MPa
+    y=  305.0  eps=   0.023 permil  sig=    0.00 MPa
+    y=  455.0  eps=   0.047 permil  sig=    0.00 MPa
+    y=  595.0  eps=   0.070 permil  sig=    0.00 MPa
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\fibers_dE.csv
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\section_dE.png
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\state_dE.png
+
+  State plots: 2 at the demand, 3 at the hull boundary along the demand ray (no state at the demand), 0 not produced.
+    BOUNDARY  tension_beyond_Nmax: eta_ray=1.5893 -> *_boundary files
+    BOUNDARY  compr_beyond_Nmin: eta_ray=1.1356 -> *_boundary files
+    BOUNDARY  G_out: eta_ray=2.4252 -> *_boundary files
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\demand_utilization.png
+
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\n_mx_diagram.png
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\n_my_diagram.png
+
+  N levels (from demands): [-6000.0, -1000.0, -500.0, 0.0, 2000.0] kN
+  Generating Mx-chi at N=-6000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm6000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm6000.png
+  Generating My-chi at N=-6000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm6000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm6000.png
+  Generating Mx-chi at N=-1000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm1000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm1000.png
+  Generating My-chi at N=-1000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm1000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm1000.png
+  Generating Mx-chi at N=-500 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm500.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_Nm500.png
+  Generating My-chi at N=-500 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm500.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_Nm500.png
+  Generating Mx-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_N0.png
+  Generating My-chi at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_N0.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_N0.png
+  Generating Mx-chi at N=2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_N2000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_N2000.png
+  Generating My-chi at N=2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_N2000.json, C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_N2000.png
+
+  Generating Mx-chi bundle...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_bundle.png
+  Generating My-chi bundle...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_bundle.png
+  Generating polar ductility at N=-6000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\polar_ductility_Nm6000.png
+  Generating polar ductility at N=-1000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\polar_ductility_Nm1000.png
+  Generating polar ductility at N=-500 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\polar_ductility_Nm500.png
+  Generating polar ductility at N=0 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\polar_ductility_N0.png
+  Generating polar ductility at N=2000 kN...
+    Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\polar_ductility_N2000.png
+
+  Generating 3D Mx-chi-N surface...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\mx_chi_N_surface.png
+  Generating 3D My-chi-N surface...
+  Exported: C:/Users/alber/AppData/Local/Temp/claude/d--SOFTWARE-HOMEPROJECTS-gensec/b611ec54-0e2b-4d19-8dec-d15f72bb1582/scratchpad/audit/out/E3\my_chi_N_surface.png
+
+================================================================================
+  All outputs in: C:\Users\alber\AppData\Local\Temp\claude\d--SOFTWARE-HOMEPROJECTS-gensec\b611ec54-0e2b-4d19-8dec-d15f72bb1582\scratchpad\audit\out\E3/
+    combination_summary.json                          1,412 bytes
+    demand_summary.csv                                  506 bytes
+    demand_summary.json                               1,645 bytes
+    demand_utilization.png                           63,511 bytes
+    fibers_G_out_boundary.csv                        96,437 bytes
+    fibers_compr_beyond_Nmin_boundary.csv           102,485 bytes
+    fibers_dE.csv                                    96,539 bytes
+    fibers_origin.csv                                97,645 bytes
+    fibers_tension_beyond_Nmax_boundary.csv          95,269 bytes
+    mx_chi_N0.csv                                     4,463 bytes
+    mx_chi_N0.json                                    7,049 bytes
+    mx_chi_N0.png                                    73,735 bytes
+    mx_chi_N2000.csv                                  3,011 bytes
+    mx_chi_N2000.json                                 5,341 bytes
+    mx_chi_N2000.png                                 37,900 bytes
+    mx_chi_N_surface.png                            333,502 bytes
+    mx_chi_Nm1000.csv                                 4,498 bytes
+    mx_chi_Nm1000.json                                7,086 bytes
+    mx_chi_Nm1000.png                                76,452 bytes
+    mx_chi_Nm500.csv                                  4,495 bytes
+    mx_chi_Nm500.json                                 7,094 bytes
+    mx_chi_Nm500.png                                 72,861 bytes
+    mx_chi_Nm6000.csv                                 3,011 bytes
+    mx_chi_Nm6000.json                                5,342 bytes
+    mx_chi_Nm6000.png                                38,123 bytes
+    mx_chi_bundle.png                                91,197 bytes
+    my_chi_N0.csv                                     4,506 bytes
+    my_chi_N0.json                                    6,946 bytes
+    my_chi_N0.png                                    63,006 bytes
+    my_chi_N2000.csv                                  3,041 bytes
+    my_chi_N2000.json                                 5,367 bytes
+    my_chi_N2000.png                                 37,967 bytes
+    my_chi_N_surface.png                            348,705 bytes
+    my_chi_Nm1000.csv                                 4,521 bytes
+    my_chi_Nm1000.json                                7,093 bytes
+    my_chi_Nm1000.png                                78,261 bytes
+    my_chi_Nm500.csv                                  4,517 bytes
+    my_chi_Nm500.json                                 6,950 bytes
+    my_chi_Nm500.png                                 64,004 bytes
+    my_chi_Nm6000.csv                                 3,041 bytes
+    my_chi_Nm6000.json                                5,368 bytes
+    my_chi_Nm6000.png                                38,084 bytes
+    my_chi_bundle.png                                88,234 bytes
+    n_mx_diagram.png                                 87,183 bytes
+    n_mx_domain.csv                                   6,939 bytes
+    n_mx_domain.json                                  9,782 bytes
+    n_my_diagram.png                                 78,942 bytes
+    n_my_domain.csv                                   7,057 bytes
+    polar_ductility_N0.png                          195,114 bytes
+    polar_ductility_N2000.png                       180,028 bytes
+    polar_ductility_Nm1000.png                      181,362 bytes
+    polar_ductility_Nm500.png                       188,879 bytes
+    polar_ductility_Nm6000.png                      193,427 bytes
+    section_G_out_boundary.png                       86,840 bytes
+    section_compr_beyond_Nmin_boundary.png          102,988 bytes
+    section_dE.png                                   77,930 bytes
+    section_geometry.png                             34,006 bytes
+    section_origin.png                               85,252 bytes
+    section_tension_beyond_Nmax_boundary.png         97,526 bytes
+    state_G_out_boundary.png                        105,592 bytes
+    state_compr_beyond_Nmin_boundary.png            119,420 bytes
+    state_dE.png                                     99,467 bytes
+    state_origin.png                                 92,129 bytes
+    state_tension_beyond_Nmax_boundary.png          114,250 bytes
+    verification_statistics.json                        670 bytes
+    verification_summary.json                         3,054 bytes
+================================================================================
+
+Done.

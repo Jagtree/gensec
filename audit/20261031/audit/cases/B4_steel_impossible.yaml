@@ -1,0 +1,14 @@
+# AUD-B: physically impossible steel: eps_su (0.001) < fyd/Es (0.00196); k_hardening < 1; also concrete fck=30 with fct > fcm
+code: ec2
+materials:
+  c: {type: concrete_ec2_gen1_custom, fck: 30.0, gamma_c: 1.5, long_term_reduction_factor: 0.85, fct: 45.0, Ec: 33000.0}
+  s: {type: steel, fyk: 450.0, gamma_s: 1.15, Es: 200000.0, k_hardening: 0.5, eps_su: 0.001}
+section:
+  shape: rect
+  params: {B: 300, H: 500}
+  bulk_material: c
+  mesh_size: 10
+  rebars:
+    - {x: 150, y: 40, As: 1500.0, material: s}
+demands:
+  - {name: d1, N_kN: -100, Mx_kNm: 10, My_kNm: 0}

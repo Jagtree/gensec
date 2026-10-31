@@ -1,0 +1,15 @@
+{
+  "demands": [
+    {
+      "name": "G",
+      "N_kN": 0.0,
+      "Mx_kNm": -300.0,
+      "My_kNm": 0.0,
+      "inside": true,
+      "verified": true,
+      "eta_norm": 0.33,
+      "eta_norm_beta": 0.6137,
+      "eta_norm_ray": 0.5462
+    }
+  ]
+}

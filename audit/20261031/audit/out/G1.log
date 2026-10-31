@@ -1,0 +1,4 @@
+{'kind': 'characteristic'} -> {'name': 'EC2 characteristic', 'k_c': 0.6, 'custom_zone_strengths': None, 'sigma_s_tens': None, 'sigma_p_max': None, 'decompression': False, 'c_dec': 25.0}
+{'kind': 'characteristic', 'fyk': 450.0, 'fpk': 1860.0} -> {'name': 'EC2 characteristic', 'k_c': 0.6, 'custom_zone_strengths': None, 'sigma_s_tens': 360.0, 'sigma_p_max': 1395.0, 'decompression': False, 'c_dec': 25.0}
+{} REFUSED: Combination 'probe': 'sls.moduli' is empty.  Every bulk zone needs an SLS modulus: GenSec 
+{'z': 0.0} REFUSED: Combination 'probe': sls.moduli['z'] must be a finite, strictly positive modulus [MPa]; go

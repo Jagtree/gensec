@@ -1,0 +1,4 @@
+demand Mu_sag N= 0.0 Mx= 0.0 My= 0.0
+demand service N= 0.0 Mx= 0.0 My= 0.0
+material concrete_4ksi Concrete code= aci318-19 {'fcd': 15.866666666666667, 'gamma_c': 1.5, 'long_term_reduction_factor': 0.85, 'n_parabola': 2.0, 'eps_c2': -0.002, 'eps_cu2': -0.0035}
+material grade60 Steel code= aci318-19 {'gamma_s': 1.15, 'eps_su': 0.05}
